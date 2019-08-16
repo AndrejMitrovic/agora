@@ -25,6 +25,8 @@ import d2sqlite3.library;
 import d2sqlite3.results;
 import d2sqlite3.sqlite3;
 
+import vibe.core.log;
+
 import std.algorithm;
 import std.conv;
 import std.exception;
