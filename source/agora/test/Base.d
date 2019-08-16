@@ -24,6 +24,7 @@ version (unittest):
 
 import agora.common.BanManager;
 import agora.consensus.data.Block;
+import agora.consensus.data.UtxoSet;
 import agora.common.Config;
 import agora.common.Data;
 import agora.common.Hash;
