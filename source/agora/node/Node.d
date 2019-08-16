@@ -114,6 +114,7 @@ public class Node : API
         logInfo("Shutting down..");
         this.network.dumpMetadata();
         this.pool.shutdown();
+        this.utxo_set.shutdown();
     }
 
     /// GET /public_key
