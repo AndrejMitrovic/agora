@@ -339,6 +339,12 @@ public final class TestNode : Node, TestAPI
         return new TransactionPool(":memory:");
     }
 
+    /// Return a UTXO set backed by an in-memory SQLite db
+    protected override UtxoSet getUtxoSet (string data_dir)
+    {
+        return new UtxoSet(":memory:");
+    }
+
     /// Used by unittests
     public override void metaAddPeer (Address peer)
     {

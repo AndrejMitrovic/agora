@@ -54,8 +54,6 @@ public class UtxoDb
 
     public this (string utxo_db_path)
     {
-        const db_path = ":memory:";  // todo: replace
-
         const db_exists = utxo_db_path.exists;
         if (db_exists)
             logInfo("Loading UTXO database from: %s", utxo_db_path);
@@ -299,9 +297,6 @@ public class UtxoStore
 public class UtxoSet
 {
     private UtxoStore utxo_store;
-
-    /// Unspent outputs
-    //private Output[Hash] utxo_store;
 
     /// Set of consumed outputs during validation
     private Set!Hash used_utxos;
