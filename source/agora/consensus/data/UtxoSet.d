@@ -50,19 +50,21 @@ public class UtxoDb
 
     ***************************************************************************/
 
-    public this ()
+    public this (string utxo_db_path)
     {
         const db_path = ":memory:";  // todo: replace
 
-        //const db_exists = db_path.exists;
-        //if (db_exists)
-        //    logInfo("Loading database from: %s", db_path);
+        const db_exists = utxo_db_path.exists;
+        if (db_exists)
+            logInfo("Loading UTXO database from: %s", utxo_db_path);
 
-        // note: can fail. we may want to just recover txes from the network instead.
-        this.db = Database(db_path);
+        // todo: can fail. we would have to recover by either:
+        // A) reconstructing it from our blockchain storage
+        // B) requesting the UTXO set from our peers
+        this.db = Database(utxo_db_path);
 
-        //if (db_exists)
-        //    logInfo("Loaded database from: %s", db_path);
+        if (db_exists)
+            logInfo("Loaded database from: %s", utxo_db_path);
 
         // create the table if it doesn't exist yet
         this.db.execute("CREATE TABLE IF NOT EXISTS utxo_map " ~
