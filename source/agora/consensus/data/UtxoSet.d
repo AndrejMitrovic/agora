@@ -296,6 +296,7 @@ public class UtxoStore
 /// ditto
 public class UtxoSet
 {
+    /// Utxo store backed by a database
     private UtxoStore utxo_store;
 
     /// Set of consumed outputs during validation
@@ -314,6 +315,17 @@ public class UtxoSet
     public this (in string utxo_db_path)
     {
         this.utxo_store = new UtxoStore(utxo_db_path);
+    }
+
+    /***************************************************************************
+
+        Shut down the utxo store
+
+    ***************************************************************************/
+
+    public void shutdown ()
+    {
+        this.utxo_store.shutdown();
     }
 
     /***************************************************************************

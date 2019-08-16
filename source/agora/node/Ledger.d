@@ -274,7 +274,9 @@ unittest
 
     auto pool = new TransactionPool(":memory:");
     scope(exit) pool.shutdown();
-    scope ledger = new Ledger(pool);
+    auto utxo = new UtxoSet(":memory:");
+    scope(exit) utxo.shutdown();
+    scope ledger = new Ledger(pool, utxo);
     assert(*ledger.getLastBlock() == getGenesisBlock());
     assert(ledger.ledger.length == 1);
 
@@ -353,7 +355,9 @@ unittest
 
     auto pool = new TransactionPool(":memory:");
     scope(exit) pool.shutdown();
-    scope ledger = new Ledger(pool);
+    auto utxo = new UtxoSet(":memory:");
+    scope(exit) utxo.shutdown();
+    scope ledger = new Ledger(pool, utxo);
 
     Block invalid_block;  // default-initialized should be invalid
     assert(!ledger.acceptBlock(invalid_block));
