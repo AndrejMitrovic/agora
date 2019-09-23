@@ -18,6 +18,7 @@ import agora.common.Data;
 import agora.common.Deserializer;
 import agora.common.Hash;
 import agora.common.Serializer;
+import agora.common.Set;
 import agora.consensus.data.Transaction;
 import agora.utils.Log;
 
@@ -37,6 +38,12 @@ mixin AddLogger!();
 /// Ditto
 public class TransactionPool
 {
+    /// Keeps track of outputs referenced by transactions in the Pool,
+    /// allowing double-spend txs to be filtered before they enter the Pool.
+    /// When Transactions are moved from the Pool to an externalized Block,
+    /// their referenced UTXOs are removed from 'pool_utxos'
+    private Set!Hash pool_utxos;
+
     /***************************************************************************
 
         Initialization function. Must be called once per-process
@@ -127,13 +134,23 @@ public class TransactionPool
         Params:
             tx = the transaction to add
 
+        Returns:
+            false if the tx is a double-spend and was therefore rejected
+
         Throws:
             SqliteException if the transaction failed to be added
 
     ***************************************************************************/
 
-    public void add (Transaction tx) @safe
+    public bool add (Transaction tx) @safe
     {
+        foreach (const ref input; tx.inputs)
+        {
+            auto utxo_hash = getHash(input.previous, input.index);
+            if (utxo_hash in this.pool_utxos)
+                return false;
+        }
+
         static ubyte[] buffer;
         buffer.length = 0;
         () @trusted { assumeSafeAppend(buffer); }();
@@ -149,6 +166,8 @@ public class TransactionPool
             db.execute("INSERT INTO tx_pool (key, val) VALUES (?, ?)",
                 hashFull(tx)[], buffer);
         }();
+
+        return true;
     }
 
     /***************************************************************************
@@ -201,12 +220,19 @@ public class TransactionPool
         Remove the transaction with the given key from the pool
 
         Params:
+            tx = the transaction to remove
             hash = the hash of the transaction
 
     ***************************************************************************/
 
-    public void remove (Hash hash) @trusted
+    public void remove (const Transaction tx, Hash hash) @trusted
     {
+        foreach (const ref input; tx.inputs)
+        {
+            auto utxo_hash = getHash(input.previous, input.index);
+            this.pool_utxos.remove(utxo_hash);
+        }
+
         this.db.execute("DELETE FROM tx_pool WHERE key = ?", hash[]);
     }
 
@@ -237,9 +263,27 @@ public class TransactionPool
                 break;
         }
 
-        hashes.each!(hash => this.remove(hash));
+        foreach (tx, hash; zip(txs, hashes))
+            this.remove(tx, hash);
+
         assert(this.length() == len_prev - count);
         return txs;
+    }
+
+    /***************************************************************************
+
+        Get the combined hash of the previous hash and index.
+        This makes sure the index is always of the same type,
+        as mixing different-sized uint/ulong would create different hashes.
+
+        Returns:
+            the combined hash of a previous hash and index
+
+    ***************************************************************************/
+
+    private static Hash getHash (Hash hash, ulong index) @safe nothrow
+    {
+        return hashMulti(hash, index);
     }
 }
 

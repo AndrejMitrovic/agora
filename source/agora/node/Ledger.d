@@ -138,8 +138,9 @@ public class Ledger
             return false;
         }
 
-        this.pool.add(tx);
-        this.utxo_set.updateSpent();
+        if (!this.pool.add(tx))
+            return false;
+
         if (this.pool.length >= Block.TxsInBlock)
             this.tryCreateBlock();
 
@@ -186,7 +187,7 @@ public class Ledger
         block.txs.each!(tx => this.utxo_set.updateUTXOCache(tx));
 
         // remove the TXs from the Pool
-        block.txs.each!(tx => this.pool.remove(tx.hashFull()));
+        block.txs.each!(tx => this.pool.remove(tx, tx.hashFull()));
     }
 
     /***************************************************************************
