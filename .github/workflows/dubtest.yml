@@ -1,4 +1,4 @@
-name: Documentation deployment
+name: Test builds on multiple OSes
 
 on:
   push:
@@ -7,7 +7,11 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macOS-latest]
+
     steps:
     - uses: actions/checkout@v1
       with:
@@ -36,20 +40,4 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        # Generate the HTML to docs
-        dub run ddox -- generate-html docs.filtered.json ./docs/
-        # # Remove gh-branch if it already exists, check it out
-        # git branch -D gh-pages || true
-        # git checkout --orphan gh-pages
-        # # Remove all staged files - We only need the docs
-        # git rm -rf $(git ls-files)
-        # # We can have some leftover files (e.g. build)
-        # # So add docs (which is only what we need), then `git mv` it.
-        # git add docs/
-        # git mv -k docs/* ./
-        # # Configure user
-        # git config --global user.email "geod24@users.noreply.github.com"
-        # git config --global user.name "Geod24"
-        # # We're done
-        # git commit -m "Documentation for commit ${GITHUB_SHA}"
-        # git push -f https://Geod24:${GITHUB_TOKEN}@github.com/bpfkorea/agora.git gh-pages:gh-pages
+        dub test
