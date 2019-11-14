@@ -51,7 +51,7 @@ import agora.common.crypto.ECC;
 
 import std.algorithm;
 import std.range;
-
+import std.stdio;
 
 /// Single signature example
 nothrow @nogc @safe unittest
@@ -59,6 +59,455 @@ nothrow @nogc @safe unittest
     Pair kp = Pair.random();
     auto signature = sign(kp, "Hello world");
     assert(verify(kp.V, signature, "Hello world"));
+}
+
+/// Returns: The accumulated values
+/// Note: be aware of accumulators, when we add to a value we must
+/// ensure the value was initialized with an accumulator (not T.init!)
+T combine (T)(T lhs, T rhs)
+    if (is(T == Point))
+{
+    assert(lhs != T.init || rhs != T.init);  // at least one must be initialized
+
+    if (lhs == T.init)
+        return rhs;
+    else if (rhs == T.init)
+        return lhs;
+    else
+        return lhs + rhs;
+}
+
+/// validator signature scheme
+unittest
+{
+    import agora.common.BitField;
+    import agora.common.Deserializer;
+    import agora.common.Serializer;
+    import std.array;
+    import std.algorithm;
+
+    /// example block structure
+    static struct Block
+    {
+        /// Bitfield of validators which signed
+        BitField validators;
+
+        /// Contains signatures of each validator (identified by 'validators')
+        Signature signature;
+
+        /// The revealed preimages for this block
+        Hash[ushort] preimages;
+
+        /// Block data
+        string data;
+
+        /// Block hash includes the preimages
+        void computeHash (scope HashDg dg) const nothrow @nogc
+        {
+            hashPart(this.data, dg);
+        }
+
+        public void serialize (scope SerializeDg dg) const @trusted
+        {
+            serializePart(this.validators, dg);
+            serializePart(this.signature, dg);
+
+            // todo: no need to serialize length, maybe
+            serializePart(this.preimages.length, dg);
+            foreach (idx, preimage; this.preimages)
+            {
+                serializePart(idx, dg);
+                serializePart(preimage, dg);
+            }
+
+            serializePart(this.data, dg);
+        }
+
+        public void deserialize (scope DeserializeDg dg) @safe
+        {
+            deserializePart(this.validators, dg);
+            deserializePart(this.signature, dg);
+
+            size_t length;
+            deserializePart(length, dg);
+
+            foreach (_; 0 .. length)
+            {
+                ushort idx;
+                deserializePart(idx, dg);
+
+                Hash preimage;
+                deserializePart(preimage, dg);
+                this.preimages[idx] = preimage;
+            }
+
+            deserializePart(this.data, dg);
+        }
+    }
+
+    Point getExpectedR (Block block, Point[] prev_pubs)
+    {
+        Point exp_Rs;
+
+        foreach (idx; 0 .. block.validators.length)
+        {
+            if (auto image = cast(ushort)idx in block.preimages)
+            {
+                if (idx < prev_pubs.length)
+                {
+                    // expected R based on (R2 = R1 + X1)
+                    auto expected_R = prev_pubs[idx] + Scalar(*image).toPoint();
+
+                    // add it to the sum of Rs
+                    exp_Rs = combine(exp_Rs, expected_R);
+                }
+            }
+        }
+
+        return exp_Rs;
+    }
+
+    // 8 validators
+    Pair[] pair_keys;
+    8.iota.each!(_ => pair_keys ~= Pair.random());
+
+    Pair[] genRandomPairs (size_t length)
+    {
+        Pair[] nodes_rands;
+        nodes_rands.length = 8;
+
+        foreach (ref pair; nodes_rands)
+            pair = Pair.random();
+
+        return nodes_rands;
+    }
+
+    // these are the initial R's that were precommited in the enrollment
+    Pair[] nodes_rands = genRandomPairs(8);
+
+    // the calculated R's for each node for the previous block (always replaced,
+    // but might keep a history of these in case blocks get rolled-back)
+    Point[] prev_pubs;
+    prev_pubs.length = 8;
+
+    // update expected R's based on the previously finalized block
+    void updateExpectedRandoms (Block block)
+    {
+        // update expected previous R's for each node
+        foreach (idx, preimage; block.preimages)
+            prev_pubs[idx] = prev_pubs[idx] + Scalar(preimage).toPoint();
+    }
+
+    // they're sorted alphabetically (for the bitmask indices)
+    Point[] pub_keys = pair_keys.map!(pair => pair.V).array;
+    pub_keys.sort();
+
+    // generates consecutive rounds of hashes for the initial scalar
+    // (preimages in the resulting array should be revealed from the back)
+    Hash[] genPreimages (Scalar s)
+    {
+        Hash[] result;
+        result ~= s.hashFull();
+
+        foreach (_; 0 .. 10)
+            result ~= result[$ - 1].hashFull();
+
+        return result;
+    }
+
+    ushort getKeyIndex (Point key)
+    {
+        auto res = pub_keys.countUntil(key);
+        assert(res >= 0);
+        assert(res < ushort.max);
+        return cast(ushort)res;
+    }
+
+    // sanity check
+    assert(getKeyIndex(pub_keys[0]) == 0);
+    assert(getKeyIndex(pub_keys[1]) == 1);
+
+    ///
+    void revealPreimage (ref Block block, Pair key_pair, Hash preimage)
+    {
+        auto signer_index = getKeyIndex(key_pair.V);
+        block.preimages[signer_index] = preimage;
+    }
+
+    ///
+    void signBlock (ref Block block, Point X, Pair key_pair, Pair rand_pair, Point[] prev_pubs)
+    {
+        // commitment to common R
+        Point R = getExpectedR(block, prev_pubs);
+
+        auto sig = sign(key_pair.v, X, R, rand_pair.v, block);
+
+        block.signature.R = R;
+        block.signature.s = block.signature.s + sig.s;
+
+        auto signer_index = getKeyIndex(key_pair.V);
+        block.validators[signer_index] = true;
+    }
+
+    /// Get the sum of public keys, based on the 'validators' bitfield
+    Point getPublicKeys (Block block)
+    {
+        Point sum;
+
+        foreach (idx, has_signed; block.validators)
+        {
+            if (has_signed)
+                sum = combine(sum, pub_keys[idx]);
+        }
+
+        return sum;
+    }
+
+    bool validateBlock (Block block, Block prev_block, Point[] prev_pubs)
+    {
+        foreach (idx, preimage; block.preimages)
+        {
+            // missing preimage
+            if (idx !in prev_block.preimages)
+                return false;
+
+            // preimage must be of the previous preimage
+            if (preimage.hashFull() != prev_block.preimages[idx])
+                return false;
+        }
+
+        foreach (idx, has_signed; block.validators)
+        {
+            if (!has_signed)
+                continue;
+
+            // this validator did not reveal the preimage, cannot sign
+            if (cast(ushort)idx !in block.preimages)
+                return false;
+        }
+
+        // R2 = R1 + X (previous R1 + preimage)
+        Point R = getExpectedR(block, prev_pubs);
+        if (block.signature.R != R)
+            return false;
+
+        Point X = getPublicKeys(block);
+        auto res = verify(X, block.signature, block);
+
+        return res;
+    }
+
+    /** enrollment data for each validator (preimages) */
+    Hash[] n1_preims = genPreimages(Scalar.random());
+    Hash[] n2_preims = genPreimages(Scalar.random());
+    Hash[] n3_preims = genPreimages(Scalar.random());
+
+    /// Block #1
+    Block block_1;
+    block_1.data = "Block #1";
+    block_1.validators = BitField(8);
+
+    // reveal the first preimage after Enrollment
+    revealPreimage(block_1, pair_keys[0], n1_preims[$ - 1]);
+    revealPreimage(block_1, pair_keys[1], n2_preims[$ - 1]);
+    revealPreimage(block_1, pair_keys[2], n3_preims[$ - 1]);
+
+    // this is the first calculation of R, based on the Enrollment data
+    prev_pubs[getKeyIndex(pair_keys[0].V)] = nodes_rands[0].V + Scalar(n1_preims[$ - 1]).toPoint();
+    prev_pubs[getKeyIndex(pair_keys[1].V)] = nodes_rands[1].V + Scalar(n2_preims[$ - 1]).toPoint();
+    prev_pubs[getKeyIndex(pair_keys[2].V)] = nodes_rands[2].V + Scalar(n3_preims[$ - 1]).toPoint();
+
+    // create the 'r' for the first revealed pre-image after enrollment
+    auto n1_rand1 = nodes_rands[0].v + Scalar(n1_preims[$ - 1]);
+    auto n2_rand1 = nodes_rands[1].v + Scalar(n2_preims[$ - 1]);
+    auto n3_rand1 = nodes_rands[2].v + Scalar(n3_preims[$ - 1]);
+
+    Pair n1_rand_pair1 = Pair(n1_rand1, n1_rand1.toPoint());
+    Pair n2_rand_pair1 = Pair(n2_rand1, n2_rand1.toPoint());
+    Pair n3_rand_pair1 = Pair(n3_rand1, n3_rand1.toPoint());
+
+    auto all_pubs = pair_keys[0].V + pair_keys[1].V + pair_keys[2].V;
+
+    // add signatures (todo: not validating yet, need Enrollment data struct)
+    signBlock(block_1, all_pubs, pair_keys[0], n1_rand_pair1, prev_pubs);
+    signBlock(block_1, all_pubs, pair_keys[1], n2_rand_pair1, prev_pubs);
+    signBlock(block_1, all_pubs, pair_keys[2], n3_rand_pair1, prev_pubs);
+
+    /// Block #2
+    Block block_2;
+    block_2.data = "Block #2";
+    block_2.validators = BitField(8);
+
+    // reveal the second preimage after Enrollment
+    revealPreimage(block_2, pair_keys[0], n1_preims[$ - 2]);
+    revealPreimage(block_2, pair_keys[1], n2_preims[$ - 2]);
+    revealPreimage(block_2, pair_keys[2], n3_preims[$ - 2]);
+
+    // calculate the new 'r' after the second preimage was revealed
+    auto n1_rand2 = n1_rand_pair1.v + Scalar(n1_preims[$ - 2]);
+    auto n2_rand2 = n2_rand_pair1.v + Scalar(n2_preims[$ - 2]);
+    auto n3_rand2 = n3_rand_pair1.v + Scalar(n3_preims[$ - 2]);
+
+    Pair n1_rand_pair2 = Pair(n1_rand2, n1_rand2.toPoint());
+    Pair n2_rand_pair2 = Pair(n2_rand2, n2_rand2.toPoint());
+    Pair n3_rand_pair2 = Pair(n3_rand2, n3_rand2.toPoint());
+
+    writefln("R1 + R2 + R3: %s",
+        n1_rand_pair2.V + n2_rand_pair2.V + n3_rand_pair2.V);
+
+    writefln("R1: %s", n1_rand_pair2.V);
+    writefln("R2: %s", n2_rand_pair2.V);
+    writefln("R3: %s", n3_rand_pair2.V);
+
+    /// signing & validation for each node
+    signBlock(block_2, all_pubs, pair_keys[0], n1_rand_pair2, prev_pubs);
+    writefln("Block 2 R: %s", block_2.signature.R);
+    assert(!validateBlock(block_2, block_1, prev_pubs));
+
+    signBlock(block_2, all_pubs, pair_keys[1], n2_rand_pair2, prev_pubs);
+    assert(!validateBlock(block_2, block_1, prev_pubs));
+    writefln("Block 2 R: %s", block_2.signature.R);
+
+    signBlock(block_2, all_pubs, pair_keys[2], n3_rand_pair2, prev_pubs);
+    assert(validateBlock(block_2, block_1, prev_pubs));
+    writefln("Block 2 R: %s", block_2.signature.R);
+
+    updateExpectedRandoms(block_2);
+
+    /// Block #3
+    Block block_3;
+    block_3.data = "Block #3";
+    block_3.validators = BitField(8);
+
+    // reveal the third preimage after Enrollment
+    revealPreimage(block_3, pair_keys[0], n1_preims[$ - 3]);
+    revealPreimage(block_3, pair_keys[1], n2_preims[$ - 3]);
+    revealPreimage(block_3, pair_keys[2], n3_preims[$ - 3]);
+
+    // calculate the new 'r' after the third preimage was revealed
+    auto n1_rand3 = n1_rand_pair2.v + Scalar(n1_preims[$ - 3]);
+    auto n2_rand3 = n2_rand_pair2.v + Scalar(n2_preims[$ - 3]);
+    auto n3_rand3 = n3_rand_pair2.v + Scalar(n3_preims[$ - 3]);
+
+    Pair n1_rand_pair3 = Pair(n1_rand3, n1_rand3.toPoint());
+    Pair n2_rand_pair3 = Pair(n2_rand3, n2_rand3.toPoint());
+    Pair n3_rand_pair3 = Pair(n3_rand3, n3_rand3.toPoint());
+
+    /// signing & validation for each node
+    signBlock(block_3, all_pubs, pair_keys[0], n1_rand_pair3, prev_pubs);
+    assert(!validateBlock(block_3, block_2, prev_pubs));
+
+    signBlock(block_3, all_pubs, pair_keys[1], n2_rand_pair3, prev_pubs);
+    assert(!validateBlock(block_3, block_2, prev_pubs));
+
+    signBlock(block_3, all_pubs, pair_keys[2], n3_rand_pair3, prev_pubs);
+    assert(validateBlock(block_3, block_2, prev_pubs));
+
+    updateExpectedRandoms(block_3);
+
+    /// Block #4
+    Block block_4;
+    block_4.data = "Block #4";
+    block_4.validators = BitField(8);
+
+    // reveal the fourth preimage after Enrollment
+    // note: node 3 did not reveal a preimage!
+    revealPreimage(block_4, pair_keys[0], n1_preims[$ - 4]);
+    revealPreimage(block_4, pair_keys[1], n2_preims[$ - 4]);
+
+    // calculate the new 'r' after the fourth preimage was revealed
+    auto n1_rand4 = n1_rand_pair3.v + Scalar(n1_preims[$ - 4]);
+    auto n2_rand4 = n2_rand_pair3.v + Scalar(n2_preims[$ - 4]);
+    auto n3_rand4 = n3_rand_pair3.v + Scalar(n3_preims[$ - 4]);
+
+    Pair n1_rand_pair4 = Pair(n1_rand4, n1_rand4.toPoint());
+    Pair n2_rand_pair4 = Pair(n2_rand4, n2_rand4.toPoint());
+    Pair n3_rand_pair4 = Pair(n3_rand4, n3_rand4.toPoint());
+
+    auto partial_pubs = pair_keys[0].V + pair_keys[1].V;
+
+    /// signing & validation for node 1
+    signBlock(block_4, partial_pubs, pair_keys[0], n1_rand_pair4, prev_pubs);
+    assert(!validateBlock(block_4, block_3, prev_pubs));
+
+    /// signing & validation for node 2
+    signBlock(block_4, partial_pubs, pair_keys[1], n2_rand_pair4, prev_pubs);
+    assert(validateBlock(block_4, block_3, prev_pubs));
+
+    /// node 3 revealed preimage too late!
+    {
+        auto dup_block = block_4.serializeFull.deserializeFull!Block;
+        assert(validateBlock(dup_block, block_3, prev_pubs));
+
+        // too late!
+        revealPreimage(dup_block, pair_keys[2], n3_preims[$ - 4]);
+        assert(!validateBlock(dup_block, block_3, prev_pubs));
+    }
+
+    updateExpectedRandoms(block_4);
+
+    /// Block #5
+    /// Test-case 1: Missing preimage in previous block => cannot sign this block
+    Block block_5;
+    block_5.data = "Block #5";
+    block_5.validators = BitField(8);
+
+    // reveal the fifth preimage after Enrollment
+    revealPreimage(block_5, pair_keys[0], n1_preims[$ - 5]);
+    revealPreimage(block_5, pair_keys[1], n2_preims[$ - 5]);
+    revealPreimage(block_5, pair_keys[2], n3_preims[$ - 5]);
+
+    // calculate the new 'r' after the fifth preimage was revealed
+    auto n1_rand5 = n1_rand_pair4.v + Scalar(n1_preims[$ - 5]);
+    auto n2_rand5 = n2_rand_pair4.v + Scalar(n2_preims[$ - 5]);
+    auto n3_rand5 = n3_rand_pair4.v + Scalar(n3_preims[$ - 5]);
+
+    Pair n1_rand_pair5 = Pair(n1_rand5, n1_rand5.toPoint());
+    Pair n2_rand_pair5 = Pair(n2_rand5, n2_rand5.toPoint());
+    Pair n3_rand_pair5 = Pair(n3_rand5, n3_rand5.toPoint());
+
+    // #add signature of node 1
+    signBlock(block_5, partial_pubs, pair_keys[0], n1_rand_pair5, prev_pubs);
+
+    // will not pass validation, node 3 revealed its preimage *now*,
+    // but it did not reveal the *previous* preimage in the last block
+    assert(!validateBlock(block_5, block_4, prev_pubs));
+
+    /// Test-case 2: Wrong preimage => cannot sign block
+    block_5 = Block.init;
+    block_5.data = "Block #5";
+    block_5.validators = BitField(8);
+
+    // #1 reveal the fifth preimage after Enrollment
+    revealPreimage(block_5, pair_keys[0], n1_preims[$ - 5]);
+    revealPreimage(block_5, pair_keys[1], n2_preims[$ - 4]);  // wrong preimage!
+
+    // #3.1 add signature of node 1 (fails)
+    signBlock(block_5, partial_pubs, pair_keys[0], n1_rand_pair5, prev_pubs);
+    assert(!validateBlock(block_5, block_4, prev_pubs));
+
+    // #3.2 add signature of node 2 (fails)
+    signBlock(block_5, partial_pubs, pair_keys[1], n2_rand_pair5, prev_pubs);
+    assert(!validateBlock(block_5, block_4, prev_pubs));
+
+    /// Test-case 3: Only nodes which revealed all previous preimages signed => ok
+    block_5 = Block.init;
+    block_5.data = "Block #5";
+    block_5.validators = BitField(8);
+
+    // #1 reveal the fifth preimage after Enrollment
+    revealPreimage(block_5, pair_keys[0], n1_preims[$ - 5]);
+    revealPreimage(block_5, pair_keys[1], n2_preims[$ - 5]);
+
+    // #3.1 add signature of node 1 (doesn't pass yet)
+    signBlock(block_5, partial_pubs, pair_keys[0], n1_rand_pair5, prev_pubs);
+    assert(!validateBlock(block_5, block_4, prev_pubs));
+
+    // #3.2 add signature of node 2 (passes)
+    signBlock(block_5, partial_pubs, pair_keys[1], n2_rand_pair5, prev_pubs);
+    assert(validateBlock(block_5, block_4, prev_pubs));
+
+    updateExpectedRandoms(block_5);
 }
 
 /// Multi-signature example
@@ -111,7 +560,7 @@ unittest
 }
 
 /// Represent the message to hash (part of `c`)
-private struct Message (T)
+public struct Message (T)
 {
     public Point X;
     public Point R;

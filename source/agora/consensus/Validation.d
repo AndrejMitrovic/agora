@@ -25,6 +25,308 @@ import agora.consensus.data.UTXOSet;
 import agora.consensus.Genesis;
 
 import std.conv;
+import std.stdio;
+
+// todo: get the public key out of the enrollment,
+// as we need to find the last preimage
+
+public void updateExpectedRs (ref Point[ushort] expected_Rs,
+    Hash[ushort] prev_preimages)
+{
+    foreach (key, ref R; expected_Rs)
+    {
+        if (auto preimage = key in prev_preimages)
+            R = R + Scalar(*preimage).toPoint();
+    }
+}
+
+/*******************************************************************************
+
+    Check the validation of the block header's signature
+
+    Params:
+        header = the block header to validate
+        prev_preimages = the preimages of the previous block (enrollment / metadata)
+        preimages = the preimages for the current block
+        expected_Rs = the map of the expected R's based on the revealed preimages
+                      (e.g. R2 = R1 + X1, a map of R2 for each validator node)
+        pub_keys = public keys of all validators, sorted alphabetically
+                   to enable bitmask index lookup
+
+    Return:
+        `null` if the block is valid, otherwise a string explaining the
+        reason it is invalid.
+
+*******************************************************************************/
+
+public string isInvalidSignatureReason (BlockHeader header,
+    Hash[ushort] prev_preimages, Hash[ushort] preimages,
+    Point[ushort] expected_Rs, Point[] pub_keys)
+    nothrow @trusted
+{
+    try
+    {
+
+        import std.algorithm;
+        import std.range;
+        import agora.common.crypto.Schnorr : verify;
+
+        foreach (idx, preimage; preimages)
+        {
+            // missing preimage
+            if (idx !in prev_preimages)
+                return "Missing preimage in the previous block";
+
+            // preimage must be of the previous preimage
+            if (preimage.hashFull() != prev_preimages[idx])
+                return "Preimage does not hash to the previous preimage";
+        }
+
+        Point sum_P;  // the sum of validators' public keys
+        Point sum_R;  // the sum of validators' R's
+
+        size_t num_signers;
+        foreach (idx, has_signed; header.validators)
+        {
+            if (!has_signed)
+                continue;
+
+            assert(idx < ushort.max);
+            const ushort index = cast(ushort)idx;
+
+            // this validator did not reveal the preimage, cannot sign
+            if (index !in preimages)
+                return "Validator which signed has not revealed the preimage";
+
+            num_signers++;
+
+            if (sum_P == Point.init)  // note: Point.init + B != B
+                sum_P = pub_keys[idx];
+            else
+                sum_P = sum_P + pub_keys[idx];
+
+            if (index !in expected_Rs)
+            {
+                import std.string;
+                assert(0, format("Wrong index: %s", index));
+            }
+
+            const Point R = expected_Rs[index];
+
+            if (sum_R == Point.init)  // note: Point.init + B != B
+                sum_R = R;
+            else
+                sum_R = sum_R + R;
+        }
+
+        // todo: could have a rule: at least 50% + 1 must have signed the block
+        // in order for the signature to be considered valid
+        if (num_signers == 0)
+            return "Nobody signed this block";
+
+        if (header.signature.R != sum_R)
+            return "Signature.R does not match expected R";
+
+        if (!verify(sum_P, header.signature, header))
+            return "Signature is invalid";
+
+        return null;
+    }
+    catch (Throwable thr)
+    {
+        scope (failure) assert(0);
+        writeln(thr);
+    }
+
+    return null;
+}
+
+/// Ditto but returns `bool`, only usable in unittests
+version (unittest)
+public bool isValidSignature (BlockHeader header, Hash[ushort] prev_preimages,
+    Hash[ushort] next_preimages, Point[ushort] expected_Rs, Point[] pub_keys) nothrow @safe
+{
+    return isInvalidSignatureReason(header, prev_preimages, next_preimages,
+        expected_Rs, pub_keys) is null;
+}
+
+///
+unittest
+{
+    import agora.consensus.Genesis;
+    import agora.common.Amount;
+    import agora.common.BitField;
+    import agora.common.crypto.Schnorr;
+    import agora.common.EnrollmentManager;
+    import agora.consensus.data.Enrollment;
+    import agora.consensus.data.Transaction;
+    import agora.consensus.data.UTXOSet;
+
+    import std.algorithm;
+    import std.format;
+    import std.range;
+
+    /// Return the index of the key into the public key array.
+    /// The index is 'ushort' to match the preimages hashmap key type
+    static ushort getKeyIndex (Point[] pub_keys, Point key)
+    {
+        assert(pub_keys.isSorted(), "Keys must be sorted!");
+        auto res = pub_keys.countUntil(key);
+        assert(res >= 0);
+        assert(res < ushort.max);
+        return cast(ushort)res;
+    }
+
+    class Node
+    {
+        private Pair pair;
+        private UTXOSet utxo_set;
+        private EnrollmentManager man;
+        private Enrollment enroll;
+        private size_t preimage_index = 1;
+        private Hash preimage;
+        private Scalar r;
+
+        ///
+        this ()
+        {
+            auto key_pair = KeyPair.random();
+            auto v = key_pair.secret.secretKeyToCurveScalar();
+            this.pair = Pair(v, v.toPoint());
+
+            Transaction utxo_tx = Transaction(
+                TxType.Freeze,
+                [Input(Hash.init, 0)],
+                [Output(Amount.MinFreezeAmount, key_pair.address)]
+            );
+
+            this.utxo_set = new UTXOSet(":memory:");
+            this.man = new EnrollmentManager(":memory:", key_pair);
+            this.utxo_set.updateUTXOCache(utxo_tx, 1);
+
+            Hash[] utxo_hashes;
+            auto utxos = this.utxo_set.getUTXOs(key_pair.address);
+            foreach (key, value; utxos)
+                utxo_hashes ~= key;
+
+            auto utxo_hash = utxo_hashes[0];
+            this.man.createEnrollment(utxo_hash, this.enroll);
+
+            this.r = this.man.signature_noise.v;
+            this.preimage = this.enroll.random_seed;
+        }
+
+        /// Return R
+        Point R ()
+        {
+            return this.r.toPoint();
+        }
+
+        // prepare the R for signing and prepare next preimage
+        void prepareToSign ()
+        {
+            // formula: r2 = r1 + x1
+            // where:   r1 = last r scalar
+            //          x1 = previous preimage
+            this.r = this.r + Scalar(this.preimage);
+
+            // get the Nth preimage
+            this.preimage = hashFull(this.man.random_seed_src);
+            foreach (i; 0 .. (this.enroll.cycle_length - 1) - this.preimage_index)
+                this.preimage = this.preimage.hashFull();
+
+            this.preimage_index++;
+        }
+
+        ///
+        void revealPreimage (ref Hash[ushort] preimages, Point[] pub_keys)
+        {
+            auto signer_index = getKeyIndex(pub_keys, this.pair.V);
+            preimages[signer_index] = this.preimage;
+        }
+
+        ///
+        void signBlock (ref Block block, Point[] pub_keys, Point P, Point R)
+        {
+            auto sig = sign(this.pair.v, P, R, this.r, block.header);
+            block.header.signature.s = block.header.signature.s + sig.s;
+
+            // mark that we signed this block
+            auto signer_index = getKeyIndex(pub_keys, this.pair.V);
+            block.header.validators[signer_index] = true;
+        }
+
+        /// Cleanup
+        void clear ()
+        {
+            this.man.shutdown();
+            this.utxo_set.shutdown();
+        }
+    }
+
+    auto node_1 = new Node();
+    scope (exit) node_1.clear();
+    auto node_2 = new Node();
+    scope (exit) node_2.clear();
+
+    // validator keys should be sorted in some defined order
+    Point[] pub_keys = [node_1.pair.V, node_2.pair.V];
+    sort(pub_keys);
+
+    // prepare block 1 containing enrollment data
+    auto gen_key = getGenesisKeyPair();
+    auto txs = makeChainedTransactions(gen_key, null, 1).sort.array;
+    auto block_1 = makeNewBlock(GenesisBlock, txs);
+
+    // validators which will validate blocks 2+
+    block_1.header.enrollments ~= node_1.enroll;
+    block_1.header.enrollments ~= node_2.enroll;
+
+    /// contains expected Rs
+    Point[ushort] expected_Rs;
+    /// The first ones are initialized to the R in the enrollment signature itself
+    expected_Rs[getKeyIndex(pub_keys, node_1.pair.V)] = node_1.enroll.enroll_sig.R;
+    expected_Rs[getKeyIndex(pub_keys, node_2.pair.V)] = node_2.enroll.enroll_sig.R;
+
+    txs = makeChainedTransactions(gen_key, txs, 1).sort.array;
+    auto block_2 = makeNewBlock(block_1, txs);
+    block_2.header.validators = BitField(2);  // two validators
+
+    Hash[ushort] prev_preimages;
+    node_1.revealPreimage(prev_preimages, pub_keys);
+    node_2.revealPreimage(prev_preimages, pub_keys);
+
+    // before signing, nodes signal that they want to sign the block.
+    // they also prepare the (R, r) pair
+    node_1.prepareToSign();
+    node_2.prepareToSign();
+
+    // now we update the expected R's, based on the previous preimage
+    updateExpectedRs(expected_Rs, prev_preimages);
+
+    // P is the sum of all validators' public keys
+    Point P = pub_keys[0] + pub_keys[1];
+
+    // R is the sum of all the validators' Rs
+    Point R = node_1.R() + node_2.R();
+    block_2.header.signature.R = R;
+
+    Hash[ushort] next_preimages;
+    node_1.revealPreimage(next_preimages, pub_keys);
+    node_2.revealPreimage(next_preimages, pub_keys);
+
+    // not all nodes which agreed signed => Fail
+    node_1.signBlock(block_2, pub_keys, P, R);
+    assert(!isValidSignature(block_2.header, prev_preimages, next_preimages, expected_Rs, pub_keys));
+
+    // all nodes signed => Ok
+    node_2.signBlock(block_2, pub_keys, P, R);
+    assert(isValidSignature(block_2.header, prev_preimages, next_preimages, expected_Rs, pub_keys));
+
+    // now it's safe to update the previous Rs for the signing of another block
+    updateExpectedRs(expected_Rs, prev_preimages);
+}
+
 /*******************************************************************************
 
     Get result of transaction data and signature verification

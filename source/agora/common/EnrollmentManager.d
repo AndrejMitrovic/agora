@@ -49,10 +49,10 @@ public class EnrollmentManager
     private Pair key_pair;
 
     /// Random seed
-    private Scalar random_seed_src;
+    public Scalar random_seed_src;
 
     /// Random key for enrollment
-    private Pair signature_noise;
+    public Pair signature_noise;
 
     /// Enrollment data object
     private Enrollment data;
