@@ -14,6 +14,7 @@
 module agora.consensus.Validation;
 
 import agora.common.Amount;
+import agora.common.Config;
 import agora.common.crypto.ECC;
 import agora.common.crypto.Key;
 import agora.common.crypto.Schnorr;
@@ -23,8 +24,112 @@ import agora.consensus.data.Enrollment;
 import agora.consensus.data.Transaction;
 import agora.consensus.data.UTXOSet;
 import agora.consensus.Genesis;
+import agora.node.Ledger;
 
 import std.conv;
+import std.stdio;
+
+/// Node ID => Block #index => Preimage
+public alias PreimagesMap = Hash[ulong][ushort];
+
+/// Node ID => Block #Index => Expected R value
+/// (based on R2 = R1 + X1, where X1 is the preimage for block #1)
+public alias PubRMap = Point[ulong][ushort];
+
+/*******************************************************************************
+
+    Check the validation of the block header's signature
+
+    Params:
+        header = the block header to validate
+        preimage_map = the currently revealed preimage_map of all the nodes
+        pub_r_map = the map of the expected R's based on the revealed preimage_map
+                      (e.g. R2 = R1 + X1, a map of R2 for each validator node)
+        pub_keys = public keys of all validators, sorted alphabetically
+                   to enable bitmask index lookup
+
+    Return:
+        `null` if the block is valid, otherwise a string explaining the
+        reason it is invalid.
+
+*******************************************************************************/
+
+public string isInvalidSignatureReason (BlockHeader header,
+    PreimagesMap preimages_map, PubRMap pub_r_map, Point[] pub_keys)
+    nothrow @safe
+{
+    import std.algorithm;
+    //import std.range;
+    import agora.common.crypto.Schnorr : verify;
+
+    Point P;  // sum of P for the validators which signed
+    Point R;  // sum of R for the validators which signed
+
+    size_t num_signers;
+    foreach (idx, has_signed; header.validators)
+    {
+        if (!has_signed)
+            continue;
+
+        /// node indices are ushort
+        assert(idx < ushort.max);
+        const node_idx = cast(ushort)idx;
+
+        /// verification: the pubkeys & preimages are known and the R's were calculated
+        if (node_idx >= pub_keys.length)
+            return "Validator is not enrolled";
+
+        auto preimages = node_idx in preimages_map;
+        if (preimages is null)
+            return "Validator has not revealed any preimages";
+
+        if (header.height !in *preimages)
+            return "Validator has not revealed the preimage for this block height";
+
+        // sanity checks: if preimages exist then the R values should have been calculated
+        auto rand_map = node_idx in pub_r_map;
+        assert(rand_map !is null);
+        auto rand_val = header.height in *rand_map;
+        assert(rand_val !is null);
+
+        /// Add the validator's P
+        if (P == Point.init)  // note: Point.init + Point != Point, must use assignment here
+            P = pub_keys[idx];
+        else
+            P = P + pub_keys[idx];
+
+        /// Add the validator's R
+        const Point node_R = *rand_val;
+        if (R == Point.init)  // note: Point.init + Point != Point, must use assignment here
+            R = node_R;
+        else
+            R = R + node_R;
+
+        num_signers++;
+    }
+
+    // todo: could have a rule: at least 50% + 1 must have signed the block
+    // in order for the signature to be considered valid
+    if (num_signers == 0)
+        return "Nobody signed this block";
+
+    // this avoids a signature check if R has been manipulated
+    if (header.signature.R != R)
+        return "Signature.R does not match expected R";
+
+    if (!verify(P, header.signature, header))
+        return "Signature is invalid";
+
+    return null;
+}
+
+/// Ditto but returns `bool`, only usable in unittests
+version (unittest)
+public bool isValidSignature (BlockHeader header, PreimagesMap preimage_map,
+    PubRMap pub_r_map, Point[] pub_keys) nothrow @safe
+{
+    return isInvalidSignatureReason(header, preimage_map, pub_r_map, pub_keys) is null;
+}
 
 /*******************************************************************************
 
