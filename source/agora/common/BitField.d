@@ -119,6 +119,40 @@ public struct BitField
     {
         return this.num_bits;
     }
+
+    /// Returns: a range of bits
+    public auto range ()
+    {
+        static struct Range
+        {
+            BitArray arr;
+            size_t num_bits;
+            size_t idx;
+
+            bool empty () @property nothrow
+            {
+                return this.idx == this.num_bits;
+            }
+
+            void popFront () @property nothrow
+            {
+                this.idx++;
+            }
+
+            size_t length() @property nothrow
+            {
+                return this.num_bits;
+            }
+
+            bool front () nothrow
+            {
+                scope (failure) assert(0);
+                return arr[this.idx];
+            }
+        }
+
+        return Range(this.bit_array, this.num_bits);
+    }
 }
 
 /// opEquals tests
