@@ -37,6 +37,7 @@ addons:
       - libsodium-dev
       - g++-9
       - libsqlite3-dev
+      - lldb
 
 env:
   - PATH=$HOME/bin/:$PATH PKG_CONFIG_PATH="/usr/local/opt/sqlite/lib/pkgconfig:/usr/local/opt/openssl@1.1/lib/pkgconfig" LIBRARY_PATH=/usr/local/lib/:$LIBRARY_PATH
@@ -54,6 +55,9 @@ before_install:
 
 script:
   - ./ci/run.sh
+
+after_failure:
+  - ./ci/core-dump.sh
 
 after_success:
  - bash <(curl -s https://codecov.io/bash) -cF unittests
