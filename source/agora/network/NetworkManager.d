@@ -173,6 +173,18 @@ public class NetworkManager
 
     public void retrieveLatestBlocks (Ledger ledger)
     {
+        // todo: validators should not run periodic getBlocksFrom,
+        // they should only run it at node start-up.
+        // but non-validators don't participate in validation, therefore
+        // they need to run this
+        // todo: actually, shouldn't the node realize that it should only retrieve
+        // new blocks if the block height at other nodes doesn't match?
+        // in this case we effectively end up having to ignore an externalize message,
+        // the question is if this is OK by the SCP standard.
+        // todo: check SCP
+        if (this.node_config.is_validator)
+            return;
+
         this.taskman.runTask(
         ()
         {

@@ -30,13 +30,33 @@ import agora.utils.Log;
 import agora.utils.PrettyPrinter;
 
 import std.algorithm;
+import std.datetime;
 import std.range;
+import std.stdio;
 
 mixin AddLogger!();
 
 /// Starts a nomination round for a new transaction set
 public alias NominateDg = void delegate (ulong slot_idx,
     Set!Transaction prev, Set!Transaction next) @safe;
+
+public string getNode () nothrow
+{
+    scope (failure) assert(0);
+    import geod24.concurrency;
+    import std.conv;
+    __gshared static string[string] nodes;
+
+    synchronized
+    {
+        auto tid = thisTid().to!string;
+        if (tid !in nodes)
+            nodes[tid] = nodes.length.to!string;
+
+        return nodes[tid];
+    }
+}
+
 
 /// Ditto
 public class Ledger
@@ -101,7 +121,7 @@ public class Ledger
 
         // by default the ledger will externalize without consenus.
         // if the node is a validator, it should set the proper nominator
-        this.setNominator((idx, prev, next) { this.onTXSetExternalized(next); });
+        this.setNominator((idx, prev, next) { this.onTXSetExternalized(idx, next); });
     }
 
     /***************************************************************************
@@ -132,9 +152,30 @@ public class Ledger
 
     ***************************************************************************/
 
-    public bool onTXSetExternalized (Set!Transaction txs) nothrow @trusted
+    public bool onTXSetExternalized (ulong block_height, Set!Transaction txs) nothrow @trusted
     {
         scope (failure) assert(0);
+        static size_t count;
+
+        static struct Hashed
+        {
+            Set!Transaction txs;
+
+            void computeHash (scope HashDg dg) const nothrow @safe @nogc
+            {
+                scope (failure) assert(0);
+                foreach (Transaction tx, bool _; txs._set)
+                    hashPart(tx, dg);
+            }
+        }
+
+        writefln("-- %s [Node %s] [Height %s] [Hash %s] [Count %s] onTXSetExternalized",
+                Clock.currTime().stdTime,
+                getNode(),
+                block_height,
+                hashFull(Hashed(txs)),
+                ++count);
+
         auto block = makeNewBlock(this.last_block, txs.byKey());
         return this.acceptBlock(block);
     }

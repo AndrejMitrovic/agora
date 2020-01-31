@@ -92,18 +92,20 @@ unittest
 unittest
 {
     import std.algorithm;
+    import std.conv;
+    import std.format;
     import std.range;
     import core.time;
 
     const NodeCount = 4;
-    auto network = makeTestNetwork(NetworkTopology.Simple, NodeCount, true,
+    auto network = makeTestNetwork(NetworkTopology.OneValidator, NodeCount, true,
         100, 20, 100);  // reduce timeout to 100 msecs
     network.start();
     scope(exit) network.shutdown();
     scope(failure) network.printLogs();
     assert(network.getDiscoveredNodes().length == NodeCount);
 
-    auto nodes = network.apis.values;
+    auto nodes = network.keys.map!(key => network.apis[key]).array;
     auto node_1 = nodes[0];
 
     // ignore transaction propagation and periodically retrieve blocks via getBlocksFrom
@@ -111,6 +113,14 @@ unittest
 
     auto txs = makeChainedTransactions(getGenesisKeyPair(), null, 2);
     txs.each!(tx => node_1.putTransaction(tx));
+
+    nodes.enumerate.each!((idx, node) =>
+        retryFor(node.getBlockHeight() == 2,
+            4.seconds,
+            format("Node %s has block height %s. Expected: %s",
+                idx, node.getBlockHeight().to!string, 2)));
+
+
     containSameBlocks(nodes, 2).retryFor(8.seconds);
 }
 

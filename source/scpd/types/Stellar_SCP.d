@@ -50,6 +50,23 @@ struct SCPNomination {
 
 static assert(SCPNomination.sizeof == 80);
 
+public string typeToString (int32_t type)
+{
+    switch (type)
+    {
+    case SCPStatementType.SCP_ST_PREPARE:
+        return "Prepare (2)";
+    case SCPStatementType.SCP_ST_CONFIRM:
+        return "Confirm / Commit (3)";
+    case SCPStatementType.SCP_ST_EXTERNALIZE:
+        return "Externalize (4)";
+    case SCPStatementType.SCP_ST_NOMINATE:
+        return "Nominate (1)";
+    default:
+        return "???";
+    }
+}
+
 struct SCPStatement {
 
     /***************************************************************************

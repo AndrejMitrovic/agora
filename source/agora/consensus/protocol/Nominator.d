@@ -13,6 +13,7 @@
 
 module agora.consensus.protocol.Nominator;
 
+import std.stdio;
 import agora.common.crypto.Key;
 import agora.common.Deserializer;
 import agora.common.Hash : hashFull;
@@ -38,6 +39,7 @@ import scpd.Util;
 
 import core.stdc.stdint;
 import core.time;
+import std.datetime;
 
 mixin AddLogger!();
 
@@ -124,16 +126,30 @@ extern(D):
     private void nominateTransactionSet (ulong slot_idx, Set!Transaction prev,
         Set!Transaction next) @trusted
     {
+        scope (failure) assert(0);
+        import std.stdio;
+
         log.info("{}(): Proposing tx set for slot {}", __FUNCTION__, slot_idx);
+        static size_t count;
 
         auto prev_value = prev.serializeFull().toVec();
         auto next_value = next.serializeFull().toVec();
         if (this.scp.nominate(slot_idx, next_value, prev_value))
         {
             log.info("{}(): Tx set nominated", __FUNCTION__);
+
+            writefln("-- %s Success SCP.nominate [Node %s] [Count %s]",
+                Clock.currTime().stdTime,
+                getNode(),
+                ++count);
         }
         else
         {
+            writefln("-- %s Failure SCP.nominate [Node %s] [Count %s]",
+                Clock.currTime().stdTime,
+                getNode(),
+                ++count);
+
             log.info("{}(): Tx set rejected nomination", __FUNCTION__);
         }
     }
@@ -208,6 +224,7 @@ extern(D):
 
     extern (C++):
 
+    import std.stdio;
 
     /***************************************************************************
 
@@ -222,6 +239,17 @@ extern(D):
 
     public override void signEnvelope (ref SCPEnvelope envelope)
     {
+        import std.datetime;
+        import std.conv : to;
+
+        scope (failure) assert(0);
+        static size_t count;
+        writefln("-- %s [Node %s] [Count #%s] signEnvelope [Envelope #%s] [Type: %s]",
+            Clock.currTime().stdTime,
+            getNode(),
+            ++count,
+            cast(ulong)envelope.statement.slotIndex,
+            envelope.statement.pledges.type_.typeToString());
     }
 
     /***************************************************************************
@@ -239,6 +267,13 @@ extern(D):
     public override ValidationLevel validateValue (uint64_t slot_idx,
         ref const(Value) value, bool nomination) nothrow
     {
+        scope (failure) assert(0);
+        static size_t count;
+        writefln("-- %s [Node %s] [Count #%s] validateValue",
+            Clock.currTime().stdTime,
+            getNode(),
+            ++count);
+
         scope (failure) assert(0);
 
         try
@@ -278,6 +313,11 @@ extern(D):
         ref const(Value) value)
     {
         scope (failure) assert(0);
+        static size_t count;
+        writefln("-- %s [Node %s] [Count #%s] valueExternalized",
+            Clock.currTime().stdTime,
+            getNode(),
+            ++count);
 
         if (slot_idx in this.externalized_slots)
             return;  // slot was already externalized
@@ -290,7 +330,7 @@ extern(D):
             assert(0, "Transaction set empty");
 
         log.info("Externalized transaction set at {}: {}", slot_idx, tx_set);
-        if (!this.ledger.onTXSetExternalized(tx_set))
+        if (!this.ledger.onTXSetExternalized(slot_idx, tx_set))
             assert(0);
     }
 
@@ -323,6 +363,15 @@ extern(D):
 
     public override void emitEnvelope (ref const(SCPEnvelope) envelope)
     {
+        static size_t count;
+        scope (failure) assert(0);
+        writefln("-- %s [Node %s] [Count #%s] emitEnvelope [Envelope #%s] [Type: %s]",
+            Clock.currTime().stdTime,
+            getNode(),
+            ++count,
+            cast(ulong)envelope.statement.slotIndex,
+            envelope.statement.pledges.type_.typeToString());
+
         try
         {
             foreach (key, node; this.peers)
@@ -364,6 +413,11 @@ extern(D):
         ref const(set!Value) candidates)
     {
         scope (failure) assert(0);
+        static size_t count;
+        writefln("-- %s [Node %s] [Count #%s] combineCandidates",
+            Clock.currTime().stdTime,
+            getNode(),
+            ++count);
 
         foreach (ref const(Value) candidate; candidates)
         {
@@ -408,23 +462,42 @@ extern(D):
     public override void setupTimer (ulong slot_idx, int timer_ID,
         milliseconds timeout, CPPDelegate!SCPCallback* callback)
     {
-        scope (failure) assert(0);
+        //scope (failure) assert(0);
 
-        if (callback is null || timeout == 0)
+        try
         {
-            this.timers.remove(timer_ID);
-            return;
-        }
+            // note: it's not the timers that are the problem,
+            // they only count timeouts so a nomination / ballot would be abandoned,
+            // e.g. if the nodes are not responsive
+            static size_t count;
+            writefln("-- %s [Node %s] [Count #%s] [%s Timer] [timeout: %s] setupTimer",
+                Clock.currTime().stdTime,
+                getNode(),
+                ++count,
+                (timer_ID == 0) ? "Nomination" : "BallotProtocol",
+                timeout);
 
-        this.timers.put(timer_ID);
-
-        this.taskman.runTask(
-        {
-            this.taskman.wait(timeout.msecs);
-            if (timer_ID !in this.timers)  // timer was cancelled
+            if (callback is null || timeout == 0)
+            {
+                this.timers.remove(timer_ID);
                 return;
+            }
 
-            callCPPDelegate(callback);
-        });
+            this.timers.put(timer_ID);
+
+            this.taskman.runTask(
+            {
+                this.taskman.wait(timeout.msecs);
+                if (timer_ID !in this.timers)  // timer was cancelled
+                    return;
+
+                callCPPDelegate(callback);
+            });
+        }
+        catch (Throwable err)
+        {
+            try { writefln("-- Error thrown in setupTimer: %s", err); } catch (Exception) { }
+            //throw err;
+        }
     }
 }
