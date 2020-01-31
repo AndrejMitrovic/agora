@@ -22,6 +22,7 @@ module agora.test.Base;
 
 version (unittest):
 
+import agora.node.Ledger;
 import agora.api.Validator;
 import agora.common.Amount;
 import agora.common.BanManager;
@@ -588,6 +589,7 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager)
         long retry_delay = 100, size_t max_retries = 20, long timeout = 500,
         size_t max_failed_requests = 100)
 {
+    .nodes = null;
     import std.algorithm;
     import std.array;
     import std.range;

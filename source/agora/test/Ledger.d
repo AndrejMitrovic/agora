@@ -26,9 +26,13 @@ import agora.consensus.data.UTXOSet;
 import agora.consensus.Genesis;
 import agora.test.Base;
 
+import agora.node.Ledger;
+
 ///
 unittest
 {
+    EnableLogging = true;
+    scope (exit) EnableLogging = false;
     import std.algorithm;
     import std.conv;
     import std.format;

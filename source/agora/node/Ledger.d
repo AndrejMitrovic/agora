@@ -30,13 +30,35 @@ import agora.utils.Log;
 import agora.utils.PrettyPrinter;
 
 import std.algorithm;
+import std.datetime;
 import std.range;
+import std.stdio;
 
 mixin AddLogger!();
+
+__gshared bool EnableLogging;
 
 /// Starts a nomination round for a new transaction set
 public alias NominateDg = void delegate (ulong slot_idx,
     Set!Transaction prev, Set!Transaction next) @safe;
+
+__gshared static string[string] nodes;
+public string getNode () nothrow
+{
+    scope (failure) assert(0);
+    import geod24.concurrency;
+    import std.conv;
+
+    synchronized
+    {
+        auto tid = thisTid().to!string;
+        if (tid !in nodes)
+            nodes[tid] = nodes.length.to!string;
+
+        return nodes[tid];
+    }
+}
+
 
 /// Ditto
 public class Ledger
@@ -104,7 +126,7 @@ public class Ledger
 
         // by default the ledger will externalize without consenus.
         // if the node is a validator, it should set the proper nominator
-        this.setNominator((idx, prev, next) { this.onTXSetExternalized(next); });
+        this.setNominator((idx, prev, next) { this.onTXSetExternalized(idx, next); });
     }
 
     /***************************************************************************
@@ -135,9 +157,11 @@ public class Ledger
 
     ***************************************************************************/
 
-    public bool onTXSetExternalized (Set!Transaction txs) nothrow @trusted
+    public bool onTXSetExternalized (ulong block_height, Set!Transaction txs) nothrow @trusted
     {
         scope (failure) assert(0);
+        static size_t count;
+
         auto block = makeNewBlock(this.last_block, txs.byKey());
         return this.acceptBlock(block);
     }
