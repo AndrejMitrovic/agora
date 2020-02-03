@@ -274,6 +274,14 @@ public class Ledger
 
     public void tryNominateTXSet () @safe
     {
+        static bool is_nominating;
+    
+        // if we received another transaction while we're nominating, don't nominate again.
+        // todo: when we change nomination to be time-based (rather than input-based),
+        // then remove this part as it will be handled by a timer
+        if (is_nominating)
+            return;
+
         if (this.pool.length < Block.TxsInBlock)
             return;
 
@@ -299,10 +307,12 @@ public class Ledger
         if (txs.length != Block.TxsInBlock)
             return;  // not enough valid txs
 
+        is_nominating = true;
         // note: we are not passing the previous tx set as we don't really
         // need it at this point (might later be necessary for chain upgrades)
         auto slot_idx = this.last_block.header.height + 1;
         this.nominate(slot_idx, Set!Transaction.init, txs);
+        is_nominating = false;
     }
 
     /***************************************************************************
