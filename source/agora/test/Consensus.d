@@ -25,25 +25,34 @@ import agora.consensus.data.UTXOSet;
 import agora.consensus.Genesis;
 import agora.test.Base;
 
-/// test cyclic quorum config
+///
 unittest
 {
     import std.algorithm;
+    import std.conv;
+    import std.format;
     import std.range;
     import core.time;
 
-    const NodeCount = 6;
-    auto network = makeTestNetwork(NetworkTopology.Cyclic, NodeCount, true,
-        100, 20, 100);
+    const NodeCount = 3;
+    auto network = makeTestNetwork(NetworkTopology.Simple, NodeCount);
     network.start();
     scope(exit) network.shutdown();
-    scope(failure) network.printLogs();
+    //scope(failure) network.printLogs();
     assert(network.getDiscoveredNodes().length == NodeCount);
 
     auto nodes = network.apis.values;
     auto node_1 = nodes[0];
 
+    // create enough tx's for a single block
     auto txs = makeChainedTransactions(getGenesisKeyPair(), null, 1);
+
+    // send it to one node
     txs.each!(tx => node_1.putTransaction(tx));
-    containSameBlocks(nodes, 1).retryFor(5.seconds);
+
+    nodes.enumerate.each!((idx, node) =>
+        retryFor(node.getBlockHeight() == 1,
+            4.seconds,
+            format("Node %s has block height %s. Expected: 1",
+                idx, node.getBlockHeight().to!string)));
 }
