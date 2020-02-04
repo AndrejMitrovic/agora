@@ -32,29 +32,7 @@ immutable Cleanup = [ "rm", "-rf", IntegrationPath.buildPath("node/0/.cache/"),
 
 private int main (string[] args)
 {
-    // If the user pass `nobuild` as first argument, skip docker image build,
-    // which is the most expensive operation this script performs
-    if (args.length < 2 || args[1] != "nobuild")
-        runCmd(BuildImg);
-
-    // Simple sanity test
-    runCmd(TestContainer);
-
-    // First make sure that there we start from a clean slate,
-    // as the docker-compose bind volumes
-    runCmd(Cleanup);
-
-    // Now run the tests
-    runCmd(DockerComposeUp);
-    scope (exit) runCmd(DockerComposeDown);
-    scope (failure)
-    {
-        runCmd(DockerComposeLogs ~ "node-0");
-        runCmd(DockerComposeLogs ~ "node-1");
-        runCmd(DockerComposeLogs ~ "node-2");
-    }
-    runCmd(RunIntegrationTests);
-
+    runCmd(BuildImg);
     return 0;
 }
 
