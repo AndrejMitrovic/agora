@@ -250,6 +250,20 @@ public class Ledger
 
     /***************************************************************************
 
+        Returns:
+            true if there is currently a nomination round in progress.
+            Blocks should not be added to the Ledger via getBlocksFrom()
+            when this node is currently in the process of nominating a block.
+
+    ***************************************************************************/
+
+    public bool isNominating () nothrow @safe pure @nogc
+    {
+        return this.is_nominating;
+    }
+
+    /***************************************************************************
+
         Try making a new block if there are enough valid and non double-spending
         transactions in the pool
 
@@ -297,11 +311,12 @@ public class Ledger
             return;  // not enough valid txs
 
         this.is_nominating = true;
+        scope (exit) is_nominating = false;
+
         // note: we are not passing the previous tx set as we don't really
         // need it at this point (might later be necessary for chain upgrades)
         auto slot_idx = this.last_block.header.height + 1;
         this.nominate(slot_idx, Set!Transaction.init, txs);
-        this.is_nominating = false;
     }
 
     /***************************************************************************
