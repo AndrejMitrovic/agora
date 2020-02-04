@@ -114,7 +114,7 @@ private UnitTestResult customModuleUnitTester ()
     }
 
     UnitTestResult result;
-    foreach (mod; parallel(mod_tests))
+    foreach (mod; mod_tests)
     {
         ++result.executed;
 
