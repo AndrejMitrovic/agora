@@ -261,6 +261,10 @@ public class Ledger
 
     public void tryNominateTXSet () @safe
     {
+        // not a validator, the node should not create blocks
+        if (!this.node_config.is_validator)
+            return;
+
         // if we received another transaction while we're nominating, don't nominate again.
         // todo: when we change nomination to be time-based (rather than input-based),
         // then remove this part as it will be handled by a timer
@@ -443,6 +447,7 @@ unittest
     auto utxo_set = new UTXOSet(":memory:");
     scope (exit) utxo_set.shutdown();
     auto config = new Config();
+    config.node.is_validator = true;
     scope ledger = new Ledger(pool, utxo_set, storage, config.node);
     assert(ledger.getBlockHeight() == 0);
 
@@ -528,6 +533,7 @@ unittest
     auto utxo_set = new UTXOSet(":memory:");
     scope (exit) utxo_set.shutdown();
     auto config = new Config();
+    config.node.is_validator = true;
     scope ledger = new Ledger(pool, utxo_set, storage, config.node);
 
     // Valid case
@@ -574,6 +580,7 @@ unittest
     auto utxo_set = new UTXOSet(":memory:");
     scope (exit) utxo_set.shutdown();
     auto config = new Config();
+    config.node.is_validator = true;
     scope ledger = new Ledger(pool, utxo_set, storage, config.node);
 
     Block invalid_block;  // default-initialized should be invalid
@@ -597,6 +604,7 @@ unittest
     auto utxo_set = new UTXOSet(":memory:");
     scope (exit) utxo_set.shutdown();
     auto config = new Config();
+    config.node.is_validator = true;
     scope ledger = new Ledger(pool, utxo_set, storage, config.node);
 
     auto gen_key_pair = getGenesisKeyPair();
@@ -674,6 +682,7 @@ unittest
     auto utxo_set = new UTXOSet(":memory:");
     scope (exit) utxo_set.shutdown();
     auto config = new Config();
+    config.node.is_validator = true;
     scope ledger = new Ledger(pool, utxo_set, storage, config.node);
 
     assert(utxo_set.length == 8);
@@ -778,6 +787,7 @@ unittest
     scope (exit) utxo_set.shutdown();
 
     auto config = new Config();
+    config.node.is_validator = true;
     scope ledger = new Ledger(pool, utxo_set, storage, config.node);
 
     KeyPair[] in_key_pairs;
@@ -875,6 +885,7 @@ unittest
     scope (exit) utxo_set.shutdown();
 
     auto config = new Config();
+    config.node.is_validator = true;
     scope ledger = new Ledger(pool, utxo_set, storage, config.node);
 
     KeyPair[] splited_keys = getRandomKeyPairs();

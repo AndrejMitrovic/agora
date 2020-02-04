@@ -34,6 +34,7 @@ unittest
     import std.format;
     import std.range;
     import core.time;
+    import core.thread;
 
     const NodeCount = 4;
     auto network = makeTestNetwork(NetworkTopology.Simple, NodeCount);
@@ -63,6 +64,7 @@ unittest
 
         block_txes ~= txs.sort.array;
         last_txs = txs;
+        Thread.sleep(500.msecs);
     }
 
     // get all the blocks (including genesis block)
