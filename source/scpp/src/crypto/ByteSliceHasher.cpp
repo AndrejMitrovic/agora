@@ -9,15 +9,16 @@ namespace stellar
 {
 namespace shortHash
 {
-static unsigned char sKey[crypto_shorthash_KEYBYTES];
-void
-initialize()
-{
-    randombytes_buf(sKey, crypto_shorthash_KEYBYTES);
-}
+// static unsigned char sKey[crypto_shorthash_KEYBYTES];
+// void
+// initialize()
+// {
+//     randombytes_buf(sKey, crypto_shorthash_KEYBYTES);
+// }
 uint64_t
 computeHash(stellar::ByteSlice const& b)
 {
+    unsigned char sKey[crypto_shorthash_KEYBYTES];
     uint64_t res;
     static_assert(sizeof(res) == crypto_shorthash_BYTES, "unexpected size");
     crypto_shorthash(reinterpret_cast<unsigned char*>(&res),
