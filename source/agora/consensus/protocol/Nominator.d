@@ -19,6 +19,7 @@ import agora.common.Hash : hashFull;
 import agora.common.Serializer;
 import agora.common.Set;
 import agora.common.Task;
+import agora.common.Types : Signature;
 import agora.consensus.data.Block;
 import agora.consensus.data.Transaction;
 import agora.network.NetworkClient;
@@ -211,9 +212,30 @@ extern(D):
 
     ***************************************************************************/
 
-    public bool receiveEnvelope (SCPEnvelope envelope) @trusted
+    public bool receiveEnvelope (SCPEnvelope envelope) @safe nothrow
     {
-        return this.scp.receiveEnvelope(envelope) == SCP.EnvelopeState.VALID;
+        if (envelope.statement.nodeID[].length != PublicKey.Width)
+        {
+            log.trace("Envelope nodeID is corrupt");
+            return false;
+        }
+
+        if (envelope.signature[].length != Signature.Width)
+        {
+            log.trace("Envelope signature is corrupt");
+            return false;
+        }
+
+        PublicKey key = PublicKey(envelope.statement.nodeID);
+        const msg = SCPStatementHash(envelope.statement).hashFull()[];
+        if (!key.verify(Signature(envelope.signature[]), msg))
+        {
+            log.trace("Envelope signature is invalid for {}: {}", key, envelope);
+            return false;
+        }
+
+        return () @trusted {
+            this.scp.receiveEnvelope(envelope) == SCP.EnvelopeState.VALID; }();
     }
 
     extern (C++):
@@ -232,6 +254,17 @@ extern(D):
 
     public override void signEnvelope (ref SCPEnvelope envelope)
     {
+        scope (failure) assert(0);
+        import core.stdc.stdlib;
+
+        auto msg = toHash(envelope.statement)[];
+        auto sig = this.key_pair.secret.sign(msg)[];
+
+        // note: SCP frees the memory, it must be malloc-allocated.
+        auto mem = cast(ubyte*)malloc(sig.length);
+        assert(mem !is null);
+        mem[0 .. sig.length] = sig[];
+        envelope.signature = mem[0 .. sig.length].toVec();
     }
 
     /***************************************************************************
