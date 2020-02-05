@@ -29,6 +29,7 @@ import agora.utils.PrettyPrinter;
 import scpd.Cpp;
 import scpd.scp.SCP;
 import scpd.scp.SCPDriver;
+import scpd.scp.Slot;
 import scpd.scp.Utils;
 import scpd.types.Stellar_types;
 import scpd.types.Stellar_types : StellarHash = Hash;
@@ -36,8 +37,11 @@ import scpd.types.Stellar_SCP;
 import scpd.types.Utils;
 import scpd.Util;
 
+alias TimerType = Slot.timerIDs;
 import core.stdc.stdint;
 import core.time;
+import std.conv;
+import std.traits;
 
 mixin AddLogger!();
 
@@ -70,6 +74,12 @@ public extern (C++) class Nominator : SCPDriver
     /// The quorum set
     private SCPQuorumSetPtr[Hash] quorum_set;
 
+    /// Tracks unique incremental timer IDs
+    private ulong[TimerType] last_timer_id;
+
+    /// Timer IDs with >= of the active timer will be allowed to run
+    private ulong[TimerType] active_timer_ids;
+
 extern(D):
 
     /***************************************************************************
@@ -89,6 +99,12 @@ extern(D):
         TaskManager taskman, NetworkClient[PublicKey] peers,
         SCPQuorumSet quorum_set)
     {
+        foreach (type; EnumMembers!TimerType)
+        {
+            last_timer_id[type] = 0;
+            active_timer_ids[type] = 0;
+        }
+
         this.key_pair = key_pair;
         auto node_id = NodeID(StellarHash(key_pair.address[]));
         const IsValidator = true;
@@ -399,7 +415,7 @@ extern(D):
 
         Params:
             slot_idx = the slot index we're currently reaching consensus for.
-            timer_type = the timer type (see Slot.timerIDs).
+            timer_type = the timer ID. required in case the timer gets cancelled.
             timeout = the timeout of the timer, in milliseconds.
             callback = the C++ callback to call.
 
@@ -410,18 +426,21 @@ extern(D):
     {
         scope (failure) assert(0);
 
+        const type = timer_type.to!TimerType;
         if (callback is null || timeout == 0)
         {
-            this.timers.remove(timer_type);
+            // signal deactivation of all current timers with this timer type
+            this.active_timer_ids[type] = this.last_timer_id[type] + 1;
             return;
         }
 
-        this.timers.put(timer_type);
-
+        const timer_id = ++this.last_timer_id[type];
         this.taskman.runTask(
         {
             this.taskman.wait(timeout.msecs);
-            if (timer_type !in this.timers)  // timer was cancelled
+
+            // timer was cancelled
+            if (timer_id < this.active_timer_ids[type])
                 return;
 
             callCPPDelegate(callback);
