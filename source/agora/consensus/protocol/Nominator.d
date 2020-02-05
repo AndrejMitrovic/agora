@@ -29,6 +29,7 @@ import agora.utils.PrettyPrinter;
 import scpd.Cpp;
 import scpd.scp.SCP;
 import scpd.scp.SCPDriver;
+import scpd.scp.Slot;
 import scpd.scp.Utils;
 import scpd.types.Stellar_types;
 import scpd.types.Stellar_types : StellarHash = Hash;
@@ -36,10 +37,13 @@ import scpd.types.Stellar_SCP;
 import scpd.types.Utils;
 import scpd.Util;
 
+alias TimerType = Slot.timerIDs;
 import core.stdc.stdint;
 import core.time;
+import std.conv;
 import std.datetime;
 import std.stdio;
+import std.traits;
 
 mixin AddLogger!();
 
@@ -72,6 +76,12 @@ public extern (C++) class Nominator : SCPDriver
     /// The quorum set
     private SCPQuorumSetPtr[Hash] quorum_set;
 
+    /// Tracks incremental timer IDs, and the range of active ones based on type
+    private ulong[TimerType] last_timer_id;
+
+    /// ditto
+    private ulong[TimerType] active_timer_ids;
+
 extern(D):
 
     /***************************************************************************
@@ -91,6 +101,12 @@ extern(D):
         TaskManager taskman, NetworkClient[PublicKey] peers,
         SCPQuorumSet quorum_set)
     {
+        foreach (type; EnumMembers!TimerType)
+        {
+            last_timer_id[type] = 0;
+            active_timer_ids[type] = 0;
+        }
+
         this.key_pair = key_pair;
         auto node_id = NodeID(StellarHash(key_pair.address[]));
         const IsValidator = true;
@@ -471,40 +487,44 @@ extern(D):
 
         Params:
             slot_idx = the slot index we're currently reaching consensus for.
-            timer_ID = the timer ID. required in case the timer gets cancelled.
+            timer_type = the timer ID. required in case the timer gets cancelled.
             timeout = the timeout of the timer, in milliseconds.
             callback = the C++ callback to call.
 
     ***************************************************************************/
 
-    public override void setupTimer (ulong slot_idx, int timer_ID,
+    public override void setupTimer (ulong slot_idx, int timer_type,
         milliseconds timeout, CPPDelegate!SCPCallback* callback)
     {
         scope (failure) assert(0);
 
         try
         {
+            const type = timer_type.to!TimerType;
+
             static size_t count;
             EnableLogging && writefln("-- %s [Node %s] [Count #%s] [%s Timer] [Timeout: %s] [Callback: %s] setupTimer",
                 Clock.currTime().stdTime,
                 getNode(),
                 ++count,
-                (timer_ID == 0) ? "Nomination" : "BallotProtocol",
+                type,
                 timeout,
                 callback);
 
             if (callback is null || timeout == 0)
             {
-                this.timers.remove(timer_ID);
+                // signal deactivation of all timers with this timer type
+                this.active_timer_ids[type] = this.last_timer_id[type] + 1;
                 return;
             }
 
-            this.timers.put(timer_ID);
-
+            const timer_id = ++this.last_timer_id[type];
             this.taskman.runTask(
             {
                 this.taskman.wait(timeout.msecs);
-                if (timer_ID !in this.timers)  // timer was cancelled
+
+                // timer was cancelled
+                if (timer_id < this.active_timer_ids[type])
                     return;
 
                 callCPPDelegate(callback);
