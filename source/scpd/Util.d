@@ -97,3 +97,6 @@ private Tuple!(string, string) getParams (alias func)()
 
 /// Invoke an std::function pointer (note: must be void* due to mangling issues)
 extern(C++) void callCPPDelegate (void* cb);
+
+/// For unittests
+extern(C++) void* createTestCPPDelegate (int* val, int new_val);

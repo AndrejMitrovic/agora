@@ -59,6 +59,14 @@ CPPSETEMPTYINST(SCPBallot)
 CPPSETEMPTYINST(PublicKey)
 CPPSETEMPTYINST(unsigned int)
 
+// for unittests
+void* createTestCPPDelegate (int* val, int new_val)
+{
+    std::function<void()>* func = new std::function<void()>;
+    *func = [val, new_val]() { *val = new_val; };
+    return func;
+}
+
 void callCPPDelegate (void* cb)
 {
     auto callback = (std::function<void()>*)cb;

@@ -99,17 +99,10 @@ extern(D):
         TaskManager taskman, NetworkClient[PublicKey] peers,
         SCPQuorumSet quorum_set)
     {
-        foreach (type; EnumMembers!TimerType)
-        {
-            last_timer_id[type] = 0;
-            active_timer_ids[type] = 0;
-        }
-
         this.key_pair = key_pair;
         auto node_id = NodeID(StellarHash(key_pair.address[]));
         const IsValidator = true;
         this.scp = createSCP(this, node_id, IsValidator, quorum_set);
-        this.taskman = taskman;
         this.ledger = ledger;
         this.peers = peers;
 
@@ -123,6 +116,19 @@ extern(D):
 
         this.restoreSCPState(ledger);
         this.ledger.setNominator(&this.nominateTransactionSet);
+        this(taskman);
+    }
+
+    ///
+    private this (TaskManager taskman)
+    {
+        foreach (type; EnumMembers!TimerType)
+        {
+            last_timer_id[type] = 0;
+            active_timer_ids[type] = 0;
+        }
+
+        this.taskman = taskman;
     }
 
     /***************************************************************************
@@ -426,24 +432,62 @@ extern(D):
     {
         scope (failure) assert(0);
 
-        const type = timer_type.to!TimerType;
-        if (callback is null || timeout == 0)
+        try
         {
-            // signal deactivation of all current timers with this timer type
-            this.active_timer_ids[type] = this.last_timer_id[type] + 1;
-            return;
+            const type = timer_type.to!TimerType;
+            if (callback is null || timeout == 0)
+            {
+                // signal deactivation of all current timers with this timer type
+                this.active_timer_ids[type] = this.last_timer_id[type] + 1;
+                return;
+            }
+
+            const timer_id = ++this.last_timer_id[type];
+            this.taskman.runTask(
+            {
+                this.taskman.wait(timeout.msecs);
+
+                // timer was cancelled
+                if (timer_id < this.active_timer_ids[type])
+                    return;
+
+                callCPPDelegate(callback);
+            });
+        }
+        catch (Error err)
+        {
+            import std.stdio;
+            writefln("error: %s", err);
+        }
+    }
+}
+
+///
+unittest
+{
+    import core.thread;
+    import std.conv;
+    static class LocalRestTaskManager : TaskManager
+    {
+        static import geod24.LocalRest;
+
+        override void runTask (void delegate() dg)
+        {
+            geod24.LocalRest.runTask(dg);
         }
 
-        const timer_id = ++this.last_timer_id[type];
-        this.taskman.runTask(
+        override void wait (Duration dur)
         {
-            this.taskman.wait(timeout.msecs);
-
-            // timer was cancelled
-            if (timer_id < this.active_timer_ids[type])
-                return;
-
-            callCPPDelegate(callback);
-        });
+            geod24.LocalRest.sleep(dur);
+        }
     }
+
+    auto taskman = new LocalRestTaskManager();
+    auto nom = new Nominator(taskman);
+
+    int value;
+    auto cb_1 = createTestCPPDelegate(&value, 42);
+    nom.setupTimer(0, 0, milliseconds(100), cast(CPPDelegate!SCPCallback*)cb_1);
+    Thread.sleep(200.msecs);
+    assert(value == 42, value.to!string);
 }
