@@ -19,6 +19,7 @@ import agora.common.Hash : Hash, HashDg, hashPart, hashFull;
 import agora.common.Serializer;
 import agora.common.Set;
 import agora.common.Task;
+import agora.common.Types : Signature;
 import agora.consensus.data.Block;
 import agora.consensus.data.Transaction;
 import agora.network.NetworkClient;
@@ -213,6 +214,14 @@ extern(D):
 
     public bool receiveEnvelope (SCPEnvelope envelope) @trusted
     {
+        PublicKey key = PublicKey(envelope.statement.nodeID);
+        const msg = toHash(envelope.statement)[];
+        if (!key.verify(Signature(envelope.signature[]), msg))
+        {
+            log.trace("Envelope signature is invalid for {}: {}", key, envelope);
+            return false;
+        }
+
         return this.scp.receiveEnvelope(envelope) == SCP.EnvelopeState.VALID;
     }
 
@@ -231,6 +240,16 @@ extern(D):
 
     public override void signEnvelope (ref SCPEnvelope envelope)
     {
+        scope (failure) assert(0);
+        import core.stdc.stdlib;
+
+        // note: SCP seems to free() this, it has to be malloc-allocated
+        auto msg = toHash(envelope.statement)[];
+        auto sig = this.key_pair.secret.sign(msg)[];
+        auto mem = cast(ubyte*)malloc(sig.length);
+        mem[0 .. sig.length] = sig[];
+
+        envelope.signature = mem[0 .. sig.length].toVec();
     }
 
     /***************************************************************************
