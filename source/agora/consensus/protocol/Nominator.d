@@ -13,6 +13,7 @@
 
 module agora.consensus.protocol.Nominator;
 
+import agora.common.crypto.ECC;
 import agora.common.crypto.Key;
 import agora.common.crypto.Schnorr;
 import agora.common.Config;
@@ -452,6 +453,16 @@ extern(D):
             return;  // slot was already externalized, ignore outdated message
         }
 
+        const challenge = SCPStatementHash(&envelope.statement).hashFull();
+        PublicKey key = PublicKey(envelope.statement.nodeID);
+        Point K = Point(key[]);
+
+        if (!verify(K, envelope.signature, challenge))
+        {
+            log.trace("Envelope signature is invalid for {}: {}", key, envelope);
+            return;
+        }
+
         if (this.scp.receiveEnvelope(envelope) != SCP.EnvelopeState.VALID)
             log.info("Rejected invalid envelope: {}", scpPrettify(&envelope));
     }
@@ -463,8 +474,6 @@ extern(D):
 
         Signs the SCPEnvelope with the node's private key.
 
-        todo: Currently not signing yet. To be done.
-
         Params:
             envelope = the SCPEnvelope to sign
 
@@ -472,6 +481,10 @@ extern(D):
 
     public override void signEnvelope (ref SCPEnvelope envelope)
     {
+        const challenge = SCPStatementHash(&envelope.statement).hashFull();
+        const R = Pair.random();
+        const sig = sign(this.key_pair.v, this.key_pair.V, R.V, R.v, challenge);
+        envelope.signature = sig;
     }
 
     /***************************************************************************
