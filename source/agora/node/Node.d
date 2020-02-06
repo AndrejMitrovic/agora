@@ -28,6 +28,7 @@ import agora.consensus.data.Transaction;
 import agora.consensus.data.UTXOSet;
 import agora.consensus.EnrollmentManager;
 import agora.consensus.protocol.Nominator;
+import agora.network.NetworkClient;
 import agora.network.NetworkManager;
 import agora.node.BlockStorage;
 import agora.node.GossipProtocol;
@@ -159,7 +160,7 @@ public class Node : API
             .map!(item => tuple(item.key, item.value))
             .assocArray();
 
-        this.nominator = new Nominator(this.config.node.key_pair,
+        this.nominator = this.getNominator(this.config.node.key_pair,
             this.ledger, this.taskman, quorum_peers, quorum_set);
     }
 
@@ -412,6 +413,32 @@ public class Node : API
     {
         return new EnrollmentManager(buildPath(data_dir, "validator_set.dat"),
             node_config.key_pair);
+    }
+
+    /***************************************************************************
+
+        Returns an instance of a Nominator.
+
+        Test-suites can inject a badly-behaved nominator in order to
+        simulate byzantine nodes.
+
+        Params:
+            key_pair = the key pair of the node
+            ledger = Ledger instance
+            taskman = the task manager
+            quorum_peers = the network clients of the validator peers
+            quorum_set = the SCP quorum set
+
+        Returns:
+            the enrollment manager
+
+    ***************************************************************************/
+
+    protected Nominator getNominator (KeyPair key_pair, Ledger ledger,
+        TaskManager taskman, NetworkClient[PublicKey] quorum_peers,
+        SCPQuorumSet quorum_set)
+    {
+        return new Nominator(key_pair, ledger, taskman, quorum_peers, quorum_set);
     }
 
     /***************************************************************************
