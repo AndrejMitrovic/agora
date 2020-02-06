@@ -25,6 +25,14 @@ int cpp_set_foreach(void* setptr, void* ctx, void* func)
 }
 
 template<typename T>
+void decrementRefCount (std::shared_ptr<T> by_value)
+{
+    // this injects a dtor call to by_value here,
+    // decrementing the reference count, and calling
+    // the destructor if refcount reached 0
+}
+
+template<typename T>
 bool cpp_set_empty(const void* setptr)
 {
     return ((const std::set<T>*)setptr)->empty();

@@ -42,6 +42,10 @@ private template StdNS ()
         alias StdNS = AliasSeq!(`std`);
 }
 
+/// trick: pass it to C++ by value, the compiler will
+/// inject a dtor call on the C++ side at the end of scope
+extern (C++) public void decrementRefCount (T)(shared_ptr!T by_value);
+
 extern(C++, (StdNS!())) {
     /// Simple binding to `std::shared_ptr`
     struct shared_ptr (T)

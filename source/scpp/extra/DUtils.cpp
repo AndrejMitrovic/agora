@@ -59,6 +59,9 @@ CPPSETEMPTYINST(SCPBallot)
 CPPSETEMPTYINST(PublicKey)
 CPPSETEMPTYINST(unsigned int)
 
+#define CPPDECREFCOUNTINST(T) template void decrementRefCount<T>(std::shared_ptr<T>);
+CPPDECREFCOUNTINST(Value)
+
 void callCPPDelegate (void* cb)
 {
     auto callback = (std::function<void()>*)cb;
