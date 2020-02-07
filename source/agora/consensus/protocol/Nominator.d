@@ -37,6 +37,7 @@ import scpd.types.Stellar_SCP;
 import scpd.types.Utils;
 import scpd.Util;
 
+import std.algorithm;
 import core.stdc.stdint;
 import core.time;
 
@@ -71,14 +72,21 @@ public extern (C++) class Nominator : SCPDriver
     /// The quorum set
     private SCPQuorumSetPtr[Hash] quorum_set;
 
-    private alias TimerType = Slot.timerIDs;
-    static assert(TimerType.max == 1);
+    /// Ballot / Nomination timers
+    private static struct Timers
+    {
+        /// after slot is externalized, lower slot timers should be cancelled
+        public ulong lowest_timer;
 
-    /// Tracks unique incremental timer IDs
-    private ulong[TimerType.max + 1] last_timer_id;
+        /// if a slot index exists, the timer is active
+        public Set!ulong ballot;
 
-    /// Timer IDs with >= of the active timer will be allowed to run
-    private ulong[TimerType.max + 1] active_timer_ids;
+        /// ditto
+        public Set!ulong nomination;
+    }
+
+    /// Ballot / Nomination timers
+    private Timers timers;
 
 extern(D):
 
@@ -398,45 +406,34 @@ extern(D):
         assert(0);  // should not reach here
     }
 
-    /***************************************************************************
-
-        Used for setting and clearing C++ callbacks which fire after a
-        given timeout.
-
-        On the D side we spawn a new task which waits until a timer expires.
-
-        The callback is a C++ delegate, we use a helper function to invoke it.
-
-        Params:
-            slot_idx = the slot index we're currently reaching consensus for.
-            timer_type = the timer type (see Slot.timerIDs).
-            timeout = the timeout of the timer, in milliseconds.
-            callback = the C++ callback to call.
-
-    ***************************************************************************/
-
-    public override void setupTimer (ulong slot_idx, int timer_type,
-        milliseconds timeout, CPPDelegate!SCPCallback* callback)
+    public override setupTimer (ulong slot_idx, int type,
+        milliseconds timeout, CPPDelegate!(void function())* cb)
     {
-        scope (failure) assert(0);
+        assert(timer_type >= TimerType.min && timer_type < TimerType.max);
+        const timer_type = cast(TimerType)type;
 
-        const type = cast(TimerType) timer_type;
-        assert(type >= TimerType.min && type <= TimerType.max);
-        if (callback is null || timeout == 0)
+        if (slot_idx <= this.ledger.getBlockHeight())
         {
-            // signal deactivation of all current timers with this timer type
-            this.active_timer_ids[type] = this.last_timer_id[type] + 1;
+            // remove all timers for this outdated externalized slot
+            this.timers.ballot.remove(slot_idx);
+            this.timers.nominator.remove(slot_idx);
             return;
         }
 
-        const timer_id = ++this.last_timer_id[type];
+        if (timeout == 0)
+        {
+            this.timers.remove(timer_type, slot_idx);
+            return;
+        }
+
         this.taskman.runTask(
         {
             this.taskman.wait(timeout.msecs);
 
-            // timer was cancelled
-            if (timer_id < this.active_timer_ids[type])
+            if (slot_idx !in this.timers[timer_type])  // timer cancelled
                 return;
+            else
+                this.timers.remove(timer_type, slot_idx);
 
             callCPPDelegate(callback);
         });
