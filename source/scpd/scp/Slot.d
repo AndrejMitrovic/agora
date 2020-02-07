@@ -109,10 +109,10 @@ private:
 
     // // ** status methods
 
-    enum timerIDs
+    enum TimerType
     {
-        NOMINATION_TIMER = 0,
-        BALLOT_PROTOCOL_TIMER = 1
+        Nomination = 0,
+        Ballot = 1
     }
 
   protected:

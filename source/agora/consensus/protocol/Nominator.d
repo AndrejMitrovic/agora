@@ -37,6 +37,7 @@ import scpd.types.Stellar_SCP;
 import scpd.types.Utils;
 import scpd.Util;
 
+import std.algorithm;
 import core.stdc.stdint;
 import core.time;
 
@@ -60,25 +61,14 @@ public extern (C++) class Nominator : SCPDriver
     /// This node's quorum node clients
     private NetworkClient[PublicKey] peers;
 
-    /// The set of active timers
-    /// Todo: SCPTests.cpp uses fake timers,
-    /// Similar to how we use FakeClockBanManager!
-    private Set!ulong timers;
-
     /// The set of externalized slot indices
     private Set!uint64_t externalized_slots;
 
     /// The quorum set
     private SCPQuorumSetPtr[StellarHash] quorum_set;
 
-    private alias TimerType = Slot.timerIDs;
-    static assert(TimerType.max == 1);
-
-    /// Tracks unique incremental timer IDs
-    private ulong[TimerType.max + 1] last_timer_id;
-
-    /// Timer IDs with >= of the active timer will be allowed to run
-    private ulong[TimerType.max + 1] active_timer_ids;
+    /// Ballot / Nomination timers
+    public Set!ulong[Slot.TimerType.max + 1] timers;
 
 extern(D):
 
@@ -99,6 +89,11 @@ extern(D):
         TaskManager taskman, NetworkClient[PublicKey] peers,
         SCPQuorumSet quorum_set)
     {
+        import std.traits;
+        // initialize so opIndex does not throw
+        foreach (type; EnumMembers!(Slot.TimerType))
+            this.timers[type] = Set!ulong.init;
+
         this.key_pair = key_pair;
         auto node_id = NodeID(StellarHash(key_pair.address[]));
         const IsValidator = true;
@@ -292,6 +287,7 @@ extern(D):
         if (slot_idx in this.externalized_slots)
             return;  // slot was already externalized
         this.externalized_slots.put(slot_idx);
+        this.removeOutdatedTimers(slot_idx);
 
         auto bytes = cast(ubyte[])value[];
         auto tx_set = deserializeFull!(Set!Transaction)(bytes);
@@ -302,6 +298,30 @@ extern(D):
         log.info("Externalized transaction set at {}: {}", slot_idx, tx_set);
         if (!this.ledger.onTXSetExternalized(tx_set))
             assert(0);
+    }
+
+    /***************************************************************************
+
+        Removes outdated timers after a slot has been externalized.
+
+        Params:
+            slot_idx = timers with a lower or equal ID will be removed
+
+    ***************************************************************************/
+
+    private void removeOutdatedTimers (uint64_t slot_idx) nothrow @trusted
+    {
+        scope (failure) assert(0);  // Set.opApply is not nothrow
+        static ulong[] to_remove;
+        foreach (type, timers; this.timers)
+        foreach (timer_idx; timers)
+        {
+            if (timer_idx <= slot_idx)
+                to_remove ~= timer_idx;
+        }
+
+        foreach (type, ref timers; this.timers)
+            to_remove.each!(idx => timers.remove(idx));
     }
 
     /***************************************************************************
@@ -398,45 +418,38 @@ extern(D):
         assert(0);  // should not reach here
     }
 
-    /***************************************************************************
-
-        Used for setting and clearing C++ callbacks which fire after a
-        given timeout.
-
-        On the D side we spawn a new task which waits until a timer expires.
-
-        The callback is a C++ delegate, we use a helper function to invoke it.
-
-        Params:
-            slot_idx = the slot index we're currently reaching consensus for.
-            timer_type = the timer type (see Slot.timerIDs).
-            timeout = the timeout of the timer, in milliseconds.
-            callback = the C++ callback to call.
-
-    ***************************************************************************/
-
-    public override void setupTimer (ulong slot_idx, int timer_type,
-        milliseconds timeout, CPPDelegate!SCPCallback* callback)
+    public override void setupTimer (ulong slot_idx, int type,
+        milliseconds timeout, CPPDelegate!(void function())* callback)
     {
         scope (failure) assert(0);
 
-        const type = cast(TimerType) timer_type;
-        assert(type >= TimerType.min && type <= TimerType.max);
-        if (callback is null || timeout == 0)
+        assert(type >= Slot.TimerType.min && type <= Slot.TimerType.max);
+        const timer_type = cast(Slot.TimerType)type;
+
+        if (slot_idx <= this.ledger.getBlockHeight())
         {
-            // signal deactivation of all current timers with this timer type
-            this.active_timer_ids[type] = this.last_timer_id[type] + 1;
+            // remove all timers for this outdated externalized slot
+            foreach (_, ref timers; this.timers)
+                timers.remove(slot_idx);
             return;
         }
 
-        const timer_id = ++this.last_timer_id[type];
+        if (timeout == 0)
+        {
+            // disable the timer for this type and slot
+            this.timers[timer_type].remove(slot_idx);
+            return;
+        }
+
+        this.timers[timer_type].put(slot_idx);
         this.taskman.runTask(
         {
             this.taskman.wait(timeout.msecs);
 
-            // timer was cancelled
-            if (timer_id < this.active_timer_ids[type])
+            if (slot_idx !in this.timers[timer_type])  // timer cancelled
                 return;
+            else
+                this.timers[timer_type].remove(slot_idx);
 
             callCPPDelegate(callback);
         });
