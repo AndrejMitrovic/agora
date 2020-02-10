@@ -61,11 +61,6 @@ public extern (C++) class Nominator : SCPDriver
     /// This node's quorum node clients
     private NetworkClient[PublicKey] peers;
 
-    /// The set of active timers
-    /// Todo: SCPTests.cpp uses fake timers,
-    /// Similar to how we use FakeClockBanManager!
-    private Set!ulong timers;
-
     /// The set of externalized slot indices
     private Set!uint64_t externalized_slots;
 
@@ -73,20 +68,7 @@ public extern (C++) class Nominator : SCPDriver
     private SCPQuorumSetPtr[Hash] quorum_set;
 
     /// Ballot / Nomination timers
-    private static struct Timers
-    {
-        /// after slot is externalized, lower slot timers should be cancelled
-        public ulong lowest_timer;
-
-        /// if a slot index exists, the timer is active
-        public Set!ulong ballot;
-
-        /// ditto
-        public Set!ulong nomination;
-    }
-
-    /// Ballot / Nomination timers
-    private Timers timers;
+    public Set!ulong[TimerType.max + 1] timers;
 
 extern(D):
 
@@ -301,6 +283,11 @@ extern(D):
             return;  // slot was already externalized
         this.externalized_slots.put(slot_idx);
 
+        foreach (timer_idx; iota(0, this.highest_timer).retro)
+        {
+
+        }
+
         auto bytes = cast(ubyte[])value[];
         auto tx_set = deserializeFull!(Set!Transaction)(bytes);
 
@@ -415,16 +402,18 @@ extern(D):
         if (slot_idx <= this.ledger.getBlockHeight())
         {
             // remove all timers for this outdated externalized slot
-            this.timers.ballot.remove(slot_idx);
-            this.timers.nominator.remove(slot_idx);
+            this.timers[].remove(slot_idx);
             return;
         }
 
         if (timeout == 0)
         {
-            this.timers.remove(timer_type, slot_idx);
+            this.timers[timer_type].remove(slot_idx);
             return;
         }
+
+        this.timers[timer_type].put(slot_idx);
+        this.highest_timer = max(this.timers.highest_timer, slot_idx);
 
         this.taskman.runTask(
         {
@@ -433,7 +422,7 @@ extern(D):
             if (slot_idx !in this.timers[timer_type])  // timer cancelled
                 return;
             else
-                this.timers.remove(timer_type, slot_idx);
+                this.timers[timer_type].remove(slot_idx);
 
             callCPPDelegate(callback);
         });
