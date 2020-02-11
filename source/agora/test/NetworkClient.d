@@ -30,7 +30,8 @@ unittest
     import std.range;
     import core.thread;
 
-    auto network = makeTestNetwork(TestConf.init);
+    TestConf conf = { topology : NetworkTopology.OneValidator };
+    auto network = makeTestNetwork(conf);
     network.start();
     scope(exit) network.shutdown();
     scope(failure) network.printLogs();
@@ -55,7 +56,8 @@ unittest
     Thread.sleep(100.msecs);
     nodes[1 .. $].each!(node => node.clearFilter());
 
-    nodes.all!(node => node.getBlockHeight() == 1).retryFor(2.seconds);
+    foreach (node; nodes[1 .. $])
+        txes.each!(tx => node.hasTransactionHash(tx.hashFull()).retryFor(2.seconds));
 }
 
 /// test request timeouts
