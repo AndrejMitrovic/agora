@@ -70,6 +70,9 @@ public extern (C++) class Nominator : SCPDriver
     /// Ballot / Nomination timers
     public Set!ulong[Slot.TimerType.max + 1] timers;
 
+    /// The currently nominating slot index
+    private ulong nominating_idx;
+
 extern(D):
 
     /***************************************************************************
@@ -287,6 +290,13 @@ extern(D):
         if (slot_idx in this.externalized_slots)
             return;  // slot was already externalized
         this.externalized_slots.put(slot_idx);
+
+        if (this.nominating_idx != 0)
+        {
+            this.scp.stopNomination(this.nominating_idx);
+            this.nominating_idx = 0;
+        }
+
         this.removeOutdatedTimers(slot_idx);
 
         auto bytes = cast(ubyte[])value[];
