@@ -468,6 +468,33 @@ public class EnrollmentManager
 
     /***************************************************************************
 
+        Get the registered enrollments in the block.
+        They will be arranged in ascending order of the utxo_key.
+
+        Params:
+            enrolls = will contain the registered enrollments if any are found
+
+        Returns:
+            The registered enrollments data
+
+    ***************************************************************************/
+
+    public Enrollment[] getRegisteredEnrollments (ref Enrollment[] enrolls)
+        @trusted
+    {
+        enrolls.length = 0;
+        assumeSafeAppend(enrolls);
+        auto results = this.db.execute("SELECT val FROM validator_set" ~
+            " WHERE enrolled_height IS NOT NULL ORDER BY key ASC");
+
+        foreach (row; results)
+            enrolls ~= deserializeFull!Enrollment(row.peek!(ubyte[])(0));
+
+        return enrolls;
+    }
+
+    /***************************************************************************
+
         Get the unregistered enrollments in the block
         And this is arranged in ascending order with the utxo_key
 
@@ -667,4 +694,95 @@ unittest
 
     // test serialization/deserializetion for pre-images
     assert(man.preimages[] == man.loadPreimages());
+}
+
+/// getRegisteredEnrollments
+unittest
+{
+    import agora.common.Amount;
+    import agora.consensus.data.Transaction;
+    import agora.consensus.Genesis;
+    import std.algorithm;
+    import std.format;
+    import std.conv;
+
+    scope storage = new TestUTXOSet;
+
+    auto gen_key_pair = getGenesisKeyPair();
+    KeyPair key_pair = KeyPair.random();
+
+    foreach (idx; 0 .. 8)
+    {
+        auto input = Input(hashFull(GenesisTransaction), idx.to!uint);
+
+        Transaction tx =
+        {
+            TxType.Freeze,
+            [input],
+            [Output(Amount.MinFreezeAmount, key_pair.address)]
+        };
+
+        auto signature = gen_key_pair.secret.sign(hashFull(tx)[]);
+        tx.inputs[0].signature = signature;
+        storage.put(tx);
+    }
+
+    auto man = new EnrollmentManager(":memory:", key_pair);
+    scope (exit) man.shutdown();
+    Hash[] utxo_hashes = storage.keys;
+
+    Enrollment[] exp_reg;
+    Enrollment[] exp_unreg;
+
+    Enrollment enroll_1;
+    auto utxo_1 = utxo_hashes[0];
+    assert(man.createEnrollment(utxo_1, enroll_1));
+    assert(man.addEnrollment(0, &storage.findUTXO, enroll_1));
+    assert(man.getEnrollmentLength() == 1);
+
+    Enrollment enroll_2;
+    auto utxo_2 = utxo_hashes[1];
+    assert(man.createEnrollment(utxo_2, enroll_2));
+    assert(man.addEnrollment(0, &storage.findUTXO, enroll_2));
+    assert(man.getEnrollmentLength() == 2);
+
+    Enrollment enroll_3;
+    auto utxo_3 = utxo_hashes[2];
+    assert(man.createEnrollment(utxo_3, enroll_3));
+    assert(man.addEnrollment(0, &storage.findUTXO, enroll_3));
+    assert(man.getEnrollmentLength() == 3);
+
+    exp_unreg = [enroll_1, enroll_2, enroll_3];
+    exp_unreg.sort!((a, b) => a.utxo_key < b.utxo_key);
+
+    Enrollment[] reg;
+    Enrollment[] unreg;
+
+    // 3 unregistered, 0 registered
+    assert(man.getRegisteredEnrollments(reg) == exp_reg);
+    assert(man.getUnregisteredEnrollments(unreg) == exp_unreg);
+
+    // register one => 2 unregistered, 1 registered
+    assert(man.updateEnrolledHeight(utxo_1, 1));
+    exp_reg = [enroll_1];
+    exp_unreg = [enroll_2, enroll_3];
+    exp_unreg.sort!((a, b) => a.utxo_key < b.utxo_key);
+    assert(man.getRegisteredEnrollments(reg) == exp_reg);
+    assert(man.getUnregisteredEnrollments(unreg) == exp_unreg);
+
+    // register another one => 1 unregistered, 2 registered
+    assert(man.updateEnrolledHeight(utxo_2, 1));
+    exp_reg = [enroll_1, enroll_2];
+    exp_reg.sort!((a, b) => a.utxo_key < b.utxo_key);
+    exp_unreg = [enroll_3];
+    assert(man.getRegisteredEnrollments(reg) == exp_reg);
+    assert(man.getUnregisteredEnrollments(unreg) == exp_unreg);
+
+    // register last one => 0 unregistered, 3 registered
+    assert(man.updateEnrolledHeight(utxo_3, 1));
+    exp_reg = [enroll_1, enroll_2, enroll_3];
+    exp_reg.sort!((a, b) => a.utxo_key < b.utxo_key);
+    exp_unreg = [];
+    assert(man.getRegisteredEnrollments(reg) == exp_reg);
+    assert(man.getUnregisteredEnrollments(unreg) == exp_unreg);
 }
