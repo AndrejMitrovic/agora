@@ -20,7 +20,8 @@ namespace
 class QuorumSetSanityChecker
 {
   public:
-    explicit QuorumSetSanityChecker(SCPQuorumSet const& qSet, bool extraChecks);
+    explicit QuorumSetSanityChecker(SCPQuorumSet const& qSet, bool extraChecks,
+                                    std::string* reason);
     bool
     isSane() const
     {
@@ -33,24 +34,44 @@ class QuorumSetSanityChecker
     bool mIsSane;
     size_t mCount{0};
 
-    bool checkSanity(SCPQuorumSet const& qSet, int depth);
+    bool checkSanity(SCPQuorumSet const& qSet, int depth, std::string& reason);
 };
 
 QuorumSetSanityChecker::QuorumSetSanityChecker(SCPQuorumSet const& qSet,
-                                               bool extraChecks)
+                                               bool extraChecks,
+                                               std::string* reason)
     : mExtraChecks{extraChecks}
 {
-    mIsSane = checkSanity(qSet, 0) && mCount >= 1 && mCount <= 1000;
+    std::string msg;
+    mIsSane = checkSanity(qSet, 0, reason == nullptr ? msg : *reason);
+
+    if (mCount < 1)
+    {
+        // reason = "Number of validator nodes is zero";
+        mIsSane = false;
+    }
+    else if (mCount > 1000)
+    {
+        // reason = "Number of validator nodes exceeds the limit of 1000";
+        mIsSane = false;
+    }
 }
 
 bool
-QuorumSetSanityChecker::checkSanity(SCPQuorumSet const& qSet, int depth)
+QuorumSetSanityChecker::checkSanity(SCPQuorumSet const& qSet, int depth,
+                                    std::string& reason)
 {
     if (depth > 2)
+    {
+        reason = "Cannot have sub-quorums with depth exceeding 2 levels";
         return false;
+    }
 
     if (qSet.threshold < 1)
+    {
+        reason = "The threshold for a quorum must equal at least 1";
         return false;
+    }
 
     auto& v = qSet.validators;
     auto& i = qSet.innerSets;
@@ -60,17 +81,24 @@ QuorumSetSanityChecker::checkSanity(SCPQuorumSet const& qSet, int depth)
     mCount += v.size();
 
     if (qSet.threshold > totEntries)
+    {
+        reason = "The threshold for a quorum exceeds total number of entries";
         return false;
+    }
 
     // threshold is within the proper range
     if (mExtraChecks && qSet.threshold < vBlockingSize)
+    {
+        reason = "Extra check: the threshold for a quorum is too low";
         return false;
+    }
 
     for (auto const& n : v)
     {
         auto r = mKnownNodes.insert(n);
         if (!r.second)
         {
+            reason = "A duplicate node was configured within another quorum";
             // n was already present
             return false;
         }
@@ -78,7 +106,7 @@ QuorumSetSanityChecker::checkSanity(SCPQuorumSet const& qSet, int depth)
 
     for (auto const& iSet : i)
     {
-        if (!checkSanity(iSet, depth + 1))
+        if (!checkSanity(iSet, depth + 1, reason))
         {
             return false;
         }
@@ -89,9 +117,9 @@ QuorumSetSanityChecker::checkSanity(SCPQuorumSet const& qSet, int depth)
 }
 
 bool
-isQuorumSetSane(SCPQuorumSet const& qSet, bool extraChecks)
+isQuorumSetSane(SCPQuorumSet const& qSet, bool extraChecks, std::string* reason)
 {
-    QuorumSetSanityChecker checker{qSet, extraChecks};
+    QuorumSetSanityChecker checker{qSet, extraChecks, reason};
     return checker.isSane();
 }
 
