@@ -21,6 +21,7 @@ import agora.common.Set;
 import agora.common.TransactionPool;
 import agora.common.Types;
 import agora.consensus.data.Block;
+import agora.consensus.data.ConsensusData;
 import agora.consensus.data.Enrollment;
 import agora.consensus.data.Transaction;
 import agora.consensus.data.UTXOSet;
@@ -36,9 +37,9 @@ import std.range;
 
 mixin AddLogger!();
 
-/// Starts a nomination round for a new transaction set
+/// Starts a nomination round for a new consensus data set
 public alias NominateDg = void delegate (ulong slot_idx,
-    Set!Transaction prev, Set!Transaction next) @safe;
+    ConsensusData prev, ConsensusData next) @safe;
 
 /// Ditto
 public class Ledger
@@ -113,7 +114,7 @@ public class Ledger
 
         // by default the ledger will externalize without consenus.
         // if the node is a validator, it should set the proper nominator
-        this.setNominator((idx, prev, next) { this.onTXSetExternalized(next); });
+        this.setNominator((idx, prev, next) { this.onExternalized(next); });
     }
 
     /***************************************************************************
@@ -132,24 +133,25 @@ public class Ledger
 
     /***************************************************************************
 
-        Called when a transaction set is externalized.
+        Called when a consensus data set is externalized.
 
         This will create a new block and add it to the ledger.
 
         Params:
-            txs = the transaction set which was externalized
+            data = the consensus data which was externalized
 
         Returns:
-            true if the transaction set was accepted
+            true if the consensus data was accepted
 
     ***************************************************************************/
 
-    public bool onTXSetExternalized (Set!Transaction txs) nothrow @trusted
+    public bool onExternalized (ConsensusData data)
+        nothrow @trusted
     {
         scope (failure) assert(0);
         static Enrollment[] enrollments;
-        auto block = makeNewBlock(this.last_block, txs.byKey(),
-            this.enroll_man.getUnregistered(enrollments));
+        auto block = makeNewBlock(this.last_block, data.tx_set.byKey(),
+            data.enrolls);
         return this.acceptBlock(block);
     }
 
@@ -292,7 +294,7 @@ public class Ledger
 
     ***************************************************************************/
 
-    public void tryNominateTXSet () @safe
+    public void tryNominate () @safe
     {
         // not a validator, the node should not create blocks
         if (!this.node_config.is_validator)
@@ -332,34 +334,47 @@ public class Ledger
         this.is_nominating = true;
         scope (exit) this.is_nominating = false;
 
-        // note: we are not passing the previous tx set as we don't really
+        static Enrollment[] enrolls;
+        this.enroll_man.getUnregistered(enrolls);
+
+        // note: we are not passing the previous consenus data as we don't really
         // need it at this point (might later be necessary for chain upgrades)
+        auto data = ConsensusData(txs, enrolls);
         auto slot_idx = this.last_block.header.height + 1;
-        this.nominate(slot_idx, Set!Transaction.init, txs);
+        this.nominate(slot_idx, ConsensusData.init, data);
     }
 
     /***************************************************************************
 
-        Check whether the transaction set is valid.
+        Check whether the consensus data is valid.
 
         Params:
-            txs = transaction set to validate
+            data = consensus data
 
         Returns:
             the error message if validation failed, otherwise null
 
     ***************************************************************************/
 
-    public string validateTxSet (Set!Transaction txs) nothrow @trusted
+    public string validateConsensusData (ConsensusData data) nothrow @trusted
     {
         scope (failure) assert(0);
         const ulong expect_height = this.getBlockHeight() + 1;
         auto utxo_finder = this.utxo_set.getUTXOFinder();
 
-        foreach (tx; txs)
+        foreach (tx; data.tx_set)
         {
             if (auto fail_reason = tx.isInvalidReason(utxo_finder, expect_height))
                 return fail_reason;
+        }
+
+        foreach (enroll; data.enrolls)
+        {
+            if (auto fail_reason = enroll.isInvalidEnrollmentReason(
+                expect_height, utxo_finder))
+            {
+                return fail_reason;
+            }
         }
 
         return null;
@@ -503,7 +518,7 @@ unittest
         {
             assert(ledger.acceptTransaction(tx));
             if ((idx + 1) % Block.TxsInBlock == 0)
-                ledger.tryNominateTXSet();
+                ledger.tryNominate();
         }
 
         // keep track of last tx's to chain them to
@@ -588,7 +603,7 @@ unittest
     }
 
     txs.each!(tx => assert(ledger.acceptTransaction(tx)));
-    ledger.tryNominateTXSet();
+    ledger.tryNominate();
     auto blocks = ledger.getBlocksFrom(0).take(10);
     assert(blocks.length == 2);
 
@@ -656,7 +671,7 @@ unittest
 
     auto txs = makeChainedTransactions(gen_key_pair, null, 1);
     txs.each!(tx => assert(ledger.acceptTransaction(tx)));
-    ledger.tryNominateTXSet();
+    ledger.tryNominate();
 
     Hash[] hashes;
     hashes.reserve(txs.length);
@@ -741,7 +756,7 @@ unittest
     UTXOSetValue _val;
     new_txs.each!(tx => assert(finder(tx.inputs[0].previous, tx.inputs[0].index,
         _val)));
-    ledger.tryNominateTXSet();
+    ledger.tryNominate();
 
     auto findUTXO = utxo_set.getUTXOFinder();
     Transaction find_tx = new_txs[0];
@@ -865,7 +880,7 @@ unittest
                 {
                     assert(ledger.acceptTransaction(tx));
                 });
-            ledger.tryNominateTXSet();
+            ledger.tryNominate();
 
             // keep track of last tx's to chain them to
             last_txs = txes[$ - Block.TxsInBlock .. $];
@@ -930,7 +945,7 @@ unittest
         {
             assert(ledger.acceptTransaction(tx));
         });
-        ledger.tryNominateTXSet();
+        ledger.tryNominate();
     }
 
     in_key_pairs_normal.length = 0;
@@ -955,7 +970,7 @@ unittest
                 {
                     assert(ledger.acceptTransaction(tx) == is_valid);
                 });
-            ledger.tryNominateTXSet();
+            ledger.tryNominate();
 
             if (is_valid)
             {
@@ -990,7 +1005,7 @@ unittest
                 {
                     assert(ledger.acceptTransaction(tx) == is_valid);
                 });
-            ledger.tryNominateTXSet();
+            ledger.tryNominate();
 
             if (is_valid)
             {
@@ -1154,7 +1169,7 @@ unittest
         {
             assert(ledger.acceptTransaction(tx));
         });
-        ledger.tryNominateTXSet();
+        ledger.tryNominate();
     }
 
     KeyPair[] in_key_pairs_normal;
@@ -1183,7 +1198,7 @@ unittest
                 {
                     assert(ledger.acceptTransaction(tx) == is_valid);
                 });
-            ledger.tryNominateTXSet();
+            ledger.tryNominate();
 
             if (is_valid)
             {
@@ -1222,7 +1237,7 @@ unittest
                 {
                     assert(ledger.acceptTransaction(tx) == is_valid);
                 });
-            ledger.tryNominateTXSet();
+            ledger.tryNominate();
 
             if (is_valid)
             {
