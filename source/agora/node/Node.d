@@ -124,18 +124,18 @@ public class Node : API
             400, Json("The query was incorrect"), string.init, int.init);
 
         if (this.config.node.is_validator)
-            this.nominator = this.getNominator(this.config.node.key_pair,
-                this.ledger, this.taskman, this.config.quorum);
+        {
+            this.nominator = this.getNominator(this.network,
+                this.config.node.key_pair, this.ledger, this.taskman,
+                this.config.quorum);
+        }
     }
 
     /// The first task method, loading from disk, node discovery, etc
     public void start ()
     {
         log.info("Doing network discovery..");
-        auto peers = this.network.discover();
-
-        if (this.config.node.is_validator)
-            this.nominator.setupNetwork(peers);
+        this.network.discover();
 
         bool isNominating ()
         {
@@ -203,7 +203,7 @@ public class Node : API
         if (this.ledger.acceptTransaction(tx))
         {
             // gossip first
-            this.network.sendTransaction(tx);
+            this.network.gossipTransaction(tx);
 
             // then nominate
             if (this.config.node.is_validator)
@@ -231,18 +231,15 @@ public class Node : API
         Params:
             envelope = the SCP envelope
 
-        Returns:
-            true if the envelope was accepted
-
     ***************************************************************************/
 
-    public bool receiveEnvelope (SCPEnvelope envelope)
+    public void receiveEnvelope (SCPEnvelope envelope)
     {
         // we should not receive SCP messages unless we're a validator node
         if (!this.config.node.is_validator)
-            return false;
+            return;
 
-        return this.nominator.receiveEnvelope(envelope);
+        this.nominator.receiveEnvelope(envelope);
     }
 
     /// GET: /has_transaction_hash
@@ -428,6 +425,7 @@ public class Node : API
         simulate byzantine nodes.
 
         Params:
+            network = the network manager for gossiping SCPEnvelopes
             key_pair = the key pair of the node
             ledger = Ledger instance
             taskman = the task manager
@@ -438,10 +436,10 @@ public class Node : API
 
     ***************************************************************************/
 
-    protected Nominator getNominator (KeyPair key_pair, Ledger ledger,
-        TaskManager taskman, in QuorumConfig quorum_config)
+    protected Nominator getNominator (NetworkManager network, KeyPair key_pair,
+        Ledger ledger, TaskManager taskman, in QuorumConfig quorum_config)
     {
-        return new Nominator(key_pair, ledger, taskman, quorum_config);
+        return new Nominator(network, key_pair, ledger, taskman, quorum_config);
     }
 
     /***************************************************************************
