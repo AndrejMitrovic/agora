@@ -48,6 +48,7 @@ import agora.consensus.data.PreimageInfo;
 static import agora.api.FullNode;
 
 import scpd.types.Stellar_SCP;
+import scpd.types.Stellar_types : StellarHash = Hash;
 
 import vibe.web.rest;
 
@@ -81,6 +82,35 @@ public interface API : agora.api.FullNode.API
     ***************************************************************************/
 
     public PublicKey getPublicKey ();
+
+    /***************************************************************************
+
+        Returns:
+            The quorum hash of this node.
+            If the client does not have a mapping of this hash to the quorum set,
+            it should call getQuorumSet with the retrieved hash.
+
+        API:
+            GET /quorum_hash
+
+    ***************************************************************************/
+
+    public StellarHash getQuorumHash ();
+
+    /***************************************************************************
+
+        Params:
+            hash = the hash to look up
+
+        Returns:
+            The quorum set for the given quorum hash.
+
+        API:
+            GET /quorum_set
+
+    ***************************************************************************/
+
+    public SCPQuorumSet getQuorumSet (StellarHash hash);
 
     /***************************************************************************
 

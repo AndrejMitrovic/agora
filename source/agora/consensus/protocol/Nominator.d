@@ -71,6 +71,9 @@ public extern (C++) class Nominator : SCPDriver
     /// The quorum set
     private SCPQuorumSetPtr[StellarHash] quorum_set;
 
+    /// The hash of the quorum set for this node
+    private StellarHash quorum_hash;
+
     private alias TimerType = Slot.timerIDs;
     static assert(TimerType.max == 1);
 
@@ -117,10 +120,24 @@ extern(D):
         auto localQSet = makeSharedSCPQuorumSet(this.scp.getLocalQuorumSet());
 
         const bytes = ByteSlice.make(XDRToOpaque(*localQSet));
-        auto quorum_hash = sha256(bytes);
-        this.quorum_set[quorum_hash] = localQSet;
+        this.quorum_hash = sha256(bytes);
+        this.quorum_set[this.quorum_hash] = localQSet;
 
         this.restoreSCPState(ledger);
+    }
+
+    /***************************************************************************
+
+        Returns:
+            The quorum hash of this node.
+            If the client does not have a mapping of this hash to the quorum set,
+            it should call getQuorumSet with this hash.
+
+    ***************************************************************************/
+
+    public StellarHash getQuorumHash () @safe
+    {
+        return this.quorum_hash;
     }
 
     /***************************************************************************

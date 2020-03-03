@@ -38,6 +38,7 @@ import agora.utils.Log;
 import agora.utils.PrettyPrinter;
 
 import scpd.types.Stellar_SCP;
+import scpd.types.Stellar_types : StellarHash = Hash;
 import scpd.types.Utils;
 
 import vibe.core.core;
@@ -224,6 +225,53 @@ public class Node : API
                 this.receivePreimage(preimage);
                 this.enroll_man.increaseNextRevealHeight();
             }
+        }
+    }
+
+    /***************************************************************************
+
+        Returns:
+            The quorum hash of this node.
+            If the client does not have a mapping of this hash to the quorum set,
+            it should call getQuorumSet with the retrieved hash.
+
+        API:
+            GET /quorum_hash
+
+    ***************************************************************************/
+
+    public override StellarHash getQuorumHash ()
+    {
+        if (this.config.node.is_validator)
+            return this.nominator.getQuorumHash();
+        else
+            return StellarHash.init;
+    }
+
+    /***************************************************************************
+
+        Params:
+            hash = the hash to look up
+
+        Returns:
+            The quorum set for the given quorum hash.
+
+        API:
+            GET /quorum_set
+
+    ***************************************************************************/
+
+    public override SCPQuorumSet getQuorumSet (StellarHash hash) @trusted
+    {
+        if (this.config.node.is_validator)
+        {
+            auto set = this.nominator.getQSet(hash);
+            assert(set.ptr !is null);
+            return *set.ptr;
+        }
+        else
+        {
+            return SCPQuorumSet.init;
         }
     }
 
