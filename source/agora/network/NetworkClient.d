@@ -23,9 +23,10 @@ import agora.common.Types;
 import agora.common.Set;
 import agora.common.Task;
 import agora.consensus.data.Transaction;
-import scpd.types.Stellar_SCP;
-
 import agora.utils.Log;
+
+import scpd.types.Stellar_SCP;
+import scpd.types.Stellar_types : StellarHash = Hash;
 
 import std.algorithm;
 import std.array;
@@ -61,6 +62,12 @@ class NetworkClient
 
     /// The key of the node as retrieved by getPublicKey()
     public PublicKey key;
+
+    /// The quorum hash of this node
+    public StellarHash quorum_hash;
+
+    /// The quorum set of this node
+    public SCPQuorumSet quorum_set;
 
     /// Reusable exception
     private Exception exception;
@@ -116,6 +123,14 @@ class NetworkClient
     {
         this.attemptRequest(this.api.handshake(address), this.exception);
         this.key = this.attemptRequest(this.api.getPublicKey(), this.exception);
+
+        this.quorum_hash = this.attemptRequest(this.api.getQuorumHash(),
+            this.exception);
+        if (this.quorum_hash != StellarHash.init)
+        {
+            this.quorum_set = this.attemptRequest(
+                this.api.getQuorumSet(this.quorum_hash), this.exception);
+        }
     }
 
     /***************************************************************************

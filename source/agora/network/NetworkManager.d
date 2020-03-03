@@ -39,6 +39,7 @@ import agora.node.Ledger;
 import agora.utils.Log;
 
 import scpd.types.Stellar_SCP;
+import scpd.types.Stellar_types : StellarHash = Hash;
 
 import vibe.web.rest;
 
@@ -64,6 +65,9 @@ public class NetworkManager
 
     /// The connected nodes
     protected NetworkClient[PublicKey] peers;
+
+    /// The quorum set
+    protected SCPQuorumSet[StellarHash] quorum_sets;
 
     /// The addresses currently establishing connections to.
     /// Used to prevent connecting to the same address twice.
@@ -129,6 +133,18 @@ public class NetworkManager
                 this.tryConnecting(address);
             }
         });
+    }
+
+    /***************************************************************************
+
+        Returns:
+            the quorum set associated with the given hash, or null if not found
+
+    ***************************************************************************/
+
+    public SCPQuorumSet* getQuorumSet (StellarHash hash) nothrow
+    {
+        return hash in this.quorum_sets;
     }
 
     /***************************************************************************
@@ -365,6 +381,8 @@ public class NetworkManager
             try
             {
                 node.handshake(this.getAddress());
+                if (node.quorum_hash != StellarHash.init)
+                    this.quorum_sets[node.quorum_hash] = node.quorum_set;
                 this.connecting_addresses.remove(node.address);
                 if (this.peerLimitReached())
                     return;
