@@ -68,6 +68,23 @@ public interface API
 {
 // The REST generator requires @safe methods
 @safe:
+
+    /***************************************************************************
+
+        Exchange addresses with another node so the connecting node becomes
+        a registered listener of the node that's being connected with.
+
+        Params:
+            address = the address of the node which wants to become a listener
+
+        API:
+            PUT /handshake
+
+    ***************************************************************************/
+
+    @method(HTTPMethod.PUT)
+    public void handshake (Address address);
+
     /***************************************************************************
 
         Returns:

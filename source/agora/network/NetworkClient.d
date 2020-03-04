@@ -102,13 +102,19 @@ class NetworkClient
 
         Note that it is currently blocking until handshake is considered complete.
 
+        Params:
+            address = the address of the node which is connecting to this one,
+                      allows the connected node to register the connecting node
+                      as a listener
+
         Throws:
             Exception if the handshake did not complete.
 
     ***************************************************************************/
 
-    public void handshake ()
+    public void handshake (Address address)
     {
+        this.attemptRequest(this.api.handshake(address), this.exception);
         this.key = this.attemptRequest(this.api.getPublicKey(), this.exception);
     }
 

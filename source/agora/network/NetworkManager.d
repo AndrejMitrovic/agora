@@ -103,6 +103,36 @@ public class NetworkManager
 
     /***************************************************************************
 
+        Called when there was an incoming connection from another node via
+        the handshake() API.
+
+        The current node will attempt to establish a connection with the
+        given address, and register this incoming node as a listener.
+        That node will receive gossiped transactions / SCPEnvelopes / etc.
+
+        Params:
+            address = the address of the incoming connection
+
+    ***************************************************************************/
+
+    public void onIncomingConnection (Address address)
+    {
+        this.taskman.runTask(()
+        {
+            // wait a little, to avoid cyclic handshake calls
+            this.taskman.wait(1.seconds);
+
+            if (!this.banman.isBanned(address) &&
+                address !in this.connecting_addresses)
+            {
+                this.connecting_addresses.put(address);
+                this.tryConnecting(address);
+            }
+        });
+    }
+
+    /***************************************************************************
+
         Returns:
             the address of this node (can be overriden in unittests)
 
@@ -334,7 +364,7 @@ public class NetworkManager
         {
             try
             {
-                node.handshake();
+                node.handshake(this.getAddress());
                 this.connecting_addresses.remove(node.address);
                 if (this.peerLimitReached())
                     return;

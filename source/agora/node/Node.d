@@ -168,6 +168,12 @@ public class Node : API
         this.enroll_man = null;
     }
 
+    /// PUT /handshake
+    public override void handshake (Address address) @trusted
+    {
+        this.network.onIncomingConnection(address);
+    }
+
     /// GET /public_key
     public override PublicKey getPublicKey () pure nothrow @safe @nogc
     {
