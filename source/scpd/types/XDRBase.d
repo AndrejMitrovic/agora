@@ -97,6 +97,14 @@ struct opaque_array(uint32_t N = XDR_MAX_LEN)
     BitBlob!(N * 8) base;
     alias base this;
     mixin ForwardCtors!base;
+
+    /// vibe.d deserialization
+    extern(D) static auto fromString (scope const(char)[] str)
+    {
+        opaque_array res;
+        res.base = BitBlob!(N * 8).fromString(str);
+        return res;
+    }
 }
 
 
