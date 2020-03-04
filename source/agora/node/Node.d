@@ -112,7 +112,8 @@ public class Node : API
         this.config = config;
         this.taskman = this.getTaskManager();
         this.network = this.getNetworkManager(config.node, config.banman,
-            config.network, config.dns_seeds, this.metadata, this.taskman);
+            config.network, config.quorum, config.dns_seeds, this.metadata,
+            this.taskman);
         this.storage = this.getBlockStorage(config.node.data_dir);
         this.pool = this.getPool(config.node.data_dir);
         scope (failure) this.pool.shutdown();
@@ -326,6 +327,7 @@ public class Node : API
             node_config = the node config
             banman_conf = the ban manager config
             peers = the peers to connect to
+            quorum_conf = the quorum config
             dns_seeds = the DNS seeds to retrieve peers from
             metadata = metadata containing known peers and other meta info
             taskman = task manager
@@ -337,10 +339,11 @@ public class Node : API
 
     protected NetworkManager getNetworkManager (in NodeConfig node_config,
         in BanManager.Config banman_conf, in string[] peers,
-        in string[] dns_seeds, Metadata metadata, TaskManager taskman)
+        in QuorumConfig quorum_conf, in string[] dns_seeds, Metadata metadata,
+        TaskManager taskman)
     {
-        return new NetworkManager(node_config, banman_conf, peers, dns_seeds,
-            metadata, taskman);
+        return new NetworkManager(node_config, banman_conf, peers, quorum_conf,
+            dns_seeds, metadata, taskman);
     }
 
     /***************************************************************************

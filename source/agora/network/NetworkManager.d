@@ -92,10 +92,13 @@ public class NetworkManager
     /// DNS seeds
     private const(string)[] dns_seeds;
 
+    /// If we're a validator, we should connect to all of our quorum peers first
+    private Set!PublicKey required_peer_keys;
+
     /// Ctor
     public this (in NodeConfig node_config, in BanManager.Config banman_conf,
-        in string[] peers, in string[] dns_seeds, Metadata metadata,
-        TaskManager taskman)
+        in string[] peers, in QuorumConfig quorum_conf, in string[] dns_seeds,
+        Metadata metadata, TaskManager taskman)
     {
         this.taskman = taskman;
         this.node_config = node_config;
@@ -103,6 +106,25 @@ public class NetworkManager
         this.seed_peers = peers;
         this.dns_seeds = dns_seeds;
         this.banman = this.getBanManager(banman_conf, node_config.data_dir);
+
+        import std.algorithm;
+        import std.array;
+        import std.typecons;
+
+        void getNodes (in QuorumConfig conf, ref Set!PublicKey nodes)
+        {
+            foreach (node; conf.nodes)
+            {
+                if (node != node_config.key_pair.address)  // filter ourselves
+                    nodes.put(node);
+            }
+
+            foreach (sub_conf; conf.quorums)
+                getNodes(sub_conf, nodes);
+        }
+
+        if (node_config.is_validator)
+            getNodes(quorum_conf, this.required_peer_keys);
     }
 
     /***************************************************************************
@@ -384,6 +406,8 @@ public class NetworkManager
                 if (node.quorum_hash != StellarHash.init)
                     this.quorum_sets[node.quorum_hash] = node.quorum_set;
                 this.connecting_addresses.remove(node.address);
+                this.required_peer_keys.remove(node.key);
+
                 if (this.peerLimitReached())
                     return;
 
@@ -486,13 +510,16 @@ public class NetworkManager
     ///
     private bool minPeersConnected ()  pure nothrow @safe @nogc
     {
-        return this.peers.length >= this.node_config.min_listeners;
+        return this.required_peer_keys.length == 0 &&
+            this.peers.length >= this.node_config.min_listeners;
     }
 
     private bool peerLimitReached ()  nothrow @safe
     {
-        return this.peers.byValue.filter!(node =>
-            !this.banman.isBanned(node.address)).count >= this.node_config.max_listeners;
+        return this.required_peer_keys.length == 0 &&
+            this.peers.byValue.filter!(node =>
+                !this.banman.isBanned(node.address)).count >=
+                    this.node_config.max_listeners;
     }
 
     /// Returns: the list of node IPs this node is connected to
