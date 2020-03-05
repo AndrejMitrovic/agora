@@ -313,7 +313,7 @@ extern(D):
 
     public void receiveEnvelope (SCPEnvelope envelope) @trusted
     {
-        this.logEnvelope(envelope);
+        //this.logEnvelope(envelope);
         if (this.scp.receiveEnvelope(envelope) != SCP.EnvelopeState.VALID)
             log.info("Rejected invalid envelope: {}", envelope);
     }
