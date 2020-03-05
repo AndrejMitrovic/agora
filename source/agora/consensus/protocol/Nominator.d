@@ -398,15 +398,15 @@ extern(D):
 
             if (auto fail_reason = this.ledger.validateTxSet(tx_set))
             {
-                log.error("validateValue(): Invalid tx set: {}", fail_reason);
+                log.error("validateValue(): Invalid tx set: {}. Reason: {}",
+                    tx_set, fail_reason);
                 return ValidationLevel.kInvalidValue;
             }
         }
         catch (Exception ex)
         {
-            log.error("{}: Received invalid tx set. Error: {}",
-                __FUNCTION__, ex.message);
-
+            log.error("validateValue(): Received un-deserializable tx set. " ~
+                "Error: {}", ex.message);
             return ValidationLevel.kInvalidValue;
         }
 
