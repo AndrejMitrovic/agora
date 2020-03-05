@@ -330,30 +330,33 @@ extern(D):
     private void logEnvelope (SCPEnvelope envelope) nothrow
     {
         scope (failure) assert(0);
+        import std.conv;
         import std.stdio;
 
-        log.info("Received Envelope {}",
-            SCPStatementHash(envelope.statement).hashFull());
+        auto st = &envelope.statement;
+        log.info("Received envelope type {}", st.pledges.type_.to!string);
 
-        //auto st = &envelope.statement;
+        //log.info("Received Envelope {}",
+        //    SCPStatementHash(envelope.statement).hashFull());
 
-        //if (st.pledges.type_ == SCPStatementType.SCP_ST_NOMINATE)
-        //{
-        //    auto nom = &st.pledges.nominate_;
 
-        //    auto qset = this.getQSet(nom.quorumSetHash);
-        //    if (qset is null)
-        //    {
-        //        writefln("Found unknown qset: %s", qset);
-        //    }
-        //    else
-        //    {
-        //        auto qc = toQuorumConfig(*qset);
-        //        writefln("%s Found nomination with qset: %s",
-        //            this.key_pair.address, qc);
-        //    }
+        if (st.pledges.type_ == SCPStatementType.SCP_ST_NOMINATE)
+        {
+            auto nom = &st.pledges.nominate_;
 
-        //}
+            auto qset = this.getQSet(nom.quorumSetHash);
+            if (qset is null)
+            {
+                log.info("Found unknown qset: {}", qset);
+            }
+            else
+            {
+                auto qc = toQuorumConfig(*qset);
+                log.info("{} Found nomination with qset: {}",
+                    this.key_pair.address, qc);
+            }
+
+        }
     }
 
     extern (C++):

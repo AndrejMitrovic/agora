@@ -93,7 +93,7 @@ struct SCPStatement {
         //using _xdr_case_type = xdr::xdr_traits<SCPStatementType>::case_type;
         //private:
         //_xdr_case_type type_;
-        int32_t type_;
+        SCPStatementType type_;
         union {
             _prepare_t prepare_;
             _confirm_t confirm_;
