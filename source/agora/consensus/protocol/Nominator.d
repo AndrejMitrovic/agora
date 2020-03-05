@@ -313,7 +313,7 @@ extern(D):
 
     public void receiveEnvelope (SCPEnvelope envelope) @trusted
     {
-        //this.logEnvelope(envelope);
+        this.logEnvelope(envelope);
         if (this.scp.receiveEnvelope(envelope) != SCP.EnvelopeState.VALID)
             log.info("Rejected invalid envelope: {}", envelope);
     }
@@ -332,25 +332,28 @@ extern(D):
         scope (failure) assert(0);
         import std.stdio;
 
-        auto st = &envelope.statement;
+        log.info("Received Envelope {}",
+            SCPStatementHash(envelope.statement).hashFull());
 
-        if (st.pledges.type_ == SCPStatementType.SCP_ST_NOMINATE)
-        {
-            auto nom = &st.pledges.nominate_;
+        //auto st = &envelope.statement;
 
-            auto qset = this.getQSet(nom.quorumSetHash);
-            if (qset is null)
-            {
-                writefln("Found unknown qset: %s", qset);
-            }
-            else
-            {
-                auto qc = toQuorumConfig(*qset);
-                writefln("%s Found nomination with qset: %s",
-                    this.key_pair.address, qc);
-            }
+        //if (st.pledges.type_ == SCPStatementType.SCP_ST_NOMINATE)
+        //{
+        //    auto nom = &st.pledges.nominate_;
 
-        }
+        //    auto qset = this.getQSet(nom.quorumSetHash);
+        //    if (qset is null)
+        //    {
+        //        writefln("Found unknown qset: %s", qset);
+        //    }
+        //    else
+        //    {
+        //        auto qc = toQuorumConfig(*qset);
+        //        writefln("%s Found nomination with qset: %s",
+        //            this.key_pair.address, qc);
+        //    }
+
+        //}
     }
 
     extern (C++):
