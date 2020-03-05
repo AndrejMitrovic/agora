@@ -329,7 +329,35 @@ extern(D):
 
     public bool receiveEnvelope (SCPEnvelope envelope) @trusted
     {
+        this.logEnvelope(envelope);
         return this.scp.receiveEnvelope(envelope) == SCP.EnvelopeState.VALID;
+    }
+
+    /***************************************************************************
+
+        Log an SCPEnvelope
+
+        Params:
+            envelope = the SCPEnvelope to log
+
+    ***************************************************************************/
+
+    private void logEnvelope (SCPEnvelope envelope) nothrow
+    {
+        scope (failure) assert(0);
+        import std.stdio;
+
+        auto st = &envelope.statement;
+
+        if (st.pledges.type_ == SCPStatementType.SCP_ST_NOMINATE)
+        {
+            auto nom = &st.pledges.nominate_;
+
+            auto qset = this.getQSet(nom.quorumSetHash);
+
+            import std.stdio;
+            writefln("Found nomination with qset: %s", qset);
+        }
     }
 
     extern (C++):
