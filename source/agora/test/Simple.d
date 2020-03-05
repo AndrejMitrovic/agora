@@ -35,7 +35,7 @@ unittest
     auto network = makeTestNetwork(TestConf.init);
     network.start();
     scope(exit) network.shutdown();
-    scope(failure) network.printLogs();
+    scope(exit) network.printLogs();
     network.waitForDiscovery();
 
     auto nodes = network.clients;
