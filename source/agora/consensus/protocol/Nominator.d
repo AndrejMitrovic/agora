@@ -216,6 +216,8 @@ extern(D):
         return scp_quorum;
     }
 
+    __gshared bool first;
+
     /***************************************************************************
 
         Nominate a new transaction set to the quorum.
@@ -231,7 +233,18 @@ extern(D):
     private void nominateTransactionSet (ulong slot_idx, Set!Transaction prev,
         Set!Transaction next) @trusted
     {
+        import std.stdio;
         log.info("{}(): Proposing tx set for slot {}", __FUNCTION__, slot_idx);
+
+        synchronized
+        {
+            if (first)
+                return;
+
+            first = true;
+        }
+
+        writefln("%s is nominating", this.key_pair.address);
 
         auto prev_value = prev.serializeFull().toVec();
         auto next_value = next.serializeFull().toVec();
@@ -310,8 +323,44 @@ extern(D):
 
     public void receiveEnvelope (SCPEnvelope envelope) @trusted
     {
+        this.logEnvelope(envelope);
         if (this.scp.receiveEnvelope(envelope) != SCP.EnvelopeState.VALID)
             log.info("Rejected invalid envelope: {}", envelope);
+    }
+
+    /***************************************************************************
+
+        Log an SCPEnvelope
+
+        Params:
+            envelope = the SCPEnvelope to log
+
+    ***************************************************************************/
+
+    private void logEnvelope (SCPEnvelope envelope) nothrow
+    {
+        scope (failure) assert(0);
+        import std.stdio;
+
+        auto st = &envelope.statement;
+
+        if (st.pledges.type_ == SCPStatementType.SCP_ST_NOMINATE)
+        {
+            auto nom = &st.pledges.nominate_;
+
+            auto qset = this.getQSet(nom.quorumSetHash);
+            if (qset is null)
+            {
+                writefln("Found unknown qset: %s", qset);
+            }
+            else
+            {
+                auto qc = toQuorumConfig(*qset);
+                writefln("%s Found nomination with qset: %s",
+                    this.key_pair.address, qc);
+            }
+
+        }
     }
 
     extern (C++):
