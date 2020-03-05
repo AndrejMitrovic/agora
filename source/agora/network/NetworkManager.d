@@ -596,9 +596,12 @@ public class NetworkManager
     public void gossipEnvelope (SCPEnvelope envelope)
     {
         import std.stdio;
-        writefln("Gossiping %s from %s to %s",
-            SCPStatementHash(envelope.statement).hashFull(),
-            this.node_config.key_pair.address, this.peers);
+        //writefln("Gossiping %s from %s to %s",
+        //    SCPStatementHash(envelope.statement).hashFull(),
+        //    this.node_config.key_pair.address, this.peers);
+
+        log.info("Gossiping {}",
+            SCPStatementHash(envelope.statement).hashFull());
 
         foreach (ref node; this.peers)
         {
