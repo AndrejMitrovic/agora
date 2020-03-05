@@ -334,7 +334,9 @@ extern(D):
         import std.stdio;
 
         auto st = &envelope.statement;
-        log.info("Received envelope type {}", st.pledges.type_.to!string);
+        log.info("Received envelope type {}. Env: {}",
+            st.pledges.type_.to!string,
+            SCPStatementHash(envelope.statement).hashFull());
 
         //log.info("Received Envelope {}",
         //    SCPStatementHash(envelope.statement).hashFull());
