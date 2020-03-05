@@ -595,6 +595,9 @@ public class NetworkManager
 
     public void gossipEnvelope (SCPEnvelope envelope)
     {
+        import std.stdio;
+        writefln("Gossiping %s from %s to %s", hashFull(envelope),
+            this.node_config.key_pair.address, this.peers);
         foreach (ref node; this.peers)
         {
             if (this.banman.isBanned(node.address))
