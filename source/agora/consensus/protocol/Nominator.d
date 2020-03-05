@@ -216,8 +216,6 @@ extern(D):
         return scp_quorum;
     }
 
-    __gshared bool first;
-
     /***************************************************************************
 
         Nominate a new transaction set to the quorum.
@@ -235,14 +233,6 @@ extern(D):
     {
         import std.stdio;
         log.info("{}(): Proposing tx set for slot {}", __FUNCTION__, slot_idx);
-
-        synchronized
-        {
-            if (first)
-                return;
-
-            first = true;
-        }
 
         writefln("%s is nominating", this.key_pair.address);
 
