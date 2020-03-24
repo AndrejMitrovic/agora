@@ -152,37 +152,39 @@ unittest
 {
     auto enrolls = genEnrollments(3, StakeLayout.Ascending);
 
-    size_t[4] counts;
+    QuorumConfig[PublicKey][4] PossibleQuorums =
+    [
+        // most common case (n2 has highest stake, included most often)
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n0, n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n0, n1, n2])],
+    ];
+
+    size_t[PossibleQuorums.length] counts;
     foreach (rand_idx; 0 .. 64)
     {
         auto rand_seed = hashFull(rand_idx);
         auto quorums = buildQuorumConfigs(enrolls.expand, rand_seed);
 
-        // most common case (n2 has highest stake, included most often)
-        if (quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
-                        n1: QuorumConfig(2, [n1, n2]),
-                        n2: QuorumConfig(2, [n1, n2])])
-            counts[0]++;
-        else
-        if (quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
-                        n1: QuorumConfig(2, [n0, n1, n2]),
-                        n2: QuorumConfig(2, [n1, n2])])
-            counts[1]++;
-        else
-        if (quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
-                        n1: QuorumConfig(2, [n0, n1, n2]),
-                        n2: QuorumConfig(2, [n0, n1, n2])])
-            counts[2]++;
-        else  // least common case
-        if (quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
-                        n1: QuorumConfig(2, [n1, n2]),
-                        n2: QuorumConfig(2, [n0, n1, n2])])
-            counts[3]++;
-        else
-            assert(0, quorums.simple(rand_idx));
+        auto idx = PossibleQuorums[].countUntil(quorums);
+        assert(idx != -1, quorums.simple(rand_idx));
+        counts[idx]++;
     }
 
     assert(counts == [36, 14, 7, 7], counts.to!string);
+    assert(counts[].sum == 64, counts[].sum.to!string);
 }
 
 /// 3 nodes with ascending quadratic stakes
@@ -190,55 +192,54 @@ unittest
 {
     auto enrolls = genEnrollments(3, StakeLayout.AscendingQuadratic);
 
-    auto possible_quorums =
+    QuorumConfig[PublicKey][8] PossibleQuorums =
     [
-        [n0: QuorumConfig(2, [n0,     n2]),
-         n1: QuorumConfig(2, [    n1, n2]),
-         n2: QuorumConfig(2, [    n1, n2])],
+        [n0: QuorumConfig(2, [n0, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
 
         [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [    n1, n2]),
-         n2: QuorumConfig(2, [    n1, n2])],
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
 
-        [n0: QuorumConfig(2, [n0,     n2]),
-         n1: QuorumConfig(2, [    n1, n2]),
-         n2: QuorumConfig(2, [n0,     n2])],
+        [n0: QuorumConfig(2, [n0, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n0, n2])],
 
-        [n0: QuorumConfig(2, [n0,     n2]),
+        [n0: QuorumConfig(2, [n0, n2]),
          n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [n0,     n2])],
+         n2: QuorumConfig(2, [n0, n2])],
 
-        [n0: QuorumConfig(2, [n0,     n2]),
+        [n0: QuorumConfig(2, [n0, n2]),
          n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [    n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [    n1, n2])],
+         n2: QuorumConfig(2, [n1, n2])],
 
         [n0: QuorumConfig(2, [n0, n1, n2]),
          n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [n0,     n2])],
+         n2: QuorumConfig(2, [n1, n2])],
 
         [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [    n1, n2]),
-         n2: QuorumConfig(2, [n0,     n2])]
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n0, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n0, n2])],
     ];
 
-    auto counts = new size_t[](possible_quorums.length);
-
+    size_t[PossibleQuorums.length] counts;
     foreach (rand_idx; 0 .. 64)
     {
         auto rand_seed = hashFull(rand_idx);
         auto quorums = buildQuorumConfigs(enrolls.expand, rand_seed);
 
-        auto idx = possible_quorums.countUntil(quorums);
+        auto idx = PossibleQuorums[].countUntil(quorums);
         assert(idx != -1, quorums.simple(rand_idx));
         counts[idx]++;
     }
 
     assert(counts == [26, 14, 7, 6, 6, 3, 1, 1], counts.to!string);
-    assert(counts.sum == 64, counts.sum.to!string);
+    assert(counts[].sum == 64, counts[].sum.to!string);
 }
 
 /*******************************************************************************
