@@ -80,8 +80,8 @@ public QuorumConfig[PublicKey] buildQuorumConfigs ( Enrollment[] enrolls,
                 .sum)));
 
     auto quorums = buildQuorums(stakes_by_price, min_quorum_amount, rand_seed);
-    verifyQuorumsSanity(quorums);
-    verifyQuorumsIntersect(quorums);
+    //verifyQuorumsSanity(quorums);
+    //verifyQuorumsIntersect(quorums);
 
     return quorums;
 }
@@ -101,7 +101,8 @@ private string simple (QuorumConfig[PublicKey] conf, size_t seed_idx)
     sort(keys);
 
     string res;
-    res ~= format("\nseed idx: %s (%s)\n", seed_idx, hashFull(seed_idx).prettify);
+    res ~= format("\nrand idx: %s (seed: %s)\n", seed_idx,
+        hashFull(seed_idx).prettify);
 
     foreach (key; keys)
     {
@@ -115,68 +116,129 @@ private string simple (QuorumConfig[PublicKey] conf, size_t seed_idx)
     return res;
 }
 
-///
+// convenience so we can use [n0, n1] when refering to public keys in the tests
+static foreach (node_idx; 0 .. pregen_seeds.length)
+    mixin("PublicKey n%s;".format(node_idx));
+
+#line __LINE__
+
+// convenience so we can use [n0, n1] when refering to public keys in the tests
+static this ()
+{
+    static foreach (node_idx; 0 .. pregen_seeds.length)
+        mixin("n%1$s = getTestKey(%1$s);".format(node_idx));
+}
+
+#line __LINE__
+
+/// 2 nodes with equal stakes
 unittest
 {
-    // convenience so we can use [n0, n1] when refering to public keys in the tests
-    static foreach (node_idx; 0 .. pregen_seeds.length)
-    {
-        mixin("PublicKey n%1$s = getTestKey(%1$s);".format(node_idx));
-    }
-    #line __LINE__
+    auto enrolls = genEnrollments(2, StakeLayout.Equal);
 
-    // 2 nodes
-    version (none)
-    foreach (seed_idx; 0 .. 16)
+    foreach (rand_idx; 0 .. 16)
     {
-        auto rand_seed = hashFull(seed_idx);
-        auto quorums = buildQuorumConfigs(genEnrollments(2).expand, rand_seed);
+        auto rand_seed = hashFull(rand_idx);
+        auto quorums = buildQuorumConfigs(enrolls.expand, rand_seed);
 
         assert(quorums == [n0: QuorumConfig(2, [n0, n1]),
                            n1: QuorumConfig(2, [n0, n1])],
-                           quorums.simple(seed_idx));
+                           quorums.simple(rand_idx));
     }
+}
 
-    // 3 nodes
-    foreach (seed_idx; 0 .. 32)
+/// 3 nodes with ascending stakes
+unittest
+{
+    auto enrolls = genEnrollments(3, StakeLayout.Ascending);
+
+    size_t[4] counts;
+    foreach (rand_idx; 0 .. 64)
     {
-        auto rand_seed = hashFull(seed_idx);
-        auto quorums = buildQuorumConfigs(genEnrollments(3).expand, rand_seed);
+        auto rand_seed = hashFull(rand_idx);
+        auto quorums = buildQuorumConfigs(enrolls.expand, rand_seed);
 
-        switch (seed_idx)
-        {
-        case 0, 6, 7, 14, 16, 22, 26, 30:
-            assert(quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
-                               n1: QuorumConfig(2, [n0, n1, n2]),
-                               n2: QuorumConfig(2, [n1, n2])],
-                               quorums.simple(seed_idx));
-            break;
-
-        case 1, 4, 5, 8, 10, 11, 13, 17, 18, 19, 20, 23, 24, 25, 29:
-            assert(quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
-                               n1: QuorumConfig(2, [n1, n2]),
-                               n2: QuorumConfig(2, [n1, n2])],
-                               quorums.simple(seed_idx));
-            break;
-
-        case 2, 9, 12, 15:
-            assert(quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
-                               n1: QuorumConfig(2, [n1, n2]),
-                               n2: QuorumConfig(2, [n0, n1, n2])],
-                               quorums.simple(seed_idx));
-            break;
-
-        case 3, 21, 27, 28, 31:
-            assert(quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
-                               n1: QuorumConfig(2, [n0, n1, n2]),
-                               n2: QuorumConfig(2, [n0, n1, n2])],
-                               quorums.simple(seed_idx));
-            break;
-
-        default:
-            assert(0, quorums.simple(seed_idx));
-        }
+        // most common case (n2 has highest stake, included most often)
+        if (quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
+                        n1: QuorumConfig(2, [n1, n2]),
+                        n2: QuorumConfig(2, [n1, n2])])
+            counts[0]++;
+        else
+        if (quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
+                        n1: QuorumConfig(2, [n0, n1, n2]),
+                        n2: QuorumConfig(2, [n1, n2])])
+            counts[1]++;
+        else
+        if (quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
+                        n1: QuorumConfig(2, [n0, n1, n2]),
+                        n2: QuorumConfig(2, [n0, n1, n2])])
+            counts[2]++;
+        else  // least common case
+        if (quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
+                        n1: QuorumConfig(2, [n1, n2]),
+                        n2: QuorumConfig(2, [n0, n1, n2])])
+            counts[3]++;
+        else
+            assert(0, quorums.simple(rand_idx));
     }
+
+    assert(counts == [36, 14, 7, 7], counts.to!string);
+}
+
+/// 3 nodes with ascending quadratic stakes
+unittest
+{
+    auto enrolls = genEnrollments(3, StakeLayout.AscendingQuadratic);
+
+    auto possible_quorums =
+    [
+        [n0: QuorumConfig(2, [n0,     n2]),
+         n1: QuorumConfig(2, [    n1, n2]),
+         n2: QuorumConfig(2, [    n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [    n1, n2]),
+         n2: QuorumConfig(2, [    n1, n2])],
+
+        [n0: QuorumConfig(2, [n0,     n2]),
+         n1: QuorumConfig(2, [    n1, n2]),
+         n2: QuorumConfig(2, [n0,     n2])],
+
+        [n0: QuorumConfig(2, [n0,     n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n0,     n2])],
+
+        [n0: QuorumConfig(2, [n0,     n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [    n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [    n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n0,     n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [    n1, n2]),
+         n2: QuorumConfig(2, [n0,     n2])]
+    ];
+
+    auto counts = new size_t[](possible_quorums.length);
+
+    foreach (rand_idx; 0 .. 64)
+    {
+        auto rand_seed = hashFull(rand_idx);
+        auto quorums = buildQuorumConfigs(enrolls.expand, rand_seed);
+
+        auto idx = possible_quorums.countUntil(quorums);
+        assert(idx != -1, quorums.simple(rand_idx));
+        counts[idx]++;
+    }
+
+    assert(counts == [26, 14, 7, 6, 6, 3, 1, 1], counts.to!string);
+    assert(counts.sum == 64, counts.sum.to!string);
 }
 
 /*******************************************************************************
@@ -341,6 +403,7 @@ private void verifyQuorumsSanity (QuorumConfig[PublicKey] quorums)
 
 private void verifyQuorumsIntersect (QuorumConfig[PublicKey] quorums)
 {
+    import agora.utils.Log;
     auto qm = QuorumTracker.QuorumMap.create();
 
     foreach (key, quorum; quorums)
@@ -355,20 +418,31 @@ private void verifyQuorumsIntersect (QuorumConfig[PublicKey] quorums)
     }
 
     auto qic = QuorumIntersectionChecker.create(qm);
-    assert(qic.networkEnjoysQuorumIntersection());
+    if (!qic.networkEnjoysQuorumIntersection())
+    {
+        CircularAppender().printConsole();
+        assert(0);
+    }
 
     auto splits = qic.getPotentialSplit();
 
     if (splits.first.length != 0 ||
         splits.second.length != 0)
     {
+        CircularAppender().printConsole();
+
         writefln("Splits: first: %s second: %s",
             splits.first[].map!(node_id => PublicKey(node_id).prettify),
             splits.second[].map!(node_id => PublicKey(node_id).prettify));
 
-        //CircularAppender().printConsole();
         assert(0);  // should not happen
     }
+}
+
+/// very simplistic way of reducing a 64-byte blob to an 8-byte seed
+private ulong hashToSeed (Hash hash)
+{
+    return (cast(ulong[])hash[]).reduce!((a, b) => a ^ b);
 }
 
 /*******************************************************************************
@@ -387,14 +461,8 @@ private void verifyQuorumsIntersect (QuorumConfig[PublicKey] quorums)
 
 private auto getGenerator (PublicKey node_key, Hash rand_seed)
 {
-    /// very simplistic way of reducing a 64-byte blob to an 8-byte seed
-    static ulong toSeed (Hash hash)
-    {
-        return (cast(ulong[])hash[]).reduce!((a, b) => a ^ b);
-    }
-
     Mt19937_64 gen;
-    gen.seed(toSeed(hashMulti(node_key, rand_seed)));
+    gen.seed(hashToSeed(hashMulti(node_key, rand_seed)));
     return gen;
 }
 
@@ -624,9 +692,17 @@ private string nice (PublicKey input)
     return toUserReadable(input[].hashFull());
 }
 
+version (unittest)
+private enum StakeLayout
+{
+    Equal,               // all nodes will have the same enrolled value
+    Ascending,           // n2 = n1 + MinFreezeAmount, etc..
+    AscendingQuadratic,  // n2 = n1 * 2, n3 = n2 * 2, etc...
+}
+
 /// Generate a tuple pair of (Enrollment[], UTXOFinder)
 version (unittest)
-private auto genEnrollments (size_t enroll_count)
+private auto genEnrollments (size_t enroll_count, StakeLayout layout)
 {
     import agora.common.Amount;
     import agora.consensus.data.Transaction;
@@ -635,13 +711,39 @@ private auto genEnrollments (size_t enroll_count)
     TestUTXOSet storage = new TestUTXOSet;
     Enrollment[] enrolls;
 
+    Amount getAmount (Amount prev_amount)
+    {
+        final switch (layout)
+        {
+            case StakeLayout.Equal:
+                return Amount.MinFreezeAmount;
+
+            case StakeLayout.Ascending:
+                Amount amount;
+                amount.add(prev_amount);
+                amount.add(Amount.MinFreezeAmount);
+                return amount;
+
+            case StakeLayout.AscendingQuadratic:
+                Amount amount;
+                if (prev_amount == Amount.init) // first amount
+                {
+                    amount.add(Amount.MinFreezeAmount);
+                }
+                else
+                {
+                    amount.add(prev_amount);
+                    amount.add(prev_amount);
+                }
+
+                return amount;
+        }
+    }
+
+    Amount prev_amount;
     foreach (idx; 0 .. enroll_count)
     {
-        // increasing amount of values, for the test
-        Amount amount = Amount.MinFreezeAmount;
-        foreach (i; 0 .. idx + 1)
-            amount.add(Amount.MinFreezeAmount);
-
+        Amount amount = getAmount(prev_amount);
         Transaction tx =
         {
             type : TxType.Freeze,
@@ -649,6 +751,7 @@ private auto genEnrollments (size_t enroll_count)
         };
 
         storage.put(tx);
+        prev_amount = amount;
     }
 
     foreach (utxo; storage.keys)
