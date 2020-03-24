@@ -45,6 +45,11 @@ import std.typecons;
 
 import std.stdio;
 
+version (unittest)
+{
+    import std.conv;
+}
+
 /// limits the number of nodes in a quorum set
 private enum MAX_NODES_IN_QUORUM = 7;
 
@@ -81,23 +86,96 @@ public QuorumConfig[PublicKey] buildQuorumConfigs ( Enrollment[] enrolls,
     return quorums;
 }
 
+/// converts "GA..." => n0 / n1, etc for easier debugging
+private string[PublicKey] key_to_simple;
+static this ()
+{
+    foreach (node_idx; 0 .. pregen_seeds.length)
+        key_to_simple[getTestKey(node_idx)] = format("n%s", node_idx);
+}
+
+/// ditto
+private string simple (QuorumConfig[PublicKey] conf, size_t seed_idx)
+{
+    auto keys = conf.keys;
+    sort(keys);
+
+    string res;
+    res ~= format("\nseed idx: %s (%s)\n", seed_idx, hashFull(seed_idx).prettify);
+
+    foreach (key; keys)
+    {
+        auto quorum = conf[key];
+        res ~= format("\n%s: QuorumConfig(%s, [%s])",
+            key_to_simple[key],
+            quorum.threshold,
+            quorum.nodes.map!(node => key_to_simple[node]));
+    }
+
+    return res;
+}
+
 ///
 unittest
 {
-    import std.conv;
+    // convenience so we can use [n0, n1] when refering to public keys in the tests
+    static foreach (node_idx; 0 .. pregen_seeds.length)
+    {
+        mixin("PublicKey n%1$s = getTestKey(%1$s);".format(node_idx));
+    }
+    #line __LINE__
 
     // 2 nodes
+    version (none)
     foreach (seed_idx; 0 .. 16)
     {
         auto rand_seed = hashFull(seed_idx);
         auto quorums = buildQuorumConfigs(genEnrollments(2).expand, rand_seed);
-        auto n1 = getTestKey(0);
-        auto n2 = getTestKey(1);
-        auto q1 = quorums[n1];
-        auto q2 = quorums[n2];
-        assert(q1.threshold == 2);
-        assert(q1.nodes == [n1, n2], format("Expected %s. Got %s", [n1, n2], q1.nodes));
-        assert(q1.quorums.length == 0);
+
+        assert(quorums == [n0: QuorumConfig(2, [n0, n1]),
+                           n1: QuorumConfig(2, [n0, n1])],
+                           quorums.simple(seed_idx));
+    }
+
+    // 3 nodes
+    foreach (seed_idx; 0 .. 32)
+    {
+        auto rand_seed = hashFull(seed_idx);
+        auto quorums = buildQuorumConfigs(genEnrollments(3).expand, rand_seed);
+
+        switch (seed_idx)
+        {
+        case 0, 6, 7, 14, 16, 22, 26, 30:
+            assert(quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
+                               n1: QuorumConfig(2, [n0, n1, n2]),
+                               n2: QuorumConfig(2, [n1, n2])],
+                               quorums.simple(seed_idx));
+            break;
+
+        case 1, 4, 5, 8, 10, 11, 13, 17, 18, 19, 20, 23, 24, 25, 29:
+            assert(quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
+                               n1: QuorumConfig(2, [n1, n2]),
+                               n2: QuorumConfig(2, [n1, n2])],
+                               quorums.simple(seed_idx));
+            break;
+
+        case 2, 9, 12, 15:
+            assert(quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
+                               n1: QuorumConfig(2, [n1, n2]),
+                               n2: QuorumConfig(2, [n0, n1, n2])],
+                               quorums.simple(seed_idx));
+            break;
+
+        case 3, 21, 27, 28, 31:
+            assert(quorums == [n0: QuorumConfig(2, [n0, n1, n2]),
+                               n1: QuorumConfig(2, [n0, n1, n2]),
+                               n2: QuorumConfig(2, [n0, n1, n2])],
+                               quorums.simple(seed_idx));
+            break;
+
+        default:
+            assert(0, quorums.simple(seed_idx));
+        }
     }
 }
 
@@ -138,16 +216,22 @@ private QuorumConfig[PublicKey] buildQuorums (in NodeStake[] stakes,
         auto rnd_gen = getGenerator(node.key, rand_seed);
         auto quorum = &quorums.require(node.key, QuorumConfig.init);
 
+        // node must add itself first
+        quorum.nodes ~= node.key;
+        if (!quorum_sum.add(node.amount))
+            assert(0);
+
         while (quorum_sum < min_amount &&
             quorum.nodes.length < MAX_NODES_IN_QUORUM)
         {
             const idx = dice(rnd_gen,
                 stakes.map!(stake => stake.amount.integral));
 
-            if (added_nodes[idx])
+            auto qnode = stakes[idx];
+            if (added_nodes[idx]  // if already added
+                || qnode.key == node.key)  // or if it's itself
                 continue;
 
-            auto qnode = stakes[idx];
             quorum.nodes ~= qnode.key;
             assigned_nodes[idx] = true;
             added_nodes[idx] = true;
