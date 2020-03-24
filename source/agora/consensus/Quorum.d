@@ -123,22 +123,11 @@ unittest
 
     QuorumConfig[PublicKey][4] PossibleQuorums =
     [
-        // most common case (n2 has highest stake, included most often)
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n1, n2]),
-         n2: QuorumConfig(2, [n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [n0, n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n1, n2]),
-         n2: QuorumConfig(2, [n0, n1, n2])],
+        // most common case (n3 has highest stake, included most often)
+        [n0: QuorumConfig(2, [n0, n2, n3]),
+         n1: QuorumConfig(2, [n0, n1, n2, n3]),
+         n2: QuorumConfig(2, [n2, n3]),
+         n3: QuorumConfig(2, [n2, n3])],
     ];
 
     auto counts = countQuorumMatches(PossibleQuorums, enrolls, getRandSeeds(64));
@@ -213,10 +202,13 @@ private string simple (QuorumConfig[PublicKey] conf, size_t seed_idx)
     foreach (key; keys)
     {
         auto quorum = conf[key];
+        auto nodes = quorum.nodes.map!(node => key_to_simple[node]).array;
+        sort(nodes);
+
         res ~= format("\n%s: QuorumConfig(%s, [%s])",
             key_to_simple[key],
             quorum.threshold,
-            quorum.nodes.map!(node => key_to_simple[node]));
+            nodes);
     }
 
     return res;
@@ -255,15 +247,47 @@ unittest
 
 version (unittest)
 private size_t[N] countQuorumMatches (size_t N, Enrolls, Range)(
-    QuorumConfig[PublicKey][N] possible_quorums, Enrolls enrolls, Range seeds)
+    QuorumConfig[PublicKey][N] possible_quorums, Enrolls enrolls, Range seeds,
+    size_t line = __LINE__)
 {
+    import core.exception : AssertError;
+
+    // workaround: we want to use [n0, n1, n2] in our tests,
+    // but the actual order of the quorums depends on the hash and not the
+    // "n0, n1" representation as used in the tests. Reorder them by hashes.
+    foreach (idx, ref qconfigs; possible_quorums)
+    {
+        foreach (key, ref conf; qconfigs)
+            sort(conf.nodes);
+    }
+
     size_t[possible_quorums.length] counts;
     size_t rand_idx;
     foreach (rand_seed; seeds)
     {
         auto quorums = buildQuorumConfigs(enrolls.expand, rand_seed);
         auto idx = possible_quorums[].countUntil(quorums);
-        assert(idx != -1, quorums.simple(rand_idx));
+
+        // todo: why does this segfault in toString() when it's later caught???
+        version (ASSERT_BUG)
+        if (idx == -1)
+            throw new AssertError(quorums.simple(rand_idx), __FILE__, line, null);
+
+        try
+        {
+            assert(idx != -1, quorums.simple(rand_idx));
+        }
+        catch (AssertError err)
+        {
+            foreach (qset; possible_quorums)
+            {
+                if ()
+            }
+
+            err.line = line;
+            throw err;
+        }
+
         counts[idx]++;
         rand_idx++;
     }
