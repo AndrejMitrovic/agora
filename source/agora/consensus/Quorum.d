@@ -147,6 +147,32 @@ unittest
     }
 }
 
+version (unittest)
+private size_t[N] countQuorumMatches (size_t N, Enrolls, Range)(
+    QuorumConfig[PublicKey][N] possible_quorums, Enrolls enrolls, Range seeds)
+{
+    size_t[possible_quorums.length] counts;
+    size_t rand_idx;
+    foreach (rand_seed; seeds)
+    {
+        auto quorums = buildQuorumConfigs(enrolls.expand, rand_seed);
+        auto idx = possible_quorums[].countUntil(quorums);
+        assert(idx != -1, quorums.simple(rand_idx));
+        counts[idx]++;
+        rand_idx++;
+    }
+
+    return counts;
+}
+
+/// Generate random seeds by hashing a range of numbers: [0 .. count)
+version (unittest)
+private auto getRandSeeds (size_t count)
+{
+    // test-cases already assumed 'int' by mistake, keeping it here
+    return iota(0, count).map!(idx => hashFull(cast(int)idx));
+}
+
 /// 3 nodes with ascending stakes
 unittest
 {
@@ -172,17 +198,7 @@ unittest
          n2: QuorumConfig(2, [n0, n1, n2])],
     ];
 
-    size_t[PossibleQuorums.length] counts;
-    foreach (rand_idx; 0 .. 64)
-    {
-        auto rand_seed = hashFull(rand_idx);
-        auto quorums = buildQuorumConfigs(enrolls.expand, rand_seed);
-
-        auto idx = PossibleQuorums[].countUntil(quorums);
-        assert(idx != -1, quorums.simple(rand_idx));
-        counts[idx]++;
-    }
-
+    auto counts = countQuorumMatches(PossibleQuorums, enrolls, getRandSeeds(64));
     assert(counts == [36, 14, 7, 7], counts.to!string);
     assert(counts[].sum == 64, counts[].sum.to!string);
 }
@@ -227,17 +243,7 @@ unittest
          n2: QuorumConfig(2, [n0, n2])],
     ];
 
-    size_t[PossibleQuorums.length] counts;
-    foreach (rand_idx; 0 .. 64)
-    {
-        auto rand_seed = hashFull(rand_idx);
-        auto quorums = buildQuorumConfigs(enrolls.expand, rand_seed);
-
-        auto idx = PossibleQuorums[].countUntil(quorums);
-        assert(idx != -1, quorums.simple(rand_idx));
-        counts[idx]++;
-    }
-
+    auto counts = countQuorumMatches(PossibleQuorums, enrolls, getRandSeeds(64));
     assert(counts == [26, 14, 7, 6, 6, 3, 1, 1], counts.to!string);
     assert(counts[].sum == 64, counts[].sum.to!string);
 }
