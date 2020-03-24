@@ -86,6 +86,112 @@ public QuorumConfig[PublicKey] buildQuorumConfigs ( Enrollment[] enrolls,
     return quorums;
 }
 
+/// 3 nodes with ascending stakes
+unittest
+{
+    auto enrolls = genEnrollments(3, StakeLayout.Ascending);
+
+    QuorumConfig[PublicKey][4] PossibleQuorums =
+    [
+        // most common case (n2 has highest stake, included most often)
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n0, n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n0, n1, n2])],
+    ];
+
+    auto counts = countQuorumMatches(PossibleQuorums, enrolls, getRandSeeds(64));
+    assert(counts == [36, 14, 7, 7], counts.to!string);
+    assert(counts[].sum == 64, counts[].sum.to!string);
+}
+
+/// 4 nodes with ascending stakes
+unittest
+{
+    auto enrolls = genEnrollments(4, StakeLayout.Ascending);
+
+    QuorumConfig[PublicKey][4] PossibleQuorums =
+    [
+        // most common case (n2 has highest stake, included most often)
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n0, n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n0, n1, n2])],
+    ];
+
+    auto counts = countQuorumMatches(PossibleQuorums, enrolls, getRandSeeds(64));
+    assert(counts == [36, 14, 7, 7], counts.to!string);
+    assert(counts[].sum == 64, counts[].sum.to!string);
+}
+
+/// 3 nodes with ascending quadratic stakes
+unittest
+{
+    auto enrolls = genEnrollments(3, StakeLayout.AscendingQuadratic);
+
+    QuorumConfig[PublicKey][8] PossibleQuorums =
+    [
+        // most common case (n2 has highest stake, included most often)
+        [n0: QuorumConfig(2, [n0, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n0, n2])],
+
+        [n0: QuorumConfig(2, [n0, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n0, n2])],
+
+        [n0: QuorumConfig(2, [n0, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n1, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n0, n1, n2]),
+         n2: QuorumConfig(2, [n0, n2])],
+
+        [n0: QuorumConfig(2, [n0, n1, n2]),
+         n1: QuorumConfig(2, [n1, n2]),
+         n2: QuorumConfig(2, [n0, n2])],
+    ];
+
+    auto counts = countQuorumMatches(PossibleQuorums, enrolls, getRandSeeds(64));
+    assert(counts == [26, 14, 7, 6, 6, 3, 1, 1], counts.to!string);
+    assert(counts[].sum == 64, counts[].sum.to!string);
+}
+
 /// converts "GA..." => n0 / n1, etc for easier debugging
 private string[PublicKey] key_to_simple;
 static this ()
@@ -98,7 +204,7 @@ static this ()
 private string simple (QuorumConfig[PublicKey] conf, size_t seed_idx)
 {
     auto keys = conf.keys;
-    sort(keys);
+    sort!((a, b) => key_to_simple[a] < key_to_simple[b])(keys);
 
     string res;
     res ~= format("\nrand idx: %s (seed: %s)\n", seed_idx,
@@ -171,81 +277,6 @@ private auto getRandSeeds (size_t count)
 {
     // test-cases already assumed 'int' by mistake, keeping it here
     return iota(0, count).map!(idx => hashFull(cast(int)idx));
-}
-
-/// 3 nodes with ascending stakes
-unittest
-{
-    auto enrolls = genEnrollments(3, StakeLayout.Ascending);
-
-    QuorumConfig[PublicKey][4] PossibleQuorums =
-    [
-        // most common case (n2 has highest stake, included most often)
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n1, n2]),
-         n2: QuorumConfig(2, [n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [n0, n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n1, n2]),
-         n2: QuorumConfig(2, [n0, n1, n2])],
-    ];
-
-    auto counts = countQuorumMatches(PossibleQuorums, enrolls, getRandSeeds(64));
-    assert(counts == [36, 14, 7, 7], counts.to!string);
-    assert(counts[].sum == 64, counts[].sum.to!string);
-}
-
-/// 3 nodes with ascending quadratic stakes
-unittest
-{
-    auto enrolls = genEnrollments(3, StakeLayout.AscendingQuadratic);
-
-    QuorumConfig[PublicKey][8] PossibleQuorums =
-    [
-        [n0: QuorumConfig(2, [n0, n2]),
-         n1: QuorumConfig(2, [n1, n2]),
-         n2: QuorumConfig(2, [n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n1, n2]),
-         n2: QuorumConfig(2, [n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n2]),
-         n1: QuorumConfig(2, [n1, n2]),
-         n2: QuorumConfig(2, [n0, n2])],
-
-        [n0: QuorumConfig(2, [n0, n2]),
-         n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [n0, n2])],
-
-        [n0: QuorumConfig(2, [n0, n2]),
-         n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [n1, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n0, n1, n2]),
-         n2: QuorumConfig(2, [n0, n2])],
-
-        [n0: QuorumConfig(2, [n0, n1, n2]),
-         n1: QuorumConfig(2, [n1, n2]),
-         n2: QuorumConfig(2, [n0, n2])],
-    ];
-
-    auto counts = countQuorumMatches(PossibleQuorums, enrolls, getRandSeeds(64));
-    assert(counts == [26, 14, 7, 6, 6, 3, 1, 1], counts.to!string);
-    assert(counts[].sum == 64, counts[].sum.to!string);
 }
 
 /*******************************************************************************
