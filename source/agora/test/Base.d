@@ -43,7 +43,7 @@ import agora.consensus.EnrollmentManager;
 import agora.consensus.Genesis;
 import agora.network.NetworkManager;
 import agora.node.Ledger;
-import agora.node.Node;
+import agora.node.Validator;
 import agora.utils.Log;
 public import agora.utils.Test;  // frequently needed in tests
 
@@ -482,7 +482,7 @@ public interface TestAPI : API
 }
 
 /// Ditto
-public class TestNode : Node, TestAPI
+public class TestNode : Validator, TestAPI
 {
     private Registry* registry;
 

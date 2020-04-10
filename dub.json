@@ -87,6 +87,7 @@
             "targetName": "agora-client",
             "mainSourceFile": "source/agora/cli/client/main.d",
             "excludedSourceFiles": [
+                "source/agora/api/FullNode.d",
                 "source/agora/api/Validator.d",
                 "source/agora/common/Config.d",
                 "source/agora/common/SCPHash.d",

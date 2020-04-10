@@ -13,9 +13,9 @@
 
 module agora.cli.multi.main;
 
-import agora.api.FullNode;
 import agora.common.Config;
-import agora.node.Node;
+import agora.node.Validator;
+import agora.node.Runner;
 import agora.utils.Log;
 
 import vibe.core.core;
@@ -104,9 +104,9 @@ private int main (string[] args)
         }
     }
 
-    Node[] nodes;
+    Validator[] nodes;
     foreach (const ref config; configs)
-        nodes ~= runNode(config);
+        nodes ~= runNode!Validator(config);
 
     scope (exit)
     {
