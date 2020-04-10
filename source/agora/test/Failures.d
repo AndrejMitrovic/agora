@@ -30,6 +30,7 @@ unittest
 
     TestConf conf = { threshold : 100, timeout : 1_000 };
     auto network = makeTestNetwork(conf);
+    scope (exit) network.printLogs();
 
     try
     {
