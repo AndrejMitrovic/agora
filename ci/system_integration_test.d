@@ -28,7 +28,8 @@ immutable DockerComposeLogs = [ "docker-compose", "-f", ComposeFile, "logs", "-t
 immutable RunIntegrationTests = [ "dub", "--root", IntegrationPath, "--",
                                     "http://127.0.0.1:4000",
                                     "http://127.0.0.1:4001",
-                                    "http://127.0.0.1:4002"];
+                                    "http://127.0.0.1:4002",
+                                    "http://127.0.0.1:4003"];
 immutable Cleanup = [ "rm", "-rf", IntegrationPath.buildPath("node/0/.cache/"),
                       IntegrationPath.buildPath("node/1/.cache/"),
                       IntegrationPath.buildPath("node/2/.cache/")];
@@ -55,6 +56,7 @@ private int main (string[] args)
         runCmd(DockerComposeLogs ~ "node-0");
         runCmd(DockerComposeLogs ~ "node-1");
         runCmd(DockerComposeLogs ~ "node-2");
+        runCmd(DockerComposeLogs ~ "node-3");
     }
     runCmd(RunIntegrationTests);
 
