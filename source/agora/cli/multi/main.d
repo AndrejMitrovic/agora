@@ -15,6 +15,7 @@ module agora.cli.multi.main;
 
 import agora.common.Config;
 import agora.node.Validator;
+import agora.node.Runner;
 import agora.utils.Log;
 
 import vibe.core.core;

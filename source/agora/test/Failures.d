@@ -24,7 +24,6 @@ import agora.utils.Log;
 ///
 unittest
 {
-    /**
     import std.algorithm;
     import std.range;
     import core.thread;
@@ -45,5 +44,4 @@ unittest
         // TestAPI.printLog(), but RemoteAPI has already shut down when
         // the node threw an exception in its constructor
     }
-    **/
 }
