@@ -53,12 +53,19 @@ public class Validator : FullNode, API
     public this (const Config config)
     {
         super(config);
-        if (this.config.node.is_validator)
+
+        // instantiating Nominator can fail if the quorum configuration
+        // fails the checkSanity() test, and we must release resources.
+        scope (failure)
         {
-            this.nominator = this.getNominator(this.network,
-                this.config.node.key_pair, this.ledger, this.taskman,
-                this.config.quorum);
+            this.pool.shutdown();
+            this.utxo_set.shutdown();
+            this.enroll_man.shutdown();
         }
+
+        this.nominator = this.getNominator(this.network,
+            this.config.node.key_pair, this.ledger, this.taskman,
+            this.config.quorum);
     }
 
     /// The first task method, loading from disk, node discovery, etc
