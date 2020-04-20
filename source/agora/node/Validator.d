@@ -52,6 +52,8 @@ public class Validator : FullNode, API
     /// Ctor
     public this (const Config config)
     {
+        assert(this.config.node.is_validator);
+
         super(config);
 
         // instantiating Nominator can fail if the quorum configuration

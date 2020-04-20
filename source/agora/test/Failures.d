@@ -22,6 +22,7 @@ import agora.test.Base;
 import agora.utils.Log;
 
 ///
+version (none)
 unittest
 {
     import std.algorithm;
