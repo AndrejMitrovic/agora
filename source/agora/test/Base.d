@@ -23,7 +23,6 @@ module agora.test.Base;
 version (unittest):
 
 import agora.node.Ledger;
-import agora.api.Validator;
 import agora.common.Amount;
 import agora.common.BanManager;
 import agora.common.Config;
@@ -43,6 +42,7 @@ import agora.consensus.EnrollmentManager;
 import agora.consensus.Genesis;
 import agora.network.NetworkManager;
 import agora.node.Ledger;
+import agora.node.FullNode;
 import agora.node.Validator;
 import agora.utils.Log;
 public import agora.utils.Test;  // frequently needed in tests
@@ -288,8 +288,13 @@ public class TestAPIManager
 
     public void createNewNode (PublicKey address, Config conf)
     {
-        auto api = RemoteAPI!TestAPI.spawn!(TestNode)(conf, &this.reg,
+        if (config.node.is_validator)
+            auto api = RemoteAPI!TestAPI.spawn!(TestNode!(Validator))(conf, &this.reg,
             conf.node.timeout.msecs);
+        else
+            auto api = RemoteAPI!TestAPI.spawn!(TestNode!(FullNode))(conf, &this.reg,
+            conf.node.timeout.msecs);
+
         this.reg.register(address.toString(), api.tid());
         this.nodes ~= NodePair(address, api);
     }
@@ -457,7 +462,28 @@ public class TestNetworkManager : NetworkManager
 }
 
 /// Used to call start/shutdown outside of main, and for dependency injection
-public interface TestAPI : API
+public interface FullNodeTestAPI : API
+{
+    ///
+    public abstract void start ();
+
+    ///
+    public abstract void shutdown ();
+
+    /// Print out the contents of the log
+    public void printLog ();
+
+    ///
+    public abstract void metaAddPeer (string peer);
+
+    ///
+    public abstract void broadcastPreimage (uint height);
+
+    ///
+    public abstract void updateEnrolledHeight (Hash enroll_key, ulong height);
+}
+/// Used to call start/shutdown outside of main, and for dependency injection
+public interface ValidatorTestAPI : API
 {
     ///
     public abstract void start ();
@@ -482,7 +508,7 @@ public interface TestAPI : API
 }
 
 /// Ditto
-public class TestNode : Validator, TestAPI
+public class TestNode (Base) : Base
 {
     private Registry* registry;
 
