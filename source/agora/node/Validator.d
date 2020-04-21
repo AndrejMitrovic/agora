@@ -77,14 +77,7 @@ public class Validator : FullNode, API
         {
             log.info("Doing network discovery..");
             this.network.discover();
-
-            bool isNominating ()
-            {
-                return this.config.node.is_validator &&
-                    this.nominator.isNominating();
-            }
-
-            this.network.startPeriodicCatchup(this.ledger, &isNominating);
+            this.network.startPeriodicCatchup(this.ledger, &this.nominator.isNominating);
         });
     }
 
@@ -108,9 +101,6 @@ public class Validator : FullNode, API
 
     public override void receiveEnvelope (SCPEnvelope envelope) @safe
     {
-        // we should not receive SCP messages unless we're a validator node
-        if (!this.config.node.is_validator)
-            return;
         this.nominator.receiveEnvelope(envelope);
     }
 
@@ -142,7 +132,6 @@ public class Validator : FullNode, API
     protected override void callTryNominate () @safe
     {
         // then nominate
-        if (this.config.node.is_validator)
-            this.nominator.tryNominate();
+        this.nominator.tryNominate();
     }
 }
