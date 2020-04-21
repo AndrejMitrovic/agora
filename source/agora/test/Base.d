@@ -23,6 +23,7 @@ module agora.test.Base;
 version (unittest):
 
 import agora.node.Ledger;
+import agora.api.FullNode;
 import agora.api.Validator;
 import agora.common.Amount;
 import agora.common.BanManager;
@@ -43,6 +44,7 @@ import agora.consensus.EnrollmentManager;
 import agora.consensus.Genesis;
 import agora.network.NetworkManager;
 import agora.node.Ledger;
+import agora.node.FullNode;
 import agora.node.Validator;
 import agora.utils.Log;
 public import agora.utils.Test;  // frequently needed in tests
@@ -235,13 +237,13 @@ public class FakeClockBanManager : BanManager
 /// We use a pair of (key, client) rather than a hashmap client[key],
 /// since we want to know the order of the nodes which were configured
 /// in the makeTestNetwork() call.
-public struct NodePair
+public struct NodePair (API)
 {
     ///
     public PublicKey key;
 
     ///
-    public RemoteAPI!TestAPI client;
+    public RemoteAPI!API client;
 }
 
 /*******************************************************************************
@@ -259,7 +261,8 @@ public class TestAPIManager
     /// Used by the unittests in order to directly interact with the nodes,
     /// without trying to handshake or do any automatic network discovery.
     /// Also kept here to avoid any eager garbage collection.
-    public NodePair[] nodes;
+    public NodePair!TestFullNodeAPI[] full_nodes;
+    public NodePair!TestValidatorAPI[] nodes;
 
     /// convenience: returns a random-access range which lets us access clients
     auto clients ()
@@ -290,17 +293,18 @@ public class TestAPIManager
     {
         if (conf.node.is_validator)
         {
-            auto api = RemoteAPI!TestAPI.spawn!(TestValidatorNode)(conf, &this.reg,
-                conf.node.timeout.msecs);
+            auto api = RemoteAPI!TestValidatorAPI.spawn!(TestValidatorNode)(
+                conf, &this.reg, conf.node.timeout.msecs);
+            this.reg.register(address.toString(), api.tid());
+            this.nodes ~= NodePair!TestValidatorAPI(address, api);
         }
         else
         {
-            auto api = RemoteAPI!TestAPI.spawn!(TestFullNode)(conf, &this.reg,
-                conf.node.timeout.msecs);
+            auto api = RemoteAPI!TestFullNodeAPI.spawn!(TestFullNode)(conf,
+                &this.reg, conf.node.timeout.msecs);
+            this.reg.register(address.toString(), api.tid());
+            this.full_nodes ~= NodePair!TestFullNodeAPI(address, api);
         }
-
-        this.reg.register(address.toString(), api.tid());
-        this.nodes ~= NodePair(address, api);
     }
 
     /***************************************************************************
@@ -466,7 +470,7 @@ public class TestNetworkManager : NetworkManager
 }
 
 /// Used to call start/shutdown outside of main, and for dependency injection
-public interface TestAPI : API
+public interface TestFullNodeAPI : agora.api.FullNode.API
 {
     ///
     public abstract void start ();
@@ -479,7 +483,10 @@ public interface TestAPI : API
 
     ///
     public abstract void metaAddPeer (string peer);
+}
 
+public interface TestValidatorAPI : TestFullNodeAPI, agora.api.Validator.API
+{
     ///
     public abstract Enrollment createEnrollmentData();
 
@@ -491,7 +498,88 @@ public interface TestAPI : API
 }
 
 /// Ditto
-public class TestNode : Validator, TestAPI
+public class TestFullNode : FullNode, TestFullNodeAPI
+{
+    private Registry* registry;
+
+    ///
+    public this (Config config, Registry* reg)
+    {
+        this.registry = reg;
+        super(config);
+    }
+
+    ///
+    public override void start ()
+    {
+        super.start();
+    }
+
+    ///
+    public override void shutdown ()
+    {
+        super.shutdown();
+    }
+
+    /// Prints out the log contents for this node
+    public void printLog ()
+    {
+        CircularAppender().printConsole();
+    }
+
+    /// Used by the node
+    public override Metadata getMetadata (string _unused) @system
+    {
+        return new MemMetadata();
+    }
+
+    /// Return a transaction pool backed by an in-memory SQLite db
+    public override TransactionPool getPool (string) @system
+    {
+        return new TransactionPool(":memory:");
+    }
+
+    /// Return a UTXO set backed by an in-memory SQLite db
+    protected override UTXOSet getUtxoSet (string data_dir)
+    {
+        return new UTXOSet(":memory:");
+    }
+
+    /// Used by unittests
+    public override void metaAddPeer (Address peer)
+    {
+        this.metadata.peers.put(peer);
+    }
+
+    /// Return a LocalRest-backed task manager
+    protected override TaskManager getTaskManager ()
+    {
+        return new LocalRestTaskManager();
+    }
+
+    /// Return an instance of the custom TestNetworkManager
+    protected override NetworkManager getNetworkManager (
+        in NodeConfig node_config, in BanManager.Config banman_conf,
+        in string[] peers, Set!PublicKey required_peer_keys,
+        in QuorumConfig quorum_conf, in string[] dns_seeds, Metadata metadata,
+        TaskManager taskman)
+    {
+        assert(taskman !is null);
+        return new TestNetworkManager(node_config, banman_conf, peers,
+            required_peer_keys, quorum_conf, dns_seeds, metadata, taskman,
+            this.registry);
+    }
+
+    /// Return an enrollment manager backed by an in-memory SQLite db
+    protected override EnrollmentManager getEnrollmentManager (
+        string data_dir, in NodeConfig node_config)
+    {
+        return new EnrollmentManager(":memory:", node_config.key_pair);
+    }
+}
+
+/// Ditto
+public class TestValidatorNode : Validator, TestValidatorAPI
 {
     private Registry* registry;
 
@@ -913,7 +1001,7 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager)
 }
 
 /// Returns: the entire ledger from the provided node
-public const(Block)[] getAllBlocks (TestAPI node)
+public const(Block)[] getAllBlocks (API)(API node)
 {
     import std.range;
     const(Block)[] blocks;

@@ -68,7 +68,7 @@ unittest
     import std.range;
 
     /// node which returns bad blocks
-    static class BadNode : TestNode
+    static class BadNode : TestValidatorNode
     {
         ///
         public this (Config config, Registry* reg)
@@ -109,20 +109,20 @@ unittest
         /// see base class
         public override void createNewNode (PublicKey address, Config conf)
         {
-            RemoteAPI!TestAPI api;
+            RemoteAPI!TestValidatorAPI api;
             if (this.nodes.length == 2)
             {
-                api = RemoteAPI!TestAPI.spawn!(BadNode)(conf, &this.reg,
+                api = RemoteAPI!TestValidatorAPI.spawn!(BadNode)(conf, &this.reg,
                     conf.node.timeout.msecs);
             }
             else
             {
-                api = RemoteAPI!TestAPI.spawn!(TestNode)(conf, &this.reg,
-                    conf.node.timeout.msecs);
+                api = RemoteAPI!TestValidatorAPI.spawn!(TestValidatorNode)(conf,
+                    &this.reg, conf.node.timeout.msecs);
             }
 
             this.reg.register(address.toString(), api.tid());
-            this.nodes ~= NodePair(address, api);
+            this.nodes ~= NodePair!TestValidatorAPI(address, api);
         }
     }
 
