@@ -288,8 +288,17 @@ public class TestAPIManager
 
     public void createNewNode (PublicKey address, Config conf)
     {
-        auto api = RemoteAPI!TestAPI.spawn!(TestNode)(conf, &this.reg,
-            conf.node.timeout.msecs);
+        if (conf.node.is_validator)
+        {
+            auto api = RemoteAPI!TestAPI.spawn!(TestValidatorNode)(conf, &this.reg,
+                conf.node.timeout.msecs);
+        }
+        else
+        {
+            auto api = RemoteAPI!TestAPI.spawn!(TestFullNode)(conf, &this.reg,
+                conf.node.timeout.msecs);
+        }
+
         this.reg.register(address.toString(), api.tid());
         this.nodes ~= NodePair(address, api);
     }
