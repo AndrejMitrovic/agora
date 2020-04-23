@@ -94,15 +94,4 @@ public interface API : agora.api.FullNode.API
     ***************************************************************************/
 
     public void receiveEnvelope (SCPEnvelope envelope);
-
-    /***************************************************************************
-
-        Reveals a pre-image
-
-        Params:
-            preimage = a PreImageInfo object which contains a hash and a height
-
-    ***************************************************************************/
-
-    public void receivePreimage (PreImageInfo preimage);
 }
