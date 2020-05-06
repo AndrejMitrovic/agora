@@ -231,7 +231,11 @@ public class Ledger
         if (!this.storage.saveBlock(block))
             assert(0);
 
+        auto old_count = this.enroll_man.validatorCount();
         this.enroll_man.clearExpiredValidators(block.header.height);
+
+        bool validators_changed = block.header.enrollments.length > 0
+            || this.enroll_man.validatorCount() != old_count;
 
         foreach (enrollment; block.header.enrollments)
             if (!this.enroll_man.addValidator(enrollment,
