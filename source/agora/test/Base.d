@@ -24,6 +24,7 @@ version (unittest):
 
 import agora.common.Amount;
 import agora.common.BanManager;
+import agora.common.BitField;
 import agora.common.Config;
 import agora.common.Types;
 import agora.common.Hash;
@@ -738,9 +739,9 @@ public enum NetworkTopology
     /// to connect to a min_listeners number of nodes
     FindNetwork,
 
-    /// Set a minimal networking config, but a full quorum configuration
+    /// Set a minimal networking config,
     /// The node should attempt to connect to all its quorum peers even
-    /// if it only knows their public keys
+    /// if it only knows their public keys via the enrollments
     FindQuorums,
 
     /// Same as Simple, with one additional non-validating node
@@ -785,9 +786,6 @@ public struct TestConf
 
     /// The threshold. If not set, it will default to the number of nodes
     size_t threshold;
-
-    /// the genesis block to use, or GenesisBlock in Genesis.d if not set.
-    immutable Block gen_block;
 }
 
 /*******************************************************************************
@@ -824,10 +822,6 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager)
 
     assert(test_conf.nodes >= 2, "Creating a network require at least 2 nodes");
 
-    // custom genesis block
-    immutable string gen_block_hex = test_conf.gen_block != immutable(Block).init
-        ? test_conf.gen_block.serializeFull.toHexString : null;
-
     size_t full_node_idx;
     size_t validator_idx;
 
@@ -854,7 +848,6 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager)
                 ? test_conf.nodes - 1 : test_conf.min_listeners,
             max_listeners : (test_conf.max_listeners == 0)
                 ? test_conf.nodes - 1 : test_conf.max_listeners,
-            genesis_block : gen_block_hex
         };
 
         return conf;
@@ -873,36 +866,20 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager)
                 .filter!(conf => conf != self)
                 .map!(conf => conf.address);
 
-        auto quorum_keys =
-            node_confs
-                .filter!(conf => conf.is_validator)
-                .map!(conf => conf.key_pair.address).array.assumeUnique;
-
         Config conf =
         {
             banman : ban_conf,
             node : self,
-            network : test_conf.configure_network ? assumeUnique(other_nodes.array) : null,
-            quorum :
-            {
-                nodes : quorum_keys,
-                threshold : (test_conf.threshold == 0) ? quorum_keys.length : test_conf.threshold
-            }
+            network : test_conf.configure_network ? assumeUnique(other_nodes.array) : null
         };
 
         return conf;
     }
 
-    // each node only has another node in its network, but will discover the
-    // entire network through the network discovery phase
+    // for discovery testing: only 1 node in the 'network' section, rest is discovered
     Config makeMinimalNetwork (size_t idx, NodeConfig self, NodeConfig[] node_confs)
     {
         auto prev_node = idx == 0 ? node_confs[$ - 1] : node_confs[idx - 1];
-
-        auto quorum_keys =
-            node_confs
-                .filter!(conf => conf.is_validator)
-                .map!(conf => conf.key_pair.address).array.assumeUnique;
 
         Config conf =
         {
@@ -921,21 +898,11 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager)
 
         node_confs.each!(conf => assert(conf.is_validator));
 
-        auto quorum_keys =
-            node_confs
-                .filter!(conf => conf.is_validator)
-                .map!(conf => conf.key_pair.address).array.assumeUnique;
-
         Config conf =
         {
             banman : ban_conf,
             node : self,
             network : test_conf.configure_network ? [prev_node.address] : null,
-            quorum :
-            {
-                nodes : quorum_keys,
-                threshold : (test_conf.threshold == 0) ? quorum_keys.length : test_conf.threshold
-            }
         };
 
         return conf;
@@ -989,14 +956,109 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager)
         break;
     }
 
-    immutable GenBlock = test_conf.gen_block != immutable(Block).init
-        ? test_conf.gen_block : GenesisBlock;
+    auto gen_block = makeGenesisBlock(node_configs);
 
-    auto net = new APIManager([GenBlock]);
+    immutable string gen_block_hex = gen_block
+        .serializeFull()
+        .toHexString();
+
+    foreach (ref conf; configs)
+        conf.node.genesis_block = gen_block_hex;
+
+    auto net = new APIManager([gen_block]);
     foreach (ref conf; configs)
         net.createNewNode(conf);
 
     return net;
+}
+
+/*******************************************************************************
+
+    Generate a genesis block given the set of node configurations.
+
+    For each Validator in the node configs, a Freeze TX and an Enrollment
+    will be created and added to the generated Genesis block.
+
+    The very first transaction is just a payment TX that uses the
+    keypair in getGenesisKeyPair().
+
+    Params:
+        node_configs = the list of node configurations
+
+    Returns:
+        The genesis block
+
+*******************************************************************************/
+
+private immutable(Block) makeGenesisBlock (in NodeConfig[] node_configs)
+{
+    // 1 payment tx, the rest are freeze txs
+    auto gen_addr = getGenesisKeyPair().address;
+    Transaction FirstTx =
+    {
+        TxType.Payment,
+        inputs: [ Input.init ],
+        outputs: [
+            Output(Amount(62_500_000L * 10_000_000L), gen_addr),
+            Output(Amount(62_500_000L * 10_000_000L), gen_addr),
+            Output(Amount(62_500_000L * 10_000_000L), gen_addr),
+            Output(Amount(62_500_000L * 10_000_000L), gen_addr),
+            Output(Amount(62_500_000L * 10_000_000L), gen_addr),
+            Output(Amount(62_500_000L * 10_000_000L), gen_addr),
+            Output(Amount(62_500_000L * 10_000_000L), gen_addr),
+            Output(Amount(62_500_000L * 10_000_000L), gen_addr),
+        ],
+    };
+
+    Transaction[] txs;
+    txs ~= FirstTx;
+    Enrollment[] enrolls;
+
+    foreach (node_conf; node_configs)
+    {
+        if (node_conf.is_validator)
+        {
+            Transaction tx =
+            {
+                type : TxType.Freeze,
+                inputs : [ Input.init ],
+                outputs : [Output(Amount.MinFreezeAmount,
+                    node_conf.key_pair.address)]
+            };
+
+            txs ~= tx;
+            Hash txhash = hashFull(tx);
+            Hash utxo = UTXOSet.getHash(txhash, 0);
+            scope enr = new EnrollmentManager(":memory:", node_conf.key_pair);
+            scope (exit) enr.shutdown();
+
+            Enrollment enroll;
+            const StartHeight = 1;
+            assert(enr.createEnrollment(utxo, StartHeight, enroll));
+            enrolls ~= enroll;
+        }
+    }
+
+    txs.sort;
+    Hash[] merkle_tree;
+    auto merkle_root = Block.buildMerkleTree(txs, merkle_tree);
+
+    immutable(BlockHeader) makeHeader ()
+    {
+        return immutable(BlockHeader)(
+            Hash.init,   // prev
+            0,           // height
+            merkle_root,
+            BitField!uint.init,
+            Signature.init,
+            enrolls.assumeUnique,
+        );
+    }
+    return immutable(Block)(
+        makeHeader(),
+        txs.assumeUnique,
+        merkle_tree.assumeUnique
+    );
 }
 
 /// Returns: the entire ledger from the provided node
