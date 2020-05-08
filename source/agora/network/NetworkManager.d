@@ -148,6 +148,43 @@ public class NetworkManager
 
     /***************************************************************************
 
+        Remove connections with Validators which are no longer needed
+        (if those connections were already established)
+
+        todo: we may want to
+
+    ***************************************************************************/
+
+    private void reset (Set!PublicKey required_peer_keys)
+    {
+        // we need to wait for the catchup task to finish,
+        // otherwise it will end up accessing a null client
+        //while (this.catching_up)
+        //    this.taskman.wait(this.node_config.retry_delay.msecs);
+
+        PublicKey[] to_remove;
+        foreach (key; this.validator_to_addr.byKey)
+        {
+            if (key !in required_peer_keys)
+                to_remove ~= to_remove;
+        }
+
+        foreach (key; to_remove)
+            this.validator_to_addr.remove(key);
+
+        Address[] addr_to_remove;
+        foreach (address, node; this.peers)
+        {
+            if (node.key !in required_peer_keys)
+                addr_to_remove ~= address;
+        }
+
+        foreach (addr; addr_to_remove)
+            this.peers.remove(addr);
+    }
+
+    /***************************************************************************
+
         Discover the network.
 
         Go through the list of peers in the node configuration,
@@ -163,6 +200,9 @@ public class NetworkManager
 
     public void discover (Set!PublicKey required_peer_keys = Set!PublicKey.init)
     {
+        if (required_peer_keys.length > 0)
+            this.reset(required_peer_keys);
+
         this.required_peer_keys = required_peer_keys;
         this.banman.load();
 
@@ -290,6 +330,11 @@ public class NetworkManager
     private void getBlocksFrom (ulong block_height,
         scope bool delegate(const(Block)[]) @safe onReceivedBlocks) nothrow
     {
+        scope (failure) assert(0);
+
+        //import std.stdio;
+        //writefln("Peers: %s", this.peers);
+
         struct Pair { size_t height; NetworkClient client; }
 
         static Pair[] node_pairs;
