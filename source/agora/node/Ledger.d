@@ -63,8 +63,9 @@ public class Ledger
     /// Node config
     private NodeConfig node_config;
 
-    /// If not-null, call this delegate after a block was applied to the ledger
-    private void delegate (bool) nothrow @safe afterBlockApplied;
+    /// If not-null, call this delegate if the validator set changed after
+    /// a block was externalized
+    private void delegate () nothrow @safe onValidatorsChanged;
 
     /***************************************************************************
 
@@ -76,8 +77,8 @@ public class Ledger
             storage = the block storage
             enroll_man = the enrollmentManager
             node_config = the node config
-            afterBlockApplied = optional delegate to call after a block was
-                                accepted and applied to the ledger
+            onValidatorsChanged = optional delegate to call after the validator
+                                  set changes when a block was externalized
 
     ***************************************************************************/
 
@@ -86,14 +87,14 @@ public class Ledger
         IBlockStorage storage,
         EnrollmentManager enroll_man,
         NodeConfig node_config,
-        void delegate (bool) nothrow @safe afterBlockApplied = null)
+        void delegate () nothrow @safe onValidatorsChanged = null)
     {
         this.pool = pool;
         this.utxo_set = utxo_set;
         this.storage = storage;
         this.enroll_man = enroll_man;
         this.node_config = node_config;
-        this.afterBlockApplied = afterBlockApplied;
+        this.onValidatorsChanged = onValidatorsChanged;
         if (!this.storage.load())
             assert(0);
 
@@ -241,6 +242,7 @@ public class Ledger
         auto old_count = this.enroll_man.validatorCount();
         this.enroll_man.clearExpiredValidators(block.header.height);
 
+        // there was a change in the active validator set
         bool validators_changed = block.header.enrollments.length > 0
             || this.enroll_man.validatorCount() != old_count;
 
@@ -252,6 +254,9 @@ public class Ledger
         // read back and cache the last block
         if (!this.storage.readLastBlock(this.last_block))
             assert(0);
+
+        if (this.onValidatorsChanged !is null && validators_changed)
+            this.onValidatorsChanged();
     }
 
     /***************************************************************************

@@ -122,6 +122,22 @@ extern(D):
 
     /***************************************************************************
 
+        Update the quorum configuration
+
+        Params:
+            quorum = the new quorum config
+
+    ***************************************************************************/
+
+    public void updateQuorumConfig (const ref QuorumConfig quorum)
+    {
+        assert(!this.is_nominating);
+        auto quorum_set = verifyBuildSCPConfig(quorum);
+        this.scp.updateLocalQuorumSet(quorum_set);
+    }
+
+    /***************************************************************************
+
         Returns:
             true if we're currently in the process of nominating
 
