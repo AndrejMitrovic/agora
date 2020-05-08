@@ -140,7 +140,7 @@ public class Validator : FullNode, API
         // this.network.reconnect();
 
         // then update the quorum configuration
-        //this.nominator.updateQuorumConfig(this.last_qc);
+        this.nominator.updateQuorumConfig(this.last_qc);
     }
 
     /***************************************************************************

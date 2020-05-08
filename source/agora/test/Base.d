@@ -63,6 +63,7 @@ import std.array;
 import std.algorithm;
 import std.exception;
 import std.format;
+import std.range;
 import std.stdio;
 
 import core.runtime;
@@ -760,6 +761,9 @@ public struct TestConf
     /// Network topology to use
     NetworkTopology topology = NetworkTopology.Simple;
 
+    /// Extra blocks to generate
+    size_t extra_blocks = 0;
+
     /// Number of nodes to instantiate
     size_t nodes = 4;
 
@@ -965,7 +969,10 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager)
     foreach (ref conf; configs)
         conf.node.genesis_block = gen_block_hex;
 
-    auto net = new APIManager([gen_block]);
+    immutable(Block)[] blocks = generateBlocks(gen_block, node_configs,
+        test_conf.extra_blocks);
+
+    auto net = new APIManager(blocks);
     foreach (ref conf; configs)
         net.createNewNode(conf);
 
@@ -1059,6 +1066,41 @@ private immutable(Block) makeGenesisBlock (in NodeConfig[] node_configs)
         txs.assumeUnique,
         merkle_tree.assumeUnique
     );
+}
+
+/*******************************************************************************
+
+    Generate a set of blocks with spend transactions
+
+    Params:
+        gen_block = the genesis block
+        count = the number of extra blocks to generate. If 0, the return
+        blockchain will only contain the genesis block.
+
+    Returns:
+        The blockchain, including the provided genesis block
+
+*******************************************************************************/
+
+private immutable(Block)[] generateBlocks (
+    ref immutable Block gen_block, in NodeConfig[] node_configs, size_t count)
+{
+    const(Block)[] blocks = [gen_block];
+    if (count == 0)
+        return blocks.assumeUnique;  // just the genesis block
+
+    const(Transaction)[] prev_txs;
+    foreach (_; 0 .. count)
+    {
+        auto txs = makeChainedTransactions(getGenesisKeyPair(),
+            prev_txs, 1);
+
+        const NoEnrollments = null;
+        blocks ~= makeNewBlock(blocks[$ - 1], txs, NoEnrollments);
+        prev_txs = txs;
+    }
+
+    return blocks.assumeUnique;
 }
 
 /// Returns: the entire ledger from the provided node
