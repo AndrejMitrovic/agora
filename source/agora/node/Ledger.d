@@ -94,29 +94,34 @@ public class Ledger
         if (!this.storage.readLastBlock(this.last_block))
             assert(0);
 
-        // need to regenerate the UTXO set, starting from the genesis block
-        if (this.utxo_set.length == 0)
+        bool utxo_empty = this.utxo_set.length == 0;
+
+        // need to regenerate the UTXO set & Enrollments,
+        // starting from the genesis block
+        bool enrolls_empty = () {
+            Enrollment[] arr;
+            if (!this.enroll_man.getValidators(arr))
+                assert(0);
+            return arr.length == 0;
+        }();
+
+        if (utxo_empty || enrolls_empty)
         {
             Block block;
             foreach (height; 0 .. this.last_block.header.height + 1)
             {
-                this.storage.readBlock(block, height);
-                this.updateUTXOSet(block);
-            }
-        }
+                if (utxo_empty)
+                {
+                    this.storage.readBlock(block, height);
+                    this.updateUTXOSet(block);
+                }
 
-        // restore validator set from lastest blocks
-        if (this.last_block.header.height > 0)
-        {
-            foreach (i; 0 .. Enrollment.ValidatorCycle)
-            {
-                if (i >= this.last_block.header.height)
-                    break;
-
-                Block block;
-                this.storage.readBlock(block, this.last_block.header.height - i);
-                this.enroll_man.restoreValidators(this.last_block.header.height,
-                    block, this.utxo_set.getUTXOFinder());
+                if (enrolls_empty)
+                {
+                    this.enroll_man.restoreValidators(
+                        this.last_block.header.height, block,
+                        this.utxo_set.getUTXOFinder());
+                }
             }
         }
     }
