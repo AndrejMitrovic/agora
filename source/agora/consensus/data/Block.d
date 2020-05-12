@@ -389,6 +389,8 @@ unittest
 
     Create a new block, referencing the provided previous block.
 
+    The transactions and enrollments will be sorted when added to the block.
+
     Params:
         prev_block = the previous block
         txs = the transactions that will be contained in the new block
@@ -409,8 +411,9 @@ public Block makeNewBlock (Transactions)(const ref Block prev_block,
 
     block.header.merkle_root = block.buildMerkleTree();
     block.header.enrollments = enrollments;
+    block.header.enrollments.sort!((a, b) => a.utxo_key < b.utxo_key);
     assert(block.header.enrollments.isStrictlyMonotonic!
-        ("a.utxo_key < b.utxo_key"));
+        ("a.utxo_key < b.utxo_key"));  // there cannot be duplicates either
     return block;
 }
 
