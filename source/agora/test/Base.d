@@ -367,6 +367,25 @@ public class TestAPIManager
 
     /***************************************************************************
 
+        Shut down a specific node
+
+        Params:
+            node_pair = the node pair
+
+    ***************************************************************************/
+
+    public void shutdown (NodePair node_pair)
+    {
+        this.reg.unregister(node_pair.address);
+        node_pair.client.shutdown();
+        node_pair.client.ctrl.shutdown();
+
+        auto idx = this.nodes.countUntil(node_pair);
+        this.nodes[idx] = NodePair.init;
+    }
+
+    /***************************************************************************
+
         Shut down each of the nodes
 
     ***************************************************************************/
@@ -374,16 +393,10 @@ public class TestAPIManager
     public void shutdown ()
     {
         foreach (node; this.nodes)
-            enforce(this.reg.unregister(node.address));
-
-        foreach (ref node; this.nodes)
         {
-            node.client.shutdown();
-            node.client.ctrl.shutdown();
-            node.client = null;
+            if (node != NodePair.init)
+                this.shutdown(node);
         }
-
-        this.nodes = null;
     }
 
     /***************************************************************************
