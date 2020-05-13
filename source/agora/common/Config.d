@@ -89,15 +89,22 @@ public struct Config
     public LoggingConfig logging;
 }
 
+/// This selects the Genesis blocks based on the set network type
+public enum NetworkType
+{
+    MainNet,     // BOA main network
+    TestNet,     // BOA test network
+    Integration, // Integration tests / unittests only
+}
+
 /// Node config
 public struct NodeConfig
 {
     static assert(!hasUnsharedAliasing!(typeof(this)),
         "Type must be shareable accross threads");
 
-    /// If set, a hexdump serialized representation of the genesis block to use
-    /// in place of the built-in genesis block as defined by CoinNet
-    public string genesis_block;
+    /// Network type (MainNet, TestNet, Integration)
+    public NetworkType network_type;
 
     /// Is this a validator node
     public bool is_validator;
