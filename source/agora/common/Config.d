@@ -51,7 +51,6 @@ public struct CommandLine
     /// Helper to add items to `overrides`
     private void overridesHandler (string, string value)
     {
-        import std.string;
         const idx = value.indexOf('=');
         if (idx < 0) return;
         string k = value[0 .. idx], v = value[idx + 1 .. $];
