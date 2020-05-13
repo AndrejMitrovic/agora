@@ -206,6 +206,7 @@ public class EnrollmentManager
         size_t block_height, scope UTXOFinder finder) @safe
     {
         this.enroll_pool.remove(enroll.utxo_key);
+        this.validator_set.remove(enroll.utxo_key);
 
         if (!this.validator_set.add(block_height, finder, enroll))
             return false;
