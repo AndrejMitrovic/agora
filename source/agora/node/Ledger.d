@@ -226,7 +226,7 @@ public class Ledger
         if (!this.storage.saveBlock(block))
             assert(0);
 
-        this.enroll_man.clearExpiredValidators(this.last_block.header.height);
+        this.enroll_man.clearExpiredValidators(block.header.height);
 
         foreach (enrollment; block.header.enrollments)
             if (!this.enroll_man.addValidator(enrollment,
@@ -1061,6 +1061,12 @@ unittest
     auto block_4 = ledger.getBlocksFrom(4);
     enrollments.sort!("a.utxo_key < b.utxo_key");
     assert(block_4[0].header.enrollments == enrollments);
+
+    genNormalBlockTransactions(1008);
+    Enrollment[] validators;
+    assert(enroll_man.getValidators(validators));
+    assert(validators.length == 0);
+    assert(ledger.getBlockHeight() == 1012);
 }
 
 version (unittest)
