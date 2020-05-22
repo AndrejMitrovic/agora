@@ -41,12 +41,6 @@ jobs:
         submodules: true
         persist-credentials: false
 
-    # Install the D compiler
-    - name: Prepare compiler
-      uses: mihails-strasuns/setup-dlang@v1
-      with:
-          compiler: ${{ matrix.dc }}
-
     # Install os-specific packages
     # Those will show up in the list of steps, but be grayed out,
     # hence the usage of the `[OSX]` tag
