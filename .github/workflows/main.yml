@@ -58,14 +58,6 @@ jobs:
         echo ::set-env name=LIBRARY_PATH::${LD_LIBRARY_PATH-}:/usr/local/lib/
         echo ::set-env name=PKG_CONFIG_PATH::/usr/local/opt/sqlite/lib/pkgconfig:/usr/local/opt/openssl@1.1/lib/pkgconfig/
 
-    - name: '[Linux] Install dependencies & setup environment'
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install libsqlite3-dev
-        sudo apt-get install libsodium-dev
-        sudo apt-get install g++-9
-
     - name: '[Windows] Install dependencies & setup environment'
       if: runner.os == 'Windows'
       shell: powershell
