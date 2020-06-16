@@ -125,9 +125,8 @@ public class Validator : FullNode, API
             assert(0);
         }
 
-        const rand_seed = hashFull(0);  // todo: derive from preimages
         return buildQuorumConfig(this.config.node.key_pair.address,
-            keys, this.utxo_set.getUTXOFinder(), rand_seed);
+            keys, this.utxo_set.getUTXOFinder());
     }
 
     /***************************************************************************

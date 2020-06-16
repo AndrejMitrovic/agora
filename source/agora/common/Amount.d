@@ -47,8 +47,6 @@ public struct Amount
     /// Internal data storage
     private ulong value;
 
-    public ulong getRaw () { return value; }
-
     /***************************************************************************
 
         Construct an instance of an `Amount`
