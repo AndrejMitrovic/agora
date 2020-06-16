@@ -152,12 +152,21 @@ public QuorumConfig buildQuorumConfig ( const ref PublicKey key,
     return quorum;
 }
 
-///
+/// Helper routine:
 private void assertEq (
-    in QuorumConfig actual, in QuorumConfig expected,
+    in QuorumConfig actual, size_t threshold, KeyPair[] key_pairs,
     string file = __FILE__, size_t line = __LINE__)
 {
     import core.exception;
+
+    // we need to recreate the expected qc, as the nodes are sorted
+    // by address, not by keypair
+    QuorumConfig expected =
+    {
+        threshold : threshold,
+        nodes : key_pairs.map!(p => cast()p.address).array
+    };
+    sort(expected.nodes);
 
     if (expected == actual)
         return;
@@ -173,11 +182,14 @@ private void assertEq (
             file, line);
 
     if (expected.nodes != actual.nodes)
+    {
         //throw new AssertError(
             //format("Actual nodes are: %s", actual.nodes.map!(n => WK.Keys[WK.Keys[n]])),
             //file, line);
-        writefln("%s(%s): Actual nodes are: %s",
-            file, line, actual.nodes.map!(n => WK.Keys[WK.Keys[n]]));
+        auto nodes = actual.nodes.map!(n => WK.Keys[WK.Keys[n]]).map!(to!string).array;
+        sort(nodes);
+        writefln("%s(%s): Actual nodes are: %s", file, line, nodes);
+    }
 
     //assert(0);
 }
@@ -186,89 +198,65 @@ private void assertEq (
 unittest
 {
     auto quorums = buildTestQuorums(3);
-    const QuorumConfig qc = {
-        threshold : 3,
-        nodes: [WK.Keys.A.address, WK.Keys.C.address, WK.Keys.B.address]
-    };
-    assertEq(quorums[WK.Keys.A.address], qc);
-    assertEq(quorums[WK.Keys.B.address], qc);
-    assertEq(quorums[WK.Keys.C.address], qc);
+    verifyQuorumsSanity(quorums);
+    verifyQuorumsIntersect(quorums);
+
+    assertEq(quorums[WK.Keys.A.address], 3, [WK.Keys.A, WK.Keys.B, WK.Keys.C]);
+    assertEq(quorums[WK.Keys.B.address], 3, [WK.Keys.A, WK.Keys.B, WK.Keys.C]);
+    assertEq(quorums[WK.Keys.C.address], 3, [WK.Keys.A, WK.Keys.B, WK.Keys.C]);
 }
 
 /// 4 nodes with equal stakes
 unittest
 {
     auto quorums = buildTestQuorums(4);
-    const QuorumConfig qc = {
-        threshold : 4,
-        nodes: [WK.Keys.D.address, WK.Keys.A.address, WK.Keys.C.address, WK.Keys.B.address]
-    };
-    assertEq(quorums[WK.Keys.A.address], qc);
-    assertEq(quorums[WK.Keys.B.address], qc);
-    assertEq(quorums[WK.Keys.C.address], qc);
-    assertEq(quorums[WK.Keys.D.address], qc);
+    verifyQuorumsSanity(quorums);
+    verifyQuorumsIntersect(quorums);
+
+    assertEq(quorums[WK.Keys.A.address], 4, [WK.Keys.A, WK.Keys.B, WK.Keys.C, WK.Keys.D]);
+    assertEq(quorums[WK.Keys.B.address], 4, [WK.Keys.A, WK.Keys.B, WK.Keys.C, WK.Keys.D]);
+    assertEq(quorums[WK.Keys.C.address], 4, [WK.Keys.A, WK.Keys.B, WK.Keys.C, WK.Keys.D]);
+    assertEq(quorums[WK.Keys.D.address], 4, [WK.Keys.A, WK.Keys.B, WK.Keys.C, WK.Keys.D]);
 }
 
 /// 8 nodes with equal stakes
 unittest
 {
     auto quorums = buildTestQuorums(8);
+    verifyQuorumsSanity(quorums);
+    verifyQuorumsIntersect(quorums);
 
-    assertEq(quorums[WK.Keys.A.address],
-        QuorumConfig(
-            7,
-            [WK.Keys.D.address, WK.Keys.G.address, WK.Keys.A.address, WK.Keys.C.address,
-             WK.Keys.B.address, WK.Keys.E.address, WK.Keys.F.address]
-        ));
+    assertEq(quorums[WK.Keys.A.address], 7,
+        [WK.Keys.A, WK.Keys.B, WK.Keys.C, WK.Keys.D,
+         WK.Keys.E, WK.Keys.F, WK.Keys.G]);
 
-    assertEq(quorums[WK.Keys.B.address],
-        QuorumConfig(
-            7,
-            [WK.Keys.D.address, WK.Keys.G.address, WK.Keys.A.address, WK.Keys.C.address,
-             WK.Keys.B.address, WK.Keys.E.address, WK.Keys.F.address]
-        ));
+    assertEq(quorums[WK.Keys.B.address], 7,
+        [WK.Keys.A, WK.Keys.B, WK.Keys.C, WK.Keys.D,
+         WK.Keys.E, WK.Keys.F, WK.Keys.G]);
 
-    assertEq(quorums[WK.Keys.C.address],
-        QuorumConfig(
-            7,
-            [WK.Keys.D.address, WK.Keys.G.address, WK.Keys.H.address, WK.Keys.A.address,
-             WK.Keys.C.address, WK.Keys.E.address, WK.Keys.F.address]
-        ));
+    assertEq(quorums[WK.Keys.C.address], 7,
+        [WK.Keys.A, WK.Keys.C, WK.Keys.D, WK.Keys.E,
+         WK.Keys.F, WK.Keys.G, WK.Keys.H]);
 
-    assertEq(quorums[WK.Keys.D.address],
-        QuorumConfig(
-            7,
-            [WK.Keys.D.address, WK.Keys.G.address, WK.Keys.H.address, WK.Keys.A.address,
-             WK.Keys.B.address, WK.Keys.E.address, WK.Keys.F.address]
-        ));
+    assertEq(quorums[WK.Keys.D.address], 7,
+        [WK.Keys.A, WK.Keys.B, WK.Keys.D, WK.Keys.E,
+         WK.Keys.F, WK.Keys.G, WK.Keys.H]);
 
-    assertEq(quorums[WK.Keys.E.address],
-        QuorumConfig(
-            7,
-            [WK.Keys.D.address, WK.Keys.G.address, WK.Keys.H.address, WK.Keys.C.address,
-             WK.Keys.B.address, WK.Keys.E.address, WK.Keys.F.address]
-        ));
+    assertEq(quorums[WK.Keys.E.address], 7,
+        [WK.Keys.B, WK.Keys.C, WK.Keys.D, WK.Keys.E,
+         WK.Keys.F, WK.Keys.G, WK.Keys.H]);
 
-    assertEq(quorums[WK.Keys.F.address],
-        QuorumConfig(
-            7,
-            [WK.Keys.D.address, WK.Keys.H.address, WK.Keys.A.address, WK.Keys.C.address,
-             WK.Keys.B.address, WK.Keys.E.address, WK.Keys.F.address]
-        ));
+    assertEq(quorums[WK.Keys.F.address], 7,
+        [WK.Keys.A, WK.Keys.B, WK.Keys.C, WK.Keys.D,
+         WK.Keys.E, WK.Keys.F, WK.Keys.H]);
 
-    assertEq(quorums[WK.Keys.G.address],
-        QuorumConfig(
-            7,
-            [WK.Keys.G.address, WK.Keys.H.address, WK.Keys.A.address, WK.Keys.C.address,
-             WK.Keys.B.address, WK.Keys.E.address, WK.Keys.F.address]
-        ));
+    assertEq(quorums[WK.Keys.G.address], 7,
+        [WK.Keys.A, WK.Keys.B, WK.Keys.C, WK.Keys.E,
+         WK.Keys.F, WK.Keys.G, WK.Keys.H]);
 
-    assertEq(quorums[WK.Keys.H.address],
-        QuorumConfig(
-            7,
-            [WK.Keys.D.address, WK.Keys.G.address, WK.Keys.H.address, WK.Keys.A.address,
-             WK.Keys.C.address, WK.Keys.B.address, WK.Keys.F.address]
-        ));
+    assertEq(quorums[WK.Keys.H.address], 7,
+        [WK.Keys.A, WK.Keys.B, WK.Keys.C, WK.Keys.D,
+         WK.Keys.F, WK.Keys.G, WK.Keys.H]);
 }
 
 ///// 8 nodes with equal stakes
