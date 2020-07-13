@@ -68,8 +68,8 @@ public extern (C++) class Nominator : SCPDriver
     /// Similar to how we use FakeClockBanManager!
     private Set!ulong timers;
 
-    /// The quorum set
-    private SCPQuorumSetPtr[Hash] quorum_set;
+    /// The mapping of all known quorum sets
+    private SCPQuorumSetPtr[Hash] known_quorums;
 
     private alias TimerType = Slot.timerIDs;
     static assert(TimerType.max == 1);
@@ -122,24 +122,24 @@ extern(D):
     ***************************************************************************/
 
     public void setQuorumConfig (const ref QuorumConfig quorum,
-        const(QuorumConfig)[] other_quorums)
+        const(QuorumConfig)[] other_quorums) nothrow @safe
     {
         assert(!this.is_nominating);
-        this.quorum_set.clear();
+        () @trusted { this.known_quorums.clear(); }();
 
         // store the list of other node's quorum hashes
         foreach (qc; other_quorums)
         {
-            auto quorum_set = verifyBuildSCPConfig(qc);
+            auto quorum_set = buildSCPConfig(qc);
             auto shared_set = makeSharedSCPQuorumSet(quorum_set);
-            this.quorum_set[hashFull(quorum_set)] = shared_set;
+            this.known_quorums[hashFull(quorum_set)] = shared_set;
         }
 
         // set up our own quorum
-        auto quorum_set = verifyBuildSCPConfig(quorum);
-        this.scp.updateLocalQuorumSet(quorum_set);
-        auto shared_set = makeSharedSCPQuorumSet(this.scp.getLocalQuorumSet());
-        this.quorum_set[hashFull(quorum_set)] = shared_set;
+        auto quorum_set = buildSCPConfig(quorum);
+        () @trusted { this.scp.updateLocalQuorumSet(quorum_set); }();
+        auto shared_set = makeSharedSCPQuorumSet(quorum_set);
+        this.known_quorums[hashFull(quorum_set)] = shared_set;
     }
 
     /***************************************************************************
@@ -195,36 +195,19 @@ extern(D):
 
     /***************************************************************************
 
-        Verify the quorum configuration, and create a normalized SCPQuorum.
+        Convert the quorum config into a normalizec SCP quorum config
 
         Params:
             config = the quorum configuration
 
-        Throws:
-            an Exception if the quorum configuration is invalid
-
     ***************************************************************************/
 
-    private static SCPQuorumSet verifyBuildSCPConfig (
-        ref const QuorumConfig config)
+    private static SCPQuorumSet buildSCPConfig (ref const QuorumConfig config)
+        @safe nothrow
     {
         import scpd.scp.QuorumSetUtils;
-
         auto scp_quorum = toSCPQuorumSet(config);
-        normalizeQSet(scp_quorum);
-
-        // todo: assertion fails do the misconfigured(?) threshold of 1 which
-        // is lower than vBlockingSize in QuorumSetSanityChecker::checkSanity
-        const ExtraChecks = false;
-        const(char)* reason;
-        if (!isQuorumSetSane(scp_quorum, ExtraChecks, &reason))
-        {
-            import std.conv;
-            string failure = reason.to!string;
-            log.fatal(failure);
-            throw new Exception(failure);
-        }
-
+        () @trusted { normalizeQSet(scp_quorum); }();
         return scp_quorum;
     }
 
@@ -438,7 +421,7 @@ extern(D):
 
     public override SCPQuorumSetPtr getQSet (ref const(StellarHash) qSetHash)
     {
-        if (auto scp_quroum = qSetHash in this.quorum_set)
+        if (auto scp_quroum = qSetHash in this.known_quorums)
             return *scp_quroum;
 
         return SCPQuorumSetPtr.init;
