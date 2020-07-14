@@ -80,9 +80,133 @@ public import std.range;
 // To print messages to the screen while debugging a test
 public import std.stdio;
 
+import geod24.concurrency;
+import core.internal.execinfo;
+import core.stdc.stdlib : free;
+import core.sys.posix.signal;
+import std.string : fromStringz;
+import core.sys.posix.sys.types;
+import core.sync.mutex : Mutex;
+import core.stdc.stdint;
+
+/// Initialize a custom SEGV handler for the uniteststs.
+/// By default Druntime already does this, however since this is process-wide
+/// the signal will be delivered to the *first available thread*, meaning that
+/// the emitted backtrace will only be shown for one specific thread.
+/// We override this behavior by multiplexing the signal accross all threads and
+/// forcing them to emit each of their backtrace. We use a lock to avoid
+/// interleaving output. And we emit some editional useful thread info:
+/// unittest which spawned the thread, any node identifier (public key).
+
+shared Mutex tid_mutex;
+static shared Mutex print_mutex;
+__gshared pthread_t[] tids;
+
 shared static this()
 {
     Runtime.extendedModuleUnitTester = &customModuleUnitTester;
+    tid_mutex = new shared Mutex();
+    print_mutex = new shared Mutex();
+}
+
+import core.sys.darwin.pthread : pthread_kill, pthread_threadid_np;
+import core.sys.posix.pthread : pthread_self;
+
+static this ()
+{
+    synchronized (tid_mutex)
+        tids ~= pthread_self();
+}
+
+public void dropIndex (T) (ref T[] arr, size_t index)
+{
+    assert(index < arr.length);
+    immutable newLen = arr.length - 1;
+
+    if (index != newLen)
+        memmove(&(arr[index]), &(arr[index + 1]), T.sizeof * (newLen - index));
+
+    arr.length = newLen;
+}
+
+version (Posix)
+private void setCustomSegvHandler ()
+{
+    import core.internal.execinfo;
+
+    sigaction_t action = void;
+    sigaction_t oldseg = void;
+    sigaction_t oldbus = void;
+
+    (cast(byte*) &action)[0 .. action.sizeof] = 0;
+    sigfillset( &action.sa_mask ); // block other signals
+
+    // WARNING: do not use '| SA_RESETHAND' like druntime did, this will reset
+    // the signal handler back to the default one after the signal is handled
+    action.sa_flags = SA_SIGINFO;
+    action.sa_sigaction = &segvHandler;
+    sigaction(SIGSEGV, &action, &oldseg);
+    sigaction(SIGBUS, &action, &oldbus);
+}
+
+import core.sys.posix.sys.types;
+import core.sys.darwin.pthread;
+
+extern (C) void segvHandler ( int signum, siginfo_t* info, void* ptr ) nothrow
+{
+    scope (failure) assert(0);
+
+    shared static bool called;
+    bool propagate;
+    synchronized (tid_mutex)
+    {
+        if (!called)
+        {
+            called = true;
+            propagate = true;
+        }
+    }
+
+    try
+    {
+        if (propagate)
+        {
+            synchronized (tid_mutex)
+            foreach (tid; tids)
+            {
+                if (tid != pthread_self())
+                    pthread_kill(tid, SIGSEGV);
+            }
+        }
+
+        static enum MAXFRAMES = 128;
+        void*[MAXFRAMES] callstack;
+        auto frame_count = backtrace(callstack.ptr, MAXFRAMES);
+        if (frame_count == 0)
+            return;  // some threads may have an empty stack
+                     // ( thread is dead already)
+        char** symbols = backtrace_symbols(callstack.ptr, frame_count);
+        scope (exit) free(symbols);
+
+        synchronized (print_mutex)
+        {
+            writeln("=======================");
+            writefln("Thread %s (sig: %s):\n", thisTid(), signum);
+            stdout.flush();
+            foreach (idx, symbol; symbols[0 .. frame_count])
+            {
+                writefln("Frame %s", symbol.fromStringz);
+                stdout.flush();
+            }
+            writeln("=======================\n");
+            stdout.flush();
+        }
+    }
+    catch (Throwable thr)
+    {
+        writefln("ERROR: %s", thr);
+        stdout.flush();
+    }
 }
 
 /// Custom unnitest runner as a workaround for multi-threading issue:
@@ -97,6 +221,8 @@ private UnitTestResult customModuleUnitTester ()
     import std.string;
     import std.uni;
     import core.atomic;
+
+    setCustomSegvHandler();
 
     // by default emit only errors during unittests.
     // can be re-set by calling code.
