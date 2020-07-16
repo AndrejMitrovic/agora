@@ -37,7 +37,7 @@ private int main (string[] args)
         Thread.sleep(30.seconds);
         writefln("Slept for %s", sw.peek);
 
-        if (sw.peek > 6.minutes)
+        if (sw.peek > 6.seconds)
             break;
     }
 

@@ -8,7 +8,7 @@
 #   For example use `${{ github.workspace }}` over `${GITHUB_WORKSPACE}`
 name: CI
 
-on: [push, pull_request]
+on: [pull_request]
 
 jobs:
   main:
@@ -108,6 +108,7 @@ jobs:
       run: |
         ulimit -c unlimited
         ./ci/run.sh || exit
+
         sudo chmod -R +rwx /cores/ || true
         file /cores/*
         # echo "Core files:"
