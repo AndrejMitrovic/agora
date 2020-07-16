@@ -31,7 +31,7 @@ private int main (string[] args)
         if (tryWait(binary_pid).terminated)
         {
             writeln("Unittests passed.");
-            return 0;  // nothing to do
+            return 1;  // nothing to do
         }
 
         Thread.sleep(30.seconds);
