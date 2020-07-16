@@ -56,6 +56,9 @@ private int main (string[] args)
     //kill(dbg, SIGKILL);
     writefln("-- Sending SIGSEGV");
     kill(binary_pid, SIGSEGV);
+
+    writefln("Sleeping while core dump..");
+    Thread.sleep(2.minutes);
     return 0;
 }
 
