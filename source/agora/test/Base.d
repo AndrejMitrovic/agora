@@ -80,9 +80,125 @@ public import std.range;
 // To print messages to the screen while debugging a test
 public import std.stdio;
 
+import geod24.concurrency;
+import core.internal.execinfo;
+import core.stdc.stdlib : free;
+import core.sys.posix.signal;
+import std.string : fromStringz;
+import core.stdc.stdint;
+import core.sys.posix.sys.types;
+import core.sync.mutex : Mutex;
+import core.sys.darwin.pthread;
+import core.sys.posix.pthread : pthread_self;
+import core.sys.posix.sys.types;
+
+/// Used for appending to 'tids'
+shared Mutex tid_mutex;
+
+/// List of all known thread IDs. We'll propagate any SEGV/SIGBUS signals to them.
+__gshared pthread_t[] tids;
+
+/// Prevents interleaved output
+static shared Mutex segv_print_mutex;
+
 shared static this()
 {
     Runtime.extendedModuleUnitTester = &customModuleUnitTester;
+    tid_mutex = new shared Mutex();
+    segv_print_mutex = new shared Mutex();
+}
+
+/// Add this thread's TID to the tid list
+static this ()
+{
+    synchronized (tid_mutex)
+        tids ~= pthread_self();
+}
+
+/// Initialize a custom SEGV handler for the uniteststs.
+/// By default Druntime already does this, however since this is process-wide
+/// the signal will be delivered to the *first available thread*, meaning that
+/// the emitted backtrace will only be shown for one specific thread.
+/// We override this behavior by multiplexing the signal accross all threads and
+/// forcing them to emit each of their backtrace. We use a lock to avoid
+/// interleaving output.
+version (Posix)
+private void setCustomSegvHandler ()
+{
+    import core.internal.execinfo;
+
+    sigaction_t action = void;
+    sigaction_t oldseg = void;
+    sigaction_t oldbus = void;
+
+    (cast(byte*) &action)[0 .. action.sizeof] = 0;
+    sigfillset( &action.sa_mask ); // block other signals
+
+    // WARNING: do not use '| SA_RESETHAND' like druntime did, this will reset
+    // the signal handler back to the default one after the signal is handled
+    action.sa_flags = SA_SIGINFO;
+    action.sa_sigaction = &segvHandler;
+    sigaction(SIGSEGV, &action, &oldseg);
+    sigaction(SIGBUS, &action, &oldbus);
+}
+
+extern (C) void segvHandler ( int signum, siginfo_t* info, void* ptr ) nothrow
+{
+    bool send_sig;  // whethre to propagate the signal to all other known threads
+    shared static bool called;
+    if (!called)  // doesn't need lock - only 1 thread will initially receive signal
+    {
+        called = true;
+        send_sig = true;
+    }
+
+    try
+    {
+        if (send_sig)
+        {
+            // sync: in case new threads get spawned. not sure how to stop all
+            // thread creation at this point.
+            synchronized (tid_mutex)
+            foreach (tid; tids)
+            {
+                if (tid != pthread_self())
+                    pthread_kill(tid, signum);
+            }
+        }
+
+        static enum MAXFRAMES = 128;
+        void*[MAXFRAMES] callstack;
+        auto frame_count = backtrace(callstack.ptr, MAXFRAMES);
+
+        // we don't keep track of destroyed threads so 'tids' may include
+        // dead threads and the stack might be empty when segvHandler gets called
+        if (frame_count == 0)
+            return;
+
+        // using this instead of backtrace_symbols_fd to print a bit more
+        // information about the thread below
+        char** symbols = backtrace_symbols(callstack.ptr, frame_count);
+        scope (exit) free(symbols);
+
+        // prevent interleaved output
+        synchronized (segv_print_mutex)
+        {
+            writeln("=======================");
+            writefln("Thread %s (sig: %s):\n", thisTid(), signum);
+            foreach (idx, symbol; symbols[0 .. frame_count])
+            {
+                writefln("Frame %s", symbol.fromStringz);
+            }
+            writeln("=======================\n");
+            stdout.flush();
+        }
+    }
+    catch (Exception ex)
+    {
+        scope (failure) assert(0);  // silence writefln nothrow errors
+        stderr.writefln("ERROR: %s", ex);
+        stderr.flush();
+    }
 }
 
 /// Custom unnitest runner as a workaround for multi-threading issue:
@@ -97,6 +213,8 @@ private UnitTestResult customModuleUnitTester ()
     import std.string;
     import std.uni;
     import core.atomic;
+
+    setCustomSegvHandler();
 
     // by default emit only errors during unittests.
     // can be re-set by calling code.
