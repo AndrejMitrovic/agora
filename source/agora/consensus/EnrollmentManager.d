@@ -276,15 +276,17 @@ public class EnrollmentManager
     ***************************************************************************/
 
     public string addValidator (const ref Enrollment enroll,
-        Height block_height, scope UTXOFinder finder,
-        const UTXOSetValue[Hash] self_utxos) @safe nothrow
+        Height block_height, scope UTXOFinder finder) @safe nothrow
     {
         this.enroll_pool.remove(enroll.utxo_key);
 
         if (auto r = this.validator_set.add(block_height, finder, enroll))
             return r;
 
-        if (enroll.utxo_key in self_utxos)
+        const pubkey = this.getEnrollmentPublicKey();
+        UTXOSetValue utxo;
+        if (finder(enroll.utxo_key, size_t.max, utxo)
+            && utxo.output.address == pubkey)
         {
             this.data = enroll;
             this.enroll_key = enroll.utxo_key;
@@ -633,12 +635,11 @@ public class EnrollmentManager
             last_height = the latest block height
             block = the block to update the validator set with
             finder = the delegate to find UTXOs with
-            self_utxos = the UTXOs belonging to this node
 
     ***************************************************************************/
 
     public void restoreValidators (Height last_height, const ref Block block,
-        scope UTXOFinder finder, const ref UTXOSetValue[Hash] self_utxos)
+        scope UTXOFinder finder)
         @safe nothrow
     {
         assert(last_height >= block.header.height);
@@ -646,8 +647,7 @@ public class EnrollmentManager
         {
             foreach (const ref enroll; block.header.enrollments)
             {
-                this.addValidator(enroll, block.header.height, finder,
-                    self_utxos);
+                this.addValidator(enroll, block.header.height, finder);
             }
         }
     }
@@ -920,7 +920,6 @@ unittest
     // create an EnrollmentManager object
     auto man = new EnrollmentManager(":memory:", key_pair,
         new immutable(ConsensusParams)());
-    auto utxos = utxo_set.storage;
     Hash[] utxo_hashes = utxo_set.keys;
 
     // check the return value of `getEnrollmentPublicKey`
@@ -970,9 +969,9 @@ unittest
 
     // test for enrollment block height update
     assert(man.getEnrolledHeight(utxo_hash) == ulong.max);
-    assert(man.addValidator(enroll, Height(9), &utxo_set.findUTXO, utxos) is null);
+    assert(man.addValidator(enroll, Height(9), &utxo_set.findUTXO) is null);
     assert(man.getEnrolledHeight(enroll.utxo_key) == 9);
-    assert(man.addValidator(enroll, Height(9), &utxo_set.findUTXO, utxos) !is null);
+    assert(man.addValidator(enroll, Height(9), &utxo_set.findUTXO) !is null);
     assert(man.getEnrolledHeight(enroll2.utxo_key) == ulong.max);
     man.getEnrollments(enrolls, Height(9));
     assert(enrolls.length == 1);
@@ -1006,7 +1005,7 @@ unittest
     // So, a pre-image can only be got from the start height.
     PreImageInfo preimage;
     enroll = man.createEnrollment(utxo_hash);
-    assert(man.addValidator(enroll, Height(10), &utxo_set.findUTXO, utxos) is null);
+    assert(man.addValidator(enroll, Height(10), &utxo_set.findUTXO) is null);
     assert(!man.getPreimage(Height(10), preimage));
     assert(man.getPreimage(Height(11), preimage));
     assert(preimage.hash == man.cycle.preimages[$ - 1]);
@@ -1031,7 +1030,7 @@ unittest
     // validator A with the `utxo_hash` and the enrolled height of 10.
     // validator B with the 'utxo_hash2' and the enrolled height of 11.
     // validator C with the 'utxo_hash3' and no enrolled height.
-    assert(man.addValidator(enroll2, Height(11), &utxo_set.findUTXO, utxos) is null);
+    assert(man.addValidator(enroll2, Height(11), &utxo_set.findUTXO) is null);
     man.clearExpiredValidators(Height(11));
     assert(man.validatorCount() == 2);
     assert(man.getEnrolledUTXOs(keys));
@@ -1040,7 +1039,7 @@ unittest
     // set an enrolled height for validator C
     // set the block height to 1019, which means validator B is expired.
     // there is only one validator in the middle of 1020th block being made.
-    assert(man.addValidator(enroll3, Height(1019), &utxo_set.findUTXO, utxos) is null);
+    assert(man.addValidator(enroll3, Height(1019), &utxo_set.findUTXO) is null);
     man.clearExpiredValidators(Height(1019));
     assert(man.validatorCount() == 1);
     assert(man.getEnrolledUTXOs(keys));
@@ -1061,7 +1060,6 @@ unittest
 
     genesisSpendable().map!(txb => txb.refund(key_pair.address).sign(TxType.Freeze))
         .each!(tx => utxo_set.put(tx));
-    UTXOSetValue[Hash] utxos = utxo_set.storage;
 
     auto man = new EnrollmentManager(":memory:", key_pair,
         new immutable(ConsensusParams)());
@@ -1074,7 +1072,7 @@ unittest
     assert(man.params.ValidatorCycle - 101 == 907); // Sanity check
     assert(man.getValidatorPreimage(utxo_hash) == PreImageInfo.init);
     auto preimage = PreImageInfo(utxo_hash, man.cycle.preimages[100], 907);
-    assert(man.addValidator(enroll, Height(2), &utxo_set.findUTXO, utxos) is null);
+    assert(man.addValidator(enroll, Height(2), &utxo_set.findUTXO) is null);
     assert(man.addPreimage(preimage));
     assert(man.getValidatorPreimage(utxo_hash) == preimage);
 
@@ -1164,7 +1162,6 @@ unittest
 
     genesisSpendable().map!(txb => txb.refund(key_pair.address).sign(TxType.Freeze))
         .each!(tx => utxo_set.put(tx));
-    UTXOSetValue[Hash] utxos = utxo_set.storage;
 
     // create an EnrollmentManager object
     auto man = new EnrollmentManager(":memory:", key_pair,
@@ -1180,7 +1177,7 @@ unittest
     assert(man.getValidatorCount(block_height) == 0);  // not active yet
 
     man.clearExpiredValidators(block_height);
-    assert(man.addValidator(enrollment, block_height, &utxo_set.findUTXO, utxos) is null);
+    assert(man.addValidator(enrollment, block_height, &utxo_set.findUTXO) is null);
     assert(man.getValidatorCount(block_height) == 1);  // updated
 
     block_height = 3;
@@ -1192,7 +1189,7 @@ unittest
     assert(man.getValidatorCount(block_height) == 1);  // not active yet
 
     man.clearExpiredValidators(block_height);
-    assert(man.addValidator(enrollment, block_height, &utxo_set.findUTXO, utxos) is null);
+    assert(man.addValidator(enrollment, block_height, &utxo_set.findUTXO) is null);
     assert(man.getValidatorCount(block_height) == 2);  // updated
 
     block_height = 4;
@@ -1204,7 +1201,7 @@ unittest
     assert(man.getValidatorCount(block_height) == 2);  // not active yet
 
     man.clearExpiredValidators(block_height);
-    assert(man.addValidator(enrollment, block_height, &utxo_set.findUTXO, utxos) is null);
+    assert(man.addValidator(enrollment, block_height, &utxo_set.findUTXO) is null);
     assert(man.getValidatorCount(block_height) == 3);  // updated
 
     block_height = 5;    // valid block height : 0 <= H < 1008
@@ -1248,7 +1245,6 @@ unittest
     KeyPair key_pair = KeyPair.random();
     genesisSpendable().map!(txb => txb.refund(key_pair.address).sign(TxType.Freeze))
         .each!(tx => utxo_set.put(tx));
-    auto utxos = utxo_set.storage;
 
     // create an EnrollmentManager
     const validator_cycle = 20;
@@ -1271,7 +1267,7 @@ unittest
     assert(enrolls.length == 1);
 
     // make the enrollment a validator
-    man.addValidator(enroll, Height(11), &utxo_set.findUTXO, utxos);
+    man.addValidator(enroll, Height(11), &utxo_set.findUTXO);
     man.getEnrollments(enrolls, Height(11));
     assert(enrolls.length == 0);
 
@@ -1285,7 +1281,7 @@ unittest
 
     // make the enrollment a validator again
     man.clearExpiredValidators(Height(validator_cycle + 11));
-    man.addValidator(enroll, Height(validator_cycle + 11), &utxo_set.findUTXO, utxos);
+    man.addValidator(enroll, Height(validator_cycle + 11), &utxo_set.findUTXO);
 
     // add the enrollment that has the available height smaller than
     // the enrolled height of the validator, we can get no enrollment
