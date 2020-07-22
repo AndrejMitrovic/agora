@@ -109,19 +109,19 @@ jobs:
         ulimit -c unlimited
         ./ci/run.sh || exit
 
-        sudo chmod -R +rwx /cores/ || true
-        file /cores/*
+        # sudo chmod -R +rwx /cores/ || true
+        # file /cores/*
         # echo "Core files:"
         # ls -alh /cores/
-        tar -cvf file.tar /cores/* ./build/*
-        gzip file.tar
+        # tar -cvf file.tar /cores/* ./build/*
+        # gzip file.tar
 
-    - shell: bash
-      env:
-        SUPER_SECRET: ${{ secrets.HOST }}
-      run: |
-        unzip -P ${{secrets.PASS}} key.zip
-        cp access ~/.ssh/id_rsa
-        ssh-add ~/.ssh/id_rsa
-        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null file.tar.gz andrej_mitrovich@${{secrets.HOST}}:/home/andrej_mitrovich/
-        echo "Done trying to connect"
+    # - shell: bash
+    #   env:
+    #     SUPER_SECRET: ${{ secrets.HOST }}
+    #   run: |
+    #     unzip -P ${{secrets.PASS}} key.zip
+    #     cp access ~/.ssh/id_rsa
+    #     ssh-add ~/.ssh/id_rsa
+    #     scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null file.tar.gz andrej_mitrovich@${{secrets.HOST}}:/home/andrej_mitrovich/
+    #     echo "Done trying to connect"
