@@ -39,7 +39,7 @@ private int main (string[] args)
             return 1;  // nothing to do
         }
 
-        const sleep_interval = 6.seconds;
+        const sleep_interval = 30.seconds;
         writefln("Sleeping for %s..", sleep_interval);
         stdout.flush();
         Thread.sleep(sleep_interval);
