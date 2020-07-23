@@ -175,7 +175,7 @@ extern (C) void segvHandler ( int signum, siginfo_t* info, void* ptr ) nothrow
             foreach (tid; tids)
             {
                 if (tid != pthread_self())
-                    pthread_kill(tid, SIGSEGV);
+                    pthread_kill(tid, signum);
             }
         }
 
