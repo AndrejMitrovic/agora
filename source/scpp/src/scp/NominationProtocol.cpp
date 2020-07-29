@@ -239,8 +239,7 @@ NominationProtocol::updateRoundLeaders()
                            << " -> " << mRoundLeaders.size();
         for (auto const& rl : mRoundLeaders)
         {
-            CLOG(DEBUG, "SCP")
-                << "    leader " << mSlot.getSCPDriver().toShortString(rl);
+            std::cout << "leader " << mSlot.getSCPDriver().toStrKey(rl) << "\n";
         }
     }
 }
@@ -481,6 +480,9 @@ NominationProtocol::nominate(Value const& value, Value const& previousValue,
     mPreviousValue = previousValue;
 
     mRoundNumber++;
+
+    printf("Slot %d: round: %d\n", mSlot.mSlotIndex, mRoundNumber);
+
     updateRoundLeaders();
 
     Value nominatingValue;
@@ -521,6 +523,7 @@ NominationProtocol::nominate(Value const& value, Value const& previousValue,
 
     std::function<void()>* func = new std::function<void()>;
     *func = [slot, value, previousValue]() {
+            printf("-- NOMINATION FAILED. TRYING AGAIN\n");
             slot->nominate(value, previousValue, true);
         };
 

@@ -105,6 +105,7 @@ private UnitTestResult customModuleUnitTester ()
     //
     const chatty = !!("dchatty" in environment);
     auto filter = environment.get("dtest").toLower();
+    filter = "agora.test.enrollmentmanager";
     size_t filtered;
 
     // can't use ModuleInfo[], opApply returns temporaries..

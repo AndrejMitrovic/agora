@@ -31,7 +31,7 @@ import core.thread;
 import core.time;
 
 /// test for enrollment process & revealing a pre-image periodically
-unittest
+version (none) unittest
 {
     // generate 9 blocks, 1 short of the enrollments expiring.
     immutable validator_cycle = 10;
@@ -110,7 +110,7 @@ unittest
     };
     auto network = makeTestNetwork(conf);
     scope(exit) network.shutdown();
-    scope(failure) network.printLogs();
+    //scope(failure) network.printLogs();
     network.start();
     network.waitForDiscovery();
 
@@ -142,6 +142,8 @@ unittest
     assert(b20.header.enrollments.length == 1);
     assert(b20.header.enrollments[0] == enroll);
 }
+
+version (none):
 
 /// Situation: A node in the network crashes after a new enrollment for the
 ///     node has been inserted into a new block with consensus. And the node

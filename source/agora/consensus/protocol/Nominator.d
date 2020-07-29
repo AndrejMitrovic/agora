@@ -171,13 +171,12 @@ extern(D):
         if (this.is_nominating)
             return;
 
-        this.is_nominating = true;
-        scope (exit) this.is_nominating = false;
-
         ConsensusData data;
         this.ledger.prepareNominatingSet(data);
         if (data.tx_set.length == 0)
             return;  // not ready yet
+
+        this.is_nominating = true;
 
         // check whether the consensus data is valid before nominating it.
         if (auto msg = this.ledger.validateConsensusData(data))
@@ -407,6 +406,8 @@ extern(D):
             log.fatal("Externalization of SCP data failed: {}", exc);
             abort();
         }
+
+        this.is_nominating = false;  // ready for nominating again
     }
 
     /***************************************************************************
