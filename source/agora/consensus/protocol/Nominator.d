@@ -170,8 +170,8 @@ extern(D):
 
     protected bool prepareNominatingSet (out ConsensusData data) @safe
     {
-        this.ledger.prepareNominatingSet(data, Block.TxsInBlock);
-        if (data.tx_set.length != Block.TxsInBlock)
+        this.ledger.prepareNominatingSet(data, 128);  // arbitrary
+        if (data.tx_set.length == 0)
             return false;  // not ready to nominate yet
 
         // check whether the consensus data is valid before nominating it.

@@ -128,15 +128,10 @@ unittest
 
     The block which contains the block header and its body (the transactions).
 
-    In the current preliminary design a block contains a single transaction.
-
 *******************************************************************************/
 
 public struct Block
 {
-    /// number of transactions that constitutes a block
-    public enum TxsInBlock = 8;
-
     ///
     public BlockHeader header;
 
