@@ -43,7 +43,10 @@ import scpd.types.Utils;
 
 import core.stdc.stdint;
 import core.stdc.stdlib : abort;
-import core.time;
+import core.stdc.time;
+
+import std.conv;
+import core.time : msecs, seconds;
 
 mixin AddLogger!();
 
@@ -80,8 +83,15 @@ public extern (C++) class Nominator : SCPDriver
     /// Currently active timers grouped by type
     private ITimer[TimerType.max + 1] active_timers;
 
-    /// Whether we're in the process of nominating
+    /// Whether we're in the asynchronous stage of nominating
     private bool is_nominating;
+
+    /// Periodic nomination timer. It runs every second and checks the clock
+    /// time to see if it's time to start nominating. We do not use the
+    /// `BlockInterval` interval directly because this makes the timer
+    /// succeptible to clock drift. Instead, the clock is checked every second.
+    /// Note that Clock network synchronization is not yet implemented.
+    private ITimer nomination_timer;
 
 extern(D):
 
@@ -152,6 +162,44 @@ extern(D):
 
     /***************************************************************************
 
+        Begins the nomination timer
+
+        This should be called once when a Node's enrollment has been confirmed
+        on the blockchain.
+
+    ***************************************************************************/
+
+    public void startNominatingTimer () @trusted nothrow
+    {
+        if (this.nomination_timer !is null)  // already running
+            return;
+
+        // For unittests we don't want to wait 1 second between checks
+        version (unittest) enum CheckNominateInterval = 100.msecs;
+        else enum CheckNominateInterval = 1.seconds;
+        this.nomination_timer = this.taskman.setTimer(CheckNominateInterval,
+            &this.checkAndNominate, Periodic.Yes);
+    }
+
+    /***************************************************************************
+
+        Stops nominating.
+
+        This should be called once when a Node's enrollment expires.
+
+    ***************************************************************************/
+
+    public void stopNominatingTimer () @safe nothrow
+    {
+        if (this.nomination_timer !is null)
+        {
+            this.nomination_timer.stop();
+            this.nomination_timer = null;
+        }
+    }
+
+    /***************************************************************************
+
         Returns:
             true if we're currently in the process of nominating
 
@@ -181,7 +229,8 @@ extern(D):
 
     ***************************************************************************/
 
-    protected bool prepareNominatingSet (out ConsensusData data) @safe
+    protected bool prepareNominatingSet (out ConsensusData data,
+        in time_t cur_time) @safe
     {
         this.ledger.prepareNominatingSet(data, 128);  // arbitrary
         if (data.tx_set.length == 0)
@@ -200,27 +249,57 @@ extern(D):
 
     /***************************************************************************
 
-        Try to begin a nomination round.
+        Gets the expected block height for the provided time.
 
-        If there is already one in progress, or if there are not enough
-        transactions in the tx pool, return early.
+        Returns:
+            the expected block height for the provided time
 
     ***************************************************************************/
 
-    public void tryNominate () @safe
+    private ulong getExpectedBlockHeight (time_t time) @safe @nogc nothrow pure
     {
-        // if we received another transaction while we're nominating, don't nominate again.
-        // todo: when we change nomination to be time-based (rather than input-based),
-        // then remove this part as it will be handled by a timer
+        return (time - this.params.GenesisStartTime) /
+            this.params.BlockIntervalSeconds;
+    }
+
+    /***************************************************************************
+
+        The main nominating function.
+
+        This function is called periodically by the nominating timer.
+
+        The function will return early if either one of these are true:
+        - We're already in the asynchronous stage of nominating or balloting
+        - The current ledger height is already >= getExpectedBlockHeight()
+        - There are no transactions in the pool to nominate yet
+
+    ***************************************************************************/
+
+    public void checkAndNominate () @safe
+    {
+        // already in the asynchronous stage of nominating
         if (this.is_nominating)
             return;
 
-        this.is_nominating = true;
-        scope (exit) this.is_nominating = false;
+        const cur_time = this.clock.time();
+        if (cur_time < this.params.GenesisStartTime)
+        {
+            log.fatal("Clock is out of sync. " ~
+                "Current time: {}. Genesis time: {}", cur_time,
+                this.params.GenesisStartTime);
+            return;
+        }
+
+        if (this.ledger.getBlockHeight() >=
+            this.getExpectedBlockHeight(cur_time))
+            return;  // too early to nominate
 
         ConsensusData data;
-        if (!this.prepareNominatingSet(data))
+        if (!this.prepareNominatingSet(data, cur_time))
             return;
+
+        log.info("Nomination started at {}", cur_time);
+        this.is_nominating = true;
 
         // note: we are not passing the previous tx set as we don't really
         // need it at this point (might later be necessary for chain upgrades)
@@ -336,6 +415,11 @@ extern(D):
 
     public void receiveEnvelope (scope ref const(SCPEnvelope) envelope) @trusted
     {
+        // ignore messages if `startNominatingTimer` was never called or
+        // if `stopNominatingTimer` was called
+        if (this.nomination_timer is null)
+            return;
+
         const cur_height = this.ledger.getBlockHeight();
         if (envelope.statement.slotIndex <= cur_height)
         {
@@ -419,6 +503,9 @@ extern(D):
         if (slot_idx <= this.ledger.getBlockHeight())
             return;  // slot was already externalized
 
+        // finished nominating, can start a new round later
+        this.is_nominating = false;
+        this.scp.stopNomination(slot_idx);
         ConsensusData data = void;
         try
             data = deserializeFull!ConsensusData(value[]);

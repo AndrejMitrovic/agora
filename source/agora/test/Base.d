@@ -62,7 +62,9 @@ import geod24.Registry;
 
 import std.array;
 import std.exception;
+import std.range;
 
+import core.atomic : atomicLoad, atomicStore;
 import core.runtime;
 import core.stdc.time;
 
@@ -364,7 +366,7 @@ extern(D):
 
     ///
     public this (immutable(ConsensusParams) params, Clock clock,
-        NetworkManager network, KeyPair key_pair, Ledger ledger, 
+        NetworkManager network, KeyPair key_pair, Ledger ledger,
         TaskManager taskman, ulong txs_to_nominate)
     {
         this.txs_to_nominate = txs_to_nominate;
@@ -373,7 +375,8 @@ extern(D):
 
     /// Overrides the default behavior and changes nomination behavior based
     /// on the TestConf 'txs_to_nominate' option
-    protected override bool prepareNominatingSet (out ConsensusData data) @safe
+    protected override bool prepareNominatingSet (out ConsensusData data,
+        in time_t cur_time) @safe
     {
         // if 0 take all txs, otherwise nominate exactly this many txs
         this.ledger.prepareNominatingSet(data,
@@ -404,6 +407,23 @@ public struct NodePair
 
     ///
     public RemoteAPI!TestAPI client;
+
+    /// the adjustable local clock time for this node.
+    /// This does not affect request timeouts and is only
+    /// used in the Nomination protocol.
+    private shared(time_t)* cur_time;
+
+    /// Get the current clock time
+    @property time_t time () @trusted @nogc nothrow
+    {
+        return atomicLoad(*this.cur_time);
+    }
+
+    /// Set the new time
+    @property void time (time_t new_time) @trusted @nogc nothrow
+    {
+        atomicStore(*this.cur_time, new_time);
+    }
 }
 
 /*******************************************************************************
@@ -426,6 +446,14 @@ public class TestAPIManager
     /// Contains the initial blockchain state of all nodes
     public immutable(Block)[] blocks;
 
+    /// Genesis block start time
+    protected time_t genesis_start_time;
+
+    /// The initial clock time of every spawned node. Note that if there were
+    /// any extra blocks loaded (`blocks` in the ctor) then the initial time
+    /// will be genesis_start_time + (last_height * block_interval)
+    protected time_t initial_time;
+
     /// convenience: returns a random-access range which lets us access clients
     auto clients ()
     {
@@ -436,19 +464,25 @@ public class TestAPIManager
     protected Registry reg;
 
     ///
-    public this (immutable(Block)[] blocks, TestConf test_conf)
+    public this (immutable(Block)[] blocks, TestConf test_conf,
+        time_t genesis_start_time)
     {
         this.test_conf = test_conf;
         this.blocks = blocks;
+        this.genesis_start_time = genesis_start_time;
+        this.initial_time = this.getBlockTime(blocks[$ - 1].header.height);
         this.reg.initialize();
     }
 
     /***************************************************************************
 
-        Checks that all the nodes contain the given block height in their ledger.
+        Sets the clock time to the expected clock time to produce a block at
+        the given height, and verifies that the nodes have generated a block
+        at the given block height.
 
         The overload allows passing a subset of nodes to verify the block
-        heights for only these nodes.
+        heights for only these nodes. Note that the clock time is adjusted
+        for all nodes (this is what most tests expect).
 
         Params:
             height = the expected block height
@@ -467,10 +501,57 @@ public class TestAPIManager
         Duration timeout, string file = __FILE__, int line = __LINE__)
         if (isInputRange!Clients)
     {
+        this.setTimeFor(height);
         clients.enumerate.each!((idx, node) =>
             retryFor(node.getBlockHeight() == height, timeout,
                 format("Node %s has block height %s. Expected: %s",
                     idx, node.getBlockHeight(), height), file, line));
+    }
+
+    /***************************************************************************
+
+        Set the new clock time for all node instances based on the block height.
+
+        Params:
+            new_time = the new clock time
+
+    ***************************************************************************/
+
+    public void setTimeFor (Height height)
+    {
+        const exp_time = this.getBlockTime(height);
+        this.setTime(exp_time);
+    }
+
+    /***************************************************************************
+
+        Set the new clock time for all node instances.
+
+        Params:
+            new_time = the new clock time
+
+    ***************************************************************************/
+
+    public void setTime (time_t new_time)
+    {
+        foreach (pair; nodes)
+            pair.time = new_time;
+    }
+
+    /***************************************************************************
+
+        Params:
+            height = the requested block height
+
+        Returns:
+            the expected timestamp for the given block height
+
+    ***************************************************************************/
+
+    public time_t getBlockTime (Height height)
+    {
+        return to!time_t(this.genesis_start_time +
+            (height * this.test_conf.block_interval_sec));
     }
 
     /***************************************************************************
@@ -483,23 +564,25 @@ public class TestAPIManager
 
     ***************************************************************************/
 
-    public void createNewNode (Config conf, )
+    public void createNewNode (Config conf)
     {
         RemoteAPI!TestAPI api;
+        auto time = new shared(time_t)(this.initial_time);
 
         if (conf.node.is_validator)
         {
             api = RemoteAPI!TestAPI.spawn!TestValidatorNode(conf, &this.reg,
-                this.blocks, this.test_conf.txs_to_nominate, conf.node.timeout);
+                this.blocks, this.test_conf.txs_to_nominate, time,
+                conf.node.timeout);
         }
         else
         {
             api = RemoteAPI!TestAPI.spawn!TestFullNode(conf, &this.reg,
-                this.blocks, conf.node.timeout);
+                this.blocks, time, conf.node.timeout);
         }
 
         this.reg.register(conf.node.address, api.tid());
-        this.nodes ~= NodePair(conf.node.address, api);
+        this.nodes ~= NodePair(conf.node.address, api, time);
     }
 
     /***************************************************************************
@@ -786,6 +869,9 @@ private mixin template TestNodeMixin ()
 {
     private Registry* registry;
 
+    /// pointer to the unittests-adjusted clock time
+    protected shared(time_t)* cur_time;
+
     /// Blocks to preload into the memory storage
     private immutable(Block)[] blocks;
 
@@ -858,6 +944,31 @@ private mixin template TestNodeMixin ()
     {
         return this.enroll_man.validatorCount();
     }
+
+    /// Provides a unittest-adjusted clock source for the node
+    protected override TestClock getClock ()
+    {
+        return new TestClock(this.cur_time);
+    }
+}
+
+///
+public class TestClock : Clock
+{
+    ///
+    private shared(time_t)* cur_time;
+
+    ///
+    public this (shared(time_t)* cur_time)
+    {
+        this.cur_time = cur_time;
+    }
+
+    ///
+    public override time_t time ()
+    {
+        return atomicLoad(*this.cur_time);
+    }
 }
 
 /// A FullNode which also implements test routines in TestAPI
@@ -871,10 +982,12 @@ public class TestFullNode : FullNode, TestAPI
 
 
     ///
-    public this (Config config, Registry* reg, immutable(Block)[] blocks)
+    public this (Config config, Registry* reg, immutable(Block)[] blocks,
+        shared(time_t)* cur_time)
     {
         this.registry = reg;
         this.blocks = blocks;
+        this.cur_time = cur_time;
         super(config);
     }
 
@@ -916,11 +1029,12 @@ public class TestValidatorNode : Validator, TestAPI
 
     ///
     public this (Config config, Registry* reg, immutable(Block)[] blocks,
-        ulong txs_to_nominate)
+        ulong txs_to_nominate, shared(time_t)* cur_time)
     {
         this.registry = reg;
         this.blocks = blocks;
         this.txs_to_nominate = txs_to_nominate;
+        this.cur_time = cur_time;
         super(config);
     }
 
@@ -951,11 +1065,10 @@ public class TestValidatorNode : Validator, TestAPI
 
     /// Returns an instance of a TestNominator with customizable behavior
     protected override TestNominator getNominator (
-        immutable(ConsensusParams) params, Clock clock, 
-        NetworkManager network, KeyPair key_pair, Ledger ledger, 
-        TaskManager taskman)
+        immutable(ConsensusParams) params, Clock clock, NetworkManager network,
+        KeyPair key_pair, Ledger ledger, TaskManager taskman)
     {
-        return new TestNominator(params, clock, network, key_pair, ledger, 
+        return new TestNominator(params, clock, network, key_pair, ledger,
             taskman, this.txs_to_nominate);
     }
 }
@@ -1191,7 +1304,7 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager)
     immutable(Block)[] blocks = generateBlocks(gen_block,
         test_conf.extra_blocks);
 
-    auto net = new APIManager(blocks, test_conf);
+    auto net = new APIManager(blocks, test_conf, genesis_start_time);
     foreach (ref conf; main_configs)
         net.createNewNode(conf);
 

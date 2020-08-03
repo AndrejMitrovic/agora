@@ -67,6 +67,10 @@ public class Validator : FullNode, API
     /// Quorum generator parameters
     protected QuorumParams quorum_params;
 
+    /// Workaround: onRegenerateQuorums() is called from within the ctor,
+    /// but LocalScheduler is not instantiated yet.
+    private bool started;
+
     /// Ctor
     public this (const Config config)
     {
@@ -75,7 +79,7 @@ public class Validator : FullNode, API
         this.quorum_params = QuorumParams(this.params.MaxQuorumNodes);
 
         this.nominator = this.getNominator(this.params, this.clock,
-        this.network, this.config.node.key_pair, this.ledger, this.taskman);
+            this.network, this.config.node.key_pair, this.ledger, this.taskman);
 
         // currently we are not saving preimage info,
         // we only have the commitment in the genesis block
@@ -108,6 +112,7 @@ public class Validator : FullNode, API
         // we're not enrolled and don't care about quorum sets
         if (!this.enroll_man.isEnrolled(this.utxo_set.getUTXOFinder()))
         {
+            this.nominator.stopNominatingTimer();
             this.qc = QuorumConfig.init;
             return;
         }
@@ -117,6 +122,9 @@ public class Validator : FullNode, API
         this.nominator.setQuorumConfig(this.qc, other_qcs);
         buildRequiredKeys(this.config.node.key_pair.address, this.qc,
             this.required_peer_keys);
+
+        if (this.started)
+            this.nominator.startNominatingTimer();
     }
 
     /***************************************************************************
@@ -191,9 +199,13 @@ public class Validator : FullNode, API
 
     public override void start ()
     {
+        this.started = true;
         this.startPeriodicDiscovery();
         this.taskman.setTimer(10.seconds, &this.checkRevealPreimage, Periodic.Yes);
         this.network.startPeriodicCatchup(this.ledger, &this.nominator.isNominating);
+
+        if (this.enroll_man.isEnrolled(this.utxo_set.getUTXOFinder()))
+            this.nominator.startNominatingTimer();
     }
 
     /***************************************************************************
@@ -233,10 +245,6 @@ public class Validator : FullNode, API
 
     public override void receiveEnvelope (SCPEnvelope envelope) @safe
     {
-        // we're not enrolled and don't care about messages
-        if (!this.enroll_man.isEnrolled(this.utxo_set.getUTXOFinder()))
-            return;
-
         this.nominator.receiveEnvelope(envelope);
     }
 
@@ -265,24 +273,6 @@ public class Validator : FullNode, API
         TaskManager taskman)
     {
         return new Nominator(params, clock, network, key_pair, ledger, taskman);
-    }
-
-    /***************************************************************************
-
-        Called when a transaction was accepted into the transaction pool.
-        Currently, nomination is triggered by an inclusion of a new transaction
-        in the transaction pool.
-        In the future, this will be replaced with a nominating timer.
-
-    ***************************************************************************/
-
-    protected final override void onAcceptedTransaction () @safe
-    {
-        if (!this.enroll_man.isEnrolled(this.utxo_set.getUTXOFinder()))
-            return;  // nothing to do, we're not an active validator
-
-        // check if there's enough txs in the pool, and start nominating
-        this.nominator.tryNominate();
     }
 
     /***************************************************************************

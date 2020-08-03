@@ -65,6 +65,7 @@ unittest
         txs.each!(tx => node_1.putTransaction(tx));
     }
 
+    network.setTimeFor(Height(validator_cycle));  // trigger consensus round
     Thread.sleep(2.seconds);  // wait for propagation
 
     // New block was not created because all validators would expire

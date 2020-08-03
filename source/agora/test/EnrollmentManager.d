@@ -28,6 +28,7 @@ import agora.consensus.validation.PreImage;
 import agora.network.Clock;
 import agora.test.Base;
 
+import core.stdc.time;
 import core.thread;
 import core.time;
 
@@ -219,9 +220,9 @@ unittest
 
         ///
         public this (Config config, Registry* reg, immutable(Block)[] blocks,
-            ulong txs_to_nominate)
+            ulong txs_to_nominate, shared(time_t)* cur_time)
         {
-            super(config, reg, blocks, txs_to_nominate);
+            super(config, reg, blocks, txs_to_nominate, cur_time);
         }
 
         public override void receivePreimage (PreImageInfo preimage)
@@ -235,9 +236,9 @@ unittest
     static final class BadAPIManager : TestAPIManager
     {
         ///
-        public this (immutable(Block)[] blocks, TestConf test_conf)
+        public this (immutable(Block)[] blocks, TestConf test_conf, time_t initial_time)
         {
-            super(blocks, test_conf);
+            super(blocks, test_conf, initial_time);
         }
 
         /// see base class
@@ -245,12 +246,13 @@ unittest
         {
             if (this.nodes.length == 0)
             {
+                auto time = new shared(time_t)(this.initial_time);
                 assert(conf.node.is_validator);
                 auto node = RemoteAPI!TestAPI.spawn!TestNode(
                     conf, &this.reg, this.blocks, this.test_conf.txs_to_nominate,
-                    conf.node.timeout);
+                    time, conf.node.timeout);
                 this.reg.register(conf.node.address, node.ctrl.tid());
-                this.nodes ~= NodePair(conf.node.address, node);
+                this.nodes ~= NodePair(conf.node.address, node, time);
             }
             else
                 super.createNewNode(conf);
@@ -306,17 +308,20 @@ unittest
 
         /// Ctor
         public this (immutable(ConsensusParams) params, Clock clock,
-            NetworkManager network, KeyPair key_pair, Ledger ledger, 
-            TaskManager taskman, ulong txs_to_nominate, shared(size_t)* countPtr)
+            NetworkManager network, KeyPair key_pair, Ledger ledger,
+            TaskManager taskman, ulong txs_to_nominate,
+            shared(time_t)* curr_time, shared(size_t)* countPtr)
         {
             this.runCount = countPtr;
-            super(params, clock, network, key_pair, ledger, taskman, txs_to_nominate);
+            super(params, clock, network, key_pair, ledger, taskman,
+                txs_to_nominate);
         }
 
         ///
-        protected override bool prepareNominatingSet (out ConsensusData data) @safe
+        protected override bool prepareNominatingSet (out ConsensusData data,
+            in time_t cur_time) @safe
         {
-            if (super.prepareNominatingSet(data))
+            if (super.prepareNominatingSet(data, cur_time))
             {
                 // This behavior is the only difference with a normal Validator:
                 // It adds an enrollment that is already for a node in the ValidatorSet
@@ -335,21 +340,22 @@ unittest
 
         /// Ctor
         public this (Config config, Registry* reg, immutable(Block)[] blocks,
-                     ulong txs_to_nominate, shared(size_t)* countPtr)
+                     ulong txs_to_nominate, shared(time_t)* cur_time,
+                     shared(size_t)* countPtr)
         {
             this.runCount = countPtr;
-            super(config, reg, blocks, txs_to_nominate);
+            super(config, reg, blocks, txs_to_nominate, cur_time);
         }
 
         ///
         protected override TestNominator getNominator (
-            immutable(ConsensusParams) params, Clock clock, 
-            NetworkManager network, KeyPair key_pair, Ledger ledger, 
+            immutable(ConsensusParams) params, Clock clock,
+            NetworkManager network, KeyPair key_pair, Ledger ledger,
             TaskManager taskman)
         {
             return new BadNominator(
                 params, clock, network, key_pair, ledger, taskman,
-                this.txs_to_nominate, this.runCount);
+                this.txs_to_nominate, this.cur_time, this.runCount);
         }
     }
 
@@ -359,9 +365,9 @@ unittest
         shared size_t runCount;
 
         ///
-        public this (immutable(Block)[] blocks, TestConf test_conf)
+        public this (immutable(Block)[] blocks, TestConf test_conf, time_t initial_time)
         {
-            super(blocks, test_conf);
+            super(blocks, test_conf, initial_time);
         }
 
         /// see base class
@@ -369,11 +375,12 @@ unittest
         {
             if (this.nodes.length == 0)
             {
+                auto time = new shared(time_t)(this.initial_time);
                 auto api = RemoteAPI!TestAPI.spawn!MisbehavingValidator(
                     conf, &this.reg, this.blocks, this.test_conf.txs_to_nominate,
-                    &this.runCount, conf.node.timeout);
+                    time, &this.runCount, conf.node.timeout);
                 this.reg.register(conf.node.address, api.tid());
-                this.nodes ~= NodePair(conf.node.address, api);
+                this.nodes ~= NodePair(conf.node.address, api, time);
             }
             else
                 super.createNewNode(conf);
@@ -398,6 +405,7 @@ unittest
         .map!(en => en.value.refund(WK.Keys.A.address).sign())
         .array();
     txs.each!(tx => validator.putTransaction(tx));
+    network.setTimeFor(Height(1));  // trigger consensus
 
     // Make sure that the code in validator gets executed
     size_t loopCount;

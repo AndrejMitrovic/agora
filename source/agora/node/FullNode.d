@@ -277,11 +277,8 @@ public class FullNode : API
             return;
 
         if (this.ledger.acceptTransaction(tx))
-        {
-            // gossip first
             this.network.gossipTransaction(tx);
-            this.onAcceptedTransaction();
-        }
+
     }
 
     /// GET: /has_transaction_hash
@@ -516,17 +513,6 @@ public class FullNode : API
     public override PreImageInfo getPreimage (Hash enroll_key)
     {
         return this.enroll_man.getValidatorPreimage(enroll_key);
-    }
-
-    /***************************************************************************
-
-        Called when a transaction was accepted into the transaction pool.
-        This is a no-op for FullNode. A Validator node overrides this behavior.
-
-    ***************************************************************************/
-
-    protected void onAcceptedTransaction () @safe
-    {
     }
 
     /***************************************************************************
