@@ -74,8 +74,8 @@ public class Validator : FullNode, API
         super(config, &this.onRegenerateQuorums);
         this.quorum_params = QuorumParams(this.params.MaxQuorumNodes);
 
-        this.nominator = this.getNominator(this.clock, this.network, 
-            this.config.node.key_pair, this.ledger, this.taskman);
+        this.nominator = this.getNominator(this.params, this.clock,
+        this.network, this.config.node.key_pair, this.ledger, this.taskman);
 
         // currently we are not saving preimage info,
         // we only have the commitment in the genesis block
@@ -248,6 +248,7 @@ public class Validator : FullNode, API
         simulate byzantine nodes.
 
         Params:
+            params = consensus params
             clock = Clock instance
             network = the network manager for gossiping SCPEnvelopes
             key_pair = the key pair of the node
@@ -259,10 +260,11 @@ public class Validator : FullNode, API
 
     ***************************************************************************/
 
-    protected Nominator getNominator (Clock clock, NetworkManager network, 
-        KeyPair key_pair, Ledger ledger, TaskManager taskman)
+    protected Nominator getNominator (immutable(ConsensusParams) params,
+        Clock clock, NetworkManager network, KeyPair key_pair, Ledger ledger,
+        TaskManager taskman)
     {
-        return new Nominator(clock, network, key_pair, ledger, taskman);
+        return new Nominator(params, clock, network, key_pair, ledger, taskman);
     }
 
     /***************************************************************************
