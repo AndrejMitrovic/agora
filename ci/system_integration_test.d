@@ -58,48 +58,53 @@ private int main (string[] args)
     // Simple sanity test
     runCmd(TestContainer);
 
-    // First make sure that there we start from a clean slate,
-    // as the docker-compose bind volumes
-    runCmd(Cleanup);
+    return 0;
 
-    // We need to have a "foreground" process to use `--abort-on-container-exit`
-    // This option allows us to detect when the node stops / crash even before
-    // the test starts (or after it completes).
-    // So we start this process with `spawnProcess` and kill it with SIGINT,
-    // simulating a CTRL+C
-    writeln(DockerComposeUp);
-    auto upPid = spawnProcess(DockerComposeUp);
-
-    try
+    version (none)
     {
-        // Now run the tests
-        runCmd(RunIntegrationTests);
-        code = 0;
-    }
-    catch (Exception e)
-    {
-        // Full node only
-        runCmd(DockerComposeLogs ~ "node-0");
+        // First make sure that there we start from a clean slate,
+        // as the docker-compose bind volumes
+        runCmd(Cleanup);
 
-        // Validators
-        runCmd(DockerComposeLogs ~ "node-2");
-        runCmd(DockerComposeLogs ~ "node-3");
-        runCmd(DockerComposeLogs ~ "node-4");
-        runCmd(DockerComposeLogs ~ "node-5");
-        runCmd(DockerComposeLogs ~ "node-6");
-        runCmd(DockerComposeLogs ~ "node-7");
-        code = 1;
-    }
+        // We need to have a "foreground" process to use `--abort-on-container-exit`
+        // This option allows us to detect when the node stops / crash even before
+        // the test starts (or after it completes).
+        // So we start this process with `spawnProcess` and kill it with SIGINT,
+        // simulating a CTRL+C
+        writeln(DockerComposeUp);
+        auto upPid = spawnProcess(DockerComposeUp);
 
-    upPid.kill(SIGINT);
-    if (auto upCode = upPid.wait())
-    {
-        writeln("docker-compose up returned error code: ", upCode);
-        code = 1;
-    }
-    runCmd(DockerComposeDown);
+        try
+        {
+            // Now run the tests
+            runCmd(RunIntegrationTests);
+            code = 0;
+        }
+        catch (Exception e)
+        {
+            // Full node only
+            runCmd(DockerComposeLogs ~ "node-0");
 
-    return code;
+            // Validators
+            runCmd(DockerComposeLogs ~ "node-2");
+            runCmd(DockerComposeLogs ~ "node-3");
+            runCmd(DockerComposeLogs ~ "node-4");
+            runCmd(DockerComposeLogs ~ "node-5");
+            runCmd(DockerComposeLogs ~ "node-6");
+            runCmd(DockerComposeLogs ~ "node-7");
+            code = 1;
+        }
+
+        upPid.kill(SIGINT);
+        if (auto upCode = upPid.wait())
+        {
+            writeln("docker-compose up returned error code: ", upCode);
+            code = 1;
+        }
+        runCmd(DockerComposeDown);
+
+        return code;
+    }
 }
 
 /// Utility function to run a command and throw on error
