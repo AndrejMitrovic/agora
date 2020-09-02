@@ -55,8 +55,6 @@ import std.file;
 import std.path : buildPath;
 import std.range;
 
-mixin AddLogger!();
-
 /// Maximum number of blocks that will be sent in a call to getBlocksFrom()
 private enum uint MaxBatchBlocksSent = 1000;
 
@@ -110,6 +108,9 @@ public class FullNode : API
     /// PreImage Received Handler list
     protected PreImageReceivedHandler[Address] preimage_handlers;
 
+    /// The logger to use
+    protected Logger log;
+
     /***************************************************************************
 
         Constructor
@@ -121,6 +122,22 @@ public class FullNode : API
 
     public this (const Config config)
     {
+        this(config, Logger(__MODULE__));
+    }
+
+    /***************************************************************************
+
+        Constructor
+
+        Params:
+            config = Config instance
+            log = the logger to use
+
+    ***************************************************************************/
+
+    public this (const Config config, Logger log)
+    {
+        this.log = log;
         import CNG = agora.consensus.data.genesis.Coinnet;
 
         // custom genesis block provided
@@ -221,7 +238,7 @@ public class FullNode : API
 
     public void shutdown ()
     {
-        log.info("Shutting down..");
+        this.log.info("Shutting down..");
         this.taskman.logStats();
         this.network.dumpMetadata();
         this.pool = null;
@@ -265,7 +282,7 @@ public class FullNode : API
 
     public override void putTransaction (Transaction tx) @safe
     {
-        log.trace("Received Transaction: {}", prettify(tx));
+        this.log.trace("Received Transaction: {}", prettify(tx));
 
         auto tx_hash = hashFull(tx);
         if (this.ledger.hasTransactionHash(tx_hash))
@@ -464,7 +481,7 @@ public class FullNode : API
     /// PUT: /enroll_validator
     public override void enrollValidator (Enrollment enroll) @safe
     {
-        log.trace("Received Enrollment: {}", prettify(enroll));
+        this.log.trace("Received Enrollment: {}", prettify(enroll));
 
         if (this.enroll_man.addEnrollment(enroll, this.ledger.getBlockHeight(),
             this.utxo_set.getUTXOFinder()))
@@ -482,7 +499,7 @@ public class FullNode : API
     /// PUT: /receive_preimage
     public override void receivePreimage (PreImageInfo preimage) @safe
     {
-        log.trace("Received Preimage: {}", prettify(preimage));
+        this.log.trace("Received Preimage: {}", prettify(preimage));
 
         if (this.enroll_man.addPreimage(preimage))
         {
@@ -550,7 +567,7 @@ public class FullNode : API
                 }
                 catch (Exception e)
                 {
-                    log.error("Error sending block height #{} to {} :{}",
+                    this.log.error("Error sending block height #{} to {} :{}",
                         block.header.height, address, e);
                 }
             });
@@ -581,7 +598,7 @@ public class FullNode : API
                 }
                 catch (Exception e)
                 {
-                    log.error("Error sending preImage (enroll_key: {}) to {} :{}",
+                    this.log.error("Error sending preImage (enroll_key: {}) to {} :{}",
                         pre_image.enroll_key, address, e);
                 }
             });

@@ -42,8 +42,6 @@ import scpd.types.Stellar_SCP;
 import core.stdc.stdlib : abort;
 import core.time;
 
-mixin AddLogger!();
-
 /*******************************************************************************
 
     Implementation of the Validator node
@@ -76,7 +74,7 @@ public class Validator : FullNode, API
     public this (const Config config)
     {
         assert(config.node.is_validator);
-        super(config);
+        super(config, Logger(__MODULE__));
         this.quorum_params = QuorumParams(this.params.MaxQuorumNodes,
             this.params.QuorumThreshold);
 
@@ -146,7 +144,7 @@ public class Validator : FullNode, API
         Hash[] keys;
         if (!this.enroll_man.getEnrolledUTXOs(keys) || keys.length == 0)
         {
-            log.fatal("Could not retrieve enrollments / no enrollments found");
+            this.log.fatal("Could not retrieve enrollments / no enrollments found");
             assert(0);
         }
 
