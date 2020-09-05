@@ -239,6 +239,10 @@ Slot::getCompanionQuorumSetHashFromStatement(SCPStatement const& st)
     return h;
 }
 
+// seems to be used by implementations like stellar, for persistence storing
+// (likely for archival nodes)
+// see HerderImpl::persistSCPState, getTxSetHashes, and getStellarValues()
+// which calls this function
 std::vector<Value>
 Slot::getStatementValues(SCPStatement const& st)
 {
@@ -380,6 +384,7 @@ Slot::getLocalNode()
     return mSCP.getLocalNode();
 }
 
+// todo: this can be used for testing! stellar-core uses it for testing.
 std::vector<SCPEnvelope>
 Slot::getEntireCurrentState()
 {

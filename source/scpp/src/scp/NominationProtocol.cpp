@@ -44,6 +44,9 @@ NominationProtocol::isNewerStatement(NodeID const& nodeID,
     return res;
 }
 
+// returns true if p is a subset of v (all p items are included in v's)
+// if it's a subset and v's length is greater, then `notEqual` will be true
+// note that the empty range returns true and sets notEqual to false.
 bool
 NominationProtocol::isSubsetHelper(xdr::xvector<Value> const& p,
                                    xdr::xvector<Value> const& v, bool& notEqual)
@@ -51,6 +54,8 @@ NominationProtocol::isSubsetHelper(xdr::xvector<Value> const& p,
     bool res;
     if (p.size() <= v.size())
     {
+        // true if p is a subset of v
+        // (v includes all p's values and not necessarily in sequence)
         res = std::includes(v.begin(), v.end(), p.begin(), p.end());
         if (res)
         {
@@ -81,6 +86,10 @@ NominationProtocol::extractValidValue(Value const& value)
     return mSlot.getSCPDriver().extractValidValue(mSlot.getSlotIndex(), value);
 }
 
+// checks if 'st' is a newer statement compared to 'oldst'
+// the old votes must strictly be a subset (cannot have newer votes in oldst),
+// and old accepted must strictly be a subset
+// if the statements are exactly the same then it returns false
 bool
 NominationProtocol::isNewerStatement(SCPNomination const& oldst,
                                      SCPNomination const& st)
@@ -95,25 +104,28 @@ NominationProtocol::isNewerStatement(SCPNomination const& oldst,
         if (isSubsetHelper(oldst.accepted, st.accepted, g))
         {
             grows = grows || g;
-            res = grows; //  true only if one of the sets grew
+            res = grows; //  true if either one of the sets grew
         }
     }
 
     return res;
 }
 
+// checks that:
+// - there at least some votes X or accepted Y values
+// - all values are unique
 bool
 NominationProtocol::isSane(SCPStatement const& st)
 {
     auto const& nom = st.pledges.nominate();
     bool res = (nom.votes.size() + nom.accepted.size()) != 0;
 
-    res = res && (std::adjacent_find(
+    res = res && (std::adjacent_find(  // ensure all items are unique (std::set is sorted by default)
                       nom.votes.begin(), nom.votes.end(),
                       [](stellar::Value const& l, stellar::Value const& r) {
                           return !(l < r);
                       }) == nom.votes.end());
-    res = res && (std::adjacent_find(
+    res = res && (std::adjacent_find(  // ditto
                       nom.accepted.begin(), nom.accepted.end(),
                       [](stellar::Value const& l, stellar::Value const& r) {
                           return !(l < r);
@@ -140,6 +152,7 @@ NominationProtocol::recordEnvelope(SCPEnvelope const& env)
     mSlot.recordStatement(env.statement);
 }
 
+// only called when the X/Y/Z set has changed
 void
 NominationProtocol::emitNomination()
 {
@@ -182,6 +195,7 @@ NominationProtocol::emitNomination()
     }
 }
 
+// check if V was accepted (it's in the Y set)
 bool
 NominationProtocol::acceptPredicate(Value const& v, SCPStatement const& st)
 {
@@ -192,6 +206,10 @@ NominationProtocol::acceptPredicate(Value const& v, SCPStatement const& st)
     return res;
 }
 
+// apply a predicate to votes (X) and accepted (Y).
+// note that candidates (Z) are not included in the nomination message,
+// as they belong to the balloting protocol + we can easily derive Z from
+// all the Y of all other nodes inside of N.
 void
 NominationProtocol::applyAll(SCPNomination const& nom,
                              std::function<void(Value const&)> processor)
@@ -214,7 +232,9 @@ NominationProtocol::updateRoundLeaders()
     // initialize priority with value derived from self
     std::set<NodeID> newRoundLeaders;
     auto localID = mSlot.getLocalNode()->getNodeID();
-    normalizeQSet(myQSet, &localID);
+    // todo: why is our own ID removed? this will affect the node priority
+    // because the fraction of slices including another node will change.
+    normalizeQSet(myQSet, &localID);  // removes our own ID from the qset
 
     newRoundLeaders.insert(localID);
     uint64 topPriority = getNodePriority(localID, myQSet);
@@ -231,6 +251,7 @@ NominationProtocol::updateRoundLeaders()
             newRoundLeaders.insert(cur);
         }
     });
+
     // expand mRoundLeaders with the newly computed leaders
     mRoundLeaders.insert(newRoundLeaders.begin(), newRoundLeaders.end());
     if (Logging::logDebug("SCP"))
@@ -312,6 +333,7 @@ NominationProtocol::getNewValueFromNomination(SCPNomination const& nom)
         }
         if (!valueToNominate.empty())
         {
+            // we did not vote for this one yet, include it in the candidate newVote
             if (mVotes.find(valueToNominate) == mVotes.end())
             {
                 uint64 curHash = hashValue(valueToNominate);
@@ -351,9 +373,11 @@ NominationProtocol::processEnvelope(SCPEnvelope const& envelope)
                 for (auto const& v : nom.votes)
                 {
                     if (mAccepted.find(v) != mAccepted.end())
-                    { // v is already accepted
+                    {
+                        // v is already accepted
                         continue;
                     }
+
                     if (mSlot.federatedAccept(
                             [&v](SCPStatement const& st) -> bool {
                                 auto const& nom = st.pledges.nominate();
@@ -391,25 +415,26 @@ NominationProtocol::processEnvelope(SCPEnvelope const& envelope)
                         }
                     }
                 }
-                // attempts to promote accepted values to candidates
+
+                // then, attempts to promote accepted values to candidates
                 for (auto const& a : mAccepted)
                 {
                     if (mCandidates.find(a) != mCandidates.end())
                     {
+                        // already a candidate
                         continue;
                     }
+
                     if (mSlot.federatedRatify(
-                            std::bind(&NominationProtocol::acceptPredicate, a,
-                                      _1),
-                            mLatestNominations))
+                        std::bind(&NominationProtocol::acceptPredicate, a, _1),
+                        mLatestNominations))
                     {
                         mCandidates.emplace(a);
                         newCandidates = true;
                     }
                 }
 
-                // only take round leader votes if we're still looking for
-                // candidates
+                // only take round leader votes if we're still looking for candidates
                 if (mCandidates.empty() &&
                     mRoundLeaders.find(st.nodeID) != mRoundLeaders.end())
                 {
@@ -423,11 +448,11 @@ NominationProtocol::processEnvelope(SCPEnvelope const& envelope)
                     }
                 }
 
+                // nomination protocol
                 if (modified)
-                {
                     emitNomination();
-                }
 
+                // this is for the balloting protocol, async to the nomination
                 if (newCandidates)
                 {
                     mLatestCompositeCandidate =
@@ -447,9 +472,13 @@ NominationProtocol::processEnvelope(SCPEnvelope const& envelope)
                 << "NominationProtocol: message didn't pass sanity check";
         }
     }
+
     return res;
 }
 
+// get all the votes and accepted values from the statement.
+// see Slot::getStatementValues which is used for persistence
+// and also collects the BallotProtocol votes.
 std::vector<Value>
 NominationProtocol::getStatementValues(SCPStatement const& st)
 {
@@ -491,11 +520,11 @@ NominationProtocol::nominate(Value const& value, Value const& previousValue,
     {
         auto ins = mVotes.insert(value);
         if (ins.second)
-        {
             updated = true;
-        }
+
         nominatingValue = value;
     }
+
     // add a few more values from other leaders
     for (auto const& leader : mRoundLeaders)
     {
@@ -545,6 +574,7 @@ NominationProtocol::stopNomination()
     mNominationStarted = false;
 }
 
+// used for tests! we should use this in our own tests, just like stellar-core.
 std::set<NodeID> const&
 NominationProtocol::getLeaders() const
 {
@@ -582,6 +612,7 @@ NominationProtocol::getJsonInfo()
     return ret;
 }
 
+// used for crash recovery
 void
 NominationProtocol::setStateFromEnvelope(SCPEnvelope const& e)
 {
