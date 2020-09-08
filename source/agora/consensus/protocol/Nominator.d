@@ -14,6 +14,7 @@
 module agora.consensus.protocol.Nominator;
 
 import agora.common.crypto.Key;
+import agora.common.crypto.Schnorr;
 import agora.common.Config;
 import agora.common.Hash : Hash, HashDg, hashPart, hashFull;
 import agora.common.Serializer;
@@ -65,8 +66,8 @@ public extern (C++) class Nominator : SCPDriver
     /// Network manager for gossiping SCPEnvelopes
     private NetworkManager network;
 
-    /// Key pair of this node
-    private KeyPair key_pair;
+    /// Schnorr key-pair of this node
+    private Pair key_pair;
 
     /// Task manager
     private TaskManager taskman;
@@ -116,7 +117,7 @@ extern(D):
         this.params = params;
         this.clock = clock;
         this.network = network;
-        this.key_pair = key_pair;
+        this.key_pair = Pair.fromScalar(secretKeyToCurveScalar(key_pair.secret));
         auto node_id = NodeID(uint256(key_pair.address));
         const IsValidator = true;
         const no_quorum = SCPQuorumSet.init;  // will be configured by setQuorumConfig()
@@ -392,7 +393,7 @@ extern(D):
         import scpd.types.Stellar_types : StellarHash = Hash, NodeID;
         import std.range;
 
-        auto pub_key = NodeID(uint256(this.key_pair.address));
+        auto pub_key = NodeID(uint256(PublicKey(this.key_pair.V[])));
 
         auto block = ledger.getBlocksFrom(ledger.getBlockHeight()).front;
         auto serialized = block.serializeFull();
