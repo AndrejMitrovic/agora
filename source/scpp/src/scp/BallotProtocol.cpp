@@ -707,14 +707,14 @@ BallotProtocol::getPrepareCandidates(SCPStatement const& hint)
     case SCP_ST_CONFIRM:
     {
         auto const& con = hint.pledges.confirm();
-        hintBallots.insert(SCPBallot(con.nPrepared, con.ballot.value));
-        hintBallots.insert(SCPBallot(UINT32_MAX, con.ballot.value));
+        hintBallots.insert(SCPBallot(con.nPrepared, con.ballot.value, con.ballot.value_sig));
+        hintBallots.insert(SCPBallot(UINT32_MAX, con.ballot.value, con.ballot.value_sig));
     }
     break;
     case SCP_ST_EXTERNALIZE:
     {
         auto const& ext = hint.pledges.externalize();
-        hintBallots.insert(SCPBallot(UINT32_MAX, ext.commit.value));
+        hintBallots.insert(SCPBallot(UINT32_MAX, ext.commit.value, ext.commit.value_sig));
     }
     break;
     default:
@@ -764,7 +764,7 @@ BallotProtocol::getPrepareCandidates(SCPStatement const& hint)
                     candidates.insert(topVote);
                     if (con.nPrepared < topVote.counter)
                     {
-                        candidates.insert(SCPBallot(con.nPrepared, val));
+                        candidates.insert(SCPBallot(con.nPrepared, val, topVote.value_sig));
                     }
                 }
             }
@@ -1192,7 +1192,7 @@ BallotProtocol::attemptAcceptCommit(SCPStatement const& hint)
         auto const& prep = hint.pledges.prepare();
         if (prep.nC != 0)
         {
-            ballot = SCPBallot(prep.nH, prep.ballot.value);
+            ballot = SCPBallot(prep.nH, prep.ballot.value, prep.ballot.value_sig);
         }
         else
         {
@@ -1203,13 +1203,13 @@ BallotProtocol::attemptAcceptCommit(SCPStatement const& hint)
     case SCPStatementType::SCP_ST_CONFIRM:
     {
         auto const& con = hint.pledges.confirm();
-        ballot = SCPBallot(con.nH, con.ballot.value);
+        ballot = SCPBallot(con.nH, con.ballot.value, con.ballot.value_sig);
     }
     break;
     case SCPStatementType::SCP_ST_EXTERNALIZE:
     {
         auto const& ext = hint.pledges.externalize();
-        ballot = SCPBallot(ext.nH, ext.commit.value);
+        ballot = SCPBallot(ext.nH, ext.commit.value, ext.commit.value_sig);
         break;
     }
     default:
@@ -1289,8 +1289,8 @@ BallotProtocol::attemptAcceptCommit(SCPStatement const& hint)
         if (mPhase != SCP_PHASE_CONFIRM ||
             candidate.second > mHighBallot->counter)
         {
-            SCPBallot c = SCPBallot(candidate.first, ballot.value);
-            SCPBallot h = SCPBallot(candidate.second, ballot.value);
+            SCPBallot c = SCPBallot(candidate.first, ballot.value, ballot.value_sig);
+            SCPBallot h = SCPBallot(candidate.second, ballot.value, ballot.value_sig);
             res = setAcceptCommit(c, h);
         }
     }
@@ -1457,13 +1457,13 @@ BallotProtocol::attemptConfirmCommit(SCPStatement const& hint)
     case SCPStatementType::SCP_ST_CONFIRM:
     {
         auto const& con = hint.pledges.confirm();
-        ballot = SCPBallot(con.nH, con.ballot.value);
+        ballot = SCPBallot(con.nH, con.ballot.value, con.ballot.value_sig);
     }
     break;
     case SCPStatementType::SCP_ST_EXTERNALIZE:
     {
         auto const& ext = hint.pledges.externalize();
-        ballot = SCPBallot(ext.nH, ext.commit.value);
+        ballot = SCPBallot(ext.nH, ext.commit.value, ext.commit.value_sig);
         break;
     }
     default:
@@ -1488,8 +1488,8 @@ BallotProtocol::attemptConfirmCommit(SCPStatement const& hint)
     bool res = candidate.first != 0;
     if (res)
     {
-        SCPBallot c = SCPBallot(candidate.first, ballot.value);
-        SCPBallot h = SCPBallot(candidate.second, ballot.value);
+        SCPBallot c = SCPBallot(candidate.first, ballot.value, ballot.value_sig);
+        SCPBallot h = SCPBallot(candidate.second, ballot.value, ballot.value_sig);
         return setConfirmCommit(c, h);
     }
     return res;
@@ -1540,7 +1540,7 @@ BallotProtocol::hasPreparedBallot(SCPBallot const& ballot,
     case SCP_ST_CONFIRM:
     {
         auto const& c = st.pledges.confirm();
-        SCPBallot prepared(c.nPrepared, c.ballot.value);
+        SCPBallot prepared(c.nPrepared, c.ballot.value, c.ballot.value_sig);
         res = areBallotsLessAndCompatible(ballot, prepared);
     }
     break;
@@ -1591,7 +1591,7 @@ BallotProtocol::getWorkingBallot(SCPStatement const& st)
     case SCP_ST_CONFIRM:
     {
         auto const& con = st.pledges.confirm();
-        res = SCPBallot(con.nCommit, con.ballot.value);
+        res = SCPBallot(con.nCommit, con.ballot.value, con.ballot.value_sig);
     }
     break;
     case SCP_ST_EXTERNALIZE:
@@ -1751,11 +1751,11 @@ BallotProtocol::setStateFromEnvelope(SCPEnvelope const& e)
         }
         if (prep.nH)
         {
-            mHighBallot = std::make_unique<SCPBallot>(prep.nH, b.value);
+            mHighBallot = std::make_unique<SCPBallot>(prep.nH, b.value, b.value_sig);
         }
         if (prep.nC)
         {
-            mCommit = std::make_unique<SCPBallot>(prep.nC, b.value);
+            mCommit = std::make_unique<SCPBallot>(prep.nC, b.value, b.value_sig);
         }
         mPhase = SCP_PHASE_PREPARE;
     }
@@ -1765,9 +1765,9 @@ BallotProtocol::setStateFromEnvelope(SCPEnvelope const& e)
         auto const& c = pl.confirm();
         auto const& v = c.ballot.value;
         bumpToBallot(c.ballot, true);
-        mPrepared = std::make_unique<SCPBallot>(c.nPrepared, v);
-        mHighBallot = std::make_unique<SCPBallot>(c.nH, v);
-        mCommit = std::make_unique<SCPBallot>(c.nCommit, v);
+        mPrepared = std::make_unique<SCPBallot>(c.nPrepared, v, c.ballot.value_sig);
+        mHighBallot = std::make_unique<SCPBallot>(c.nH, v, c.ballot.value_sig);
+        mCommit = std::make_unique<SCPBallot>(c.nCommit, v, c.ballot.value_sig);
         mPhase = SCP_PHASE_CONFIRM;
     }
     break;
@@ -1775,9 +1775,9 @@ BallotProtocol::setStateFromEnvelope(SCPEnvelope const& e)
     {
         auto const& ext = pl.externalize();
         auto const& v = ext.commit.value;
-        bumpToBallot(SCPBallot(UINT32_MAX, v), true);
-        mPrepared = std::make_unique<SCPBallot>(UINT32_MAX, v);
-        mHighBallot = std::make_unique<SCPBallot>(ext.nH, v);
+        bumpToBallot(SCPBallot(UINT32_MAX, v, ext.commit.value_sig), true);
+        mPrepared = std::make_unique<SCPBallot>(UINT32_MAX, v, ext.commit.value_sig);
+        mHighBallot = std::make_unique<SCPBallot>(ext.nH, v, ext.commit.value_sig);
         mCommit = std::make_unique<SCPBallot>(ext.commit);
         mPhase = SCP_PHASE_EXTERNALIZE;
     }

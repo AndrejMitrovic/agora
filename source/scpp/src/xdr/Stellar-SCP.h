@@ -16,18 +16,23 @@ using Value = xdr::opaque_vec<>;
 struct SCPBallot {
   uint32 counter{};
   Value value{};
+  Signature value_sig{};
 
   SCPBallot() = default;
   template<typename _counter_T,
            typename _value_T,
+           typename _signature_T,
            typename = typename
            std::enable_if<std::is_constructible<uint32, _counter_T>::value
                           && std::is_constructible<Value, _value_T>::value
+                          && std::is_constructible<Signature, _signature_T>::value
                          >::type>
   explicit SCPBallot(_counter_T &&_counter,
-                     _value_T &&_value)
+                     _value_T &&_value,
+                     _signature_T &&_signature)
     : counter(std::forward<_counter_T>(_counter)),
-      value(std::forward<_value_T>(_value)) {}
+      value(std::forward<_value_T>(_value)),
+      value_sig(std::forward<_signature_T>(_signature)) {}
 };
 } namespace xdr {
 template<> struct xdr_traits<::stellar::SCPBallot>
