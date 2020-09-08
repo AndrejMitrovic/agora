@@ -365,10 +365,121 @@ extern(D):
 
     public override void signEnvelope (ref SCPEnvelope envelope)
     {
-        auto challenge = SCPStatementHash(&envelope.statement).hashFull();
+        // derive the block and sign its hash
+        //if (envelope.statement.pledges.type_ == SCPStatementType.SCP_ST_CONFIRM)
+        //{
+        //    ConsensusData con_data;
+
+        //    try
+        //    {
+        //        con_data = deserializeFull!ConsensusData(
+        //            envelope.statement.pledges.confirm_.ballot.value[]);
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        assert(0);  // this should never happen
+        //    }
+
+        //    const prev_block = this.ledger.getLastBlock();
+        //    const proposed_block = makeNewBlock(prev_block, con_data.tx_set,
+        //        con_data.enrolls);
+
+        //    const challenge = hashFull(proposed_block);
+        //    const R = Pair.random();
+        //    const sig = sign(this.key_pair.v, this.key_pair.V, R.V, R.v, challenge);
+        //    envelope.statement.pledges.confirm_.ballot.value_sig = sig;
+
+        //    import std.stdio;
+        //    scope (failure) assert(0);
+        //    writefln("Signed confirm with: %s", sig);
+        //}
+
+        if (envelope.statement.pledges.type_ == SCPStatementType.SCP_ST_PREPARE)
+        {
+            ConsensusData con_data;
+
+            try
+            {
+                con_data = deserializeFull!ConsensusData(
+                    envelope.statement.pledges.prepare_.ballot.value[]);
+            }
+            catch (Exception ex)
+            {
+                assert(0);  // this should never happen
+            }
+
+            const prev_block = this.ledger.getLastBlock();
+            const proposed_block = makeNewBlock(prev_block, con_data.tx_set,
+                con_data.enrolls);
+
+            const challenge = hashFull(proposed_block);
+            const R = Pair.random();
+            const sig = sign(this.key_pair.v, this.key_pair.V, R.V, R.v, challenge);
+            envelope.statement.pledges.prepare_.ballot.value_sig = sig;
+
+            import std.stdio;
+            scope (failure) assert(0);
+            writefln("%s slot index %s signed for prepare with: %s",
+                this.key_pair.V, envelope.statement.slotIndex, sig);
+        }
+
+        //if (envelope.statement.pledges.type_ == SCPStatementType.SCP_ST_EXTERNALIZE)
+        //{
+        //    ConsensusData con_data;
+
+        //    try
+        //    {
+        //        con_data = deserializeFull!ConsensusData(
+        //            envelope.statement.pledges.externalize_.ballot.value[]);
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        assert(0);  // this should never happen
+        //    }
+
+        //    const prev_block = this.ledger.getLastBlock();
+        //    const proposed_block = makeNewBlock(prev_block, con_data.tx_set,
+        //        con_data.enrolls);
+
+        //    const challenge = hashFull(proposed_block);
+        //    const R = Pair.random();
+        //    const sig = sign(this.key_pair.v, this.key_pair.V, R.V, R.v, challenge);
+        //    envelope.statement.pledges.externalize_.ballot.value_sig = sig;
+
+        //    import std.stdio;
+        //    scope (failure) assert(0);
+        //    writefln("Signed externalize with: %s", sig);
+        //}
+
+        const challenge = SCPStatementHash(&envelope.statement).hashFull();
         const R = Pair.random();
         const sig = sign(this.key_pair.v, this.key_pair.V, R.V, R.v, challenge);
         envelope.signature = sig;
+    }
+
+    /***************************************************************************
+
+        Called when a ballot commit was accepted.
+
+        Collects the signature from the ballot for later construction
+        of the block schnorr signature
+
+        Params:
+            slot_idx = the slot index we're currently reaching consensus for
+            value = the transaction set to validate
+            nomination = unused, seems to be stellar-specific
+
+    ***************************************************************************/
+
+    public override void acceptedCommit (uint64_t slotIndex,
+        ref const(SCPBallot) ballot)
+    {
+        //
+        import std.stdio;
+        scope (failure) assert(0);
+
+        writefln("accepted commit with signature: %s",
+            ballot.value_sig);
     }
 
     /***************************************************************************

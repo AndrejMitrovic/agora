@@ -437,6 +437,18 @@ public class Ledger
 
     /***************************************************************************
 
+        Returns:
+            latest block
+
+    ***************************************************************************/
+
+    public Block getLastBlock () @safe nothrow
+    {
+        return this.last_block;
+    }
+
+    /***************************************************************************
+
         Get a range of blocks, starting from the provided block height.
 
         Params:
