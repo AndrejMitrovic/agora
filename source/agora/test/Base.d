@@ -529,7 +529,7 @@ public class TestAPIManager
     public void createNewNode (Config conf, string file = __FILE__, int line = __LINE__)
     {
         RemoteAPI!TestAPI api;
-        if (conf.node.is_validator)
+        if (conf.validator.enabled == true)
         {
             api = RemoteAPI!TestAPI.spawn!TestValidatorNode(conf, &this.reg,
                 this.blocks, this.test_conf.txs_to_nominate, conf.node.timeout, file, line);
@@ -958,10 +958,10 @@ private mixin template TestNodeMixin ()
 
     /// Return an enrollment manager backed by an in-memory SQLite db
     protected override EnrollmentManager getEnrollmentManager (
-        string data_dir, in NodeConfig node_config,
+        string data_dir, in ValidatorConfig validator_config,
         immutable(ConsensusParams) params)
     {
-        return new EnrollmentManager(":memory:", node_config.key_pair, params);
+        return new EnrollmentManager(":memory:", validator_config.key_pair, params);
     }
 
     /// Get the active validator count for the current block height
@@ -1209,21 +1209,19 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
     size_t full_node_idx;
     size_t validator_idx;
 
-    NodeConfig makeNodeConfig (bool is_validator, KeyPair node_key)
+    string validatorAddress (KeyPair node_key) {
+        return format("Validator #%s (%s)",
+            validator_idx++, node_key.address.prettify);
+    }
+    string fullNodeAddress () {
+        return format("FullNode #%s", full_node_idx++);
+    }
+
+    NodeConfig makeNodeConfig (Address address)
     {
-        Address address;
-
-        if (is_validator)
-            address = format("Validator #%s (%s)",
-                validator_idx++, node_key.address.prettify);
-        else
-            address = format("FullNode #%s", full_node_idx++);
-
         NodeConfig conf =
         {
             address : address,
-            is_validator : is_validator,
-            key_pair : node_key,
             retry_delay : test_conf.retry_delay,
             max_retries : test_conf.max_retries,
             timeout : test_conf.timeout,
@@ -1242,13 +1240,38 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
         return conf;
     }
 
+    ValidatorConfig makeValidatorConfig (KeyPair node_key)
+    {
+        ValidatorConfig conf =
+        {
+            enabled : true,
+            key_pair : node_key,
+            // preimage_reveal_interval : 1.seconds,  // check revealing frequently
+        };
+
+        return conf;
+    }
+
+    ValidatorConfig makeFalseValidatorConfig ()
+    {
+        ValidatorConfig conf =
+        {
+            enabled : false,
+            key_pair : KeyPair.init,
+            // preimage_reveal_interval : 1.seconds,  // check revealing frequently
+        };
+
+        return conf;
+    }
+
     BanManager.Config ban_conf =
     {
         max_failed_requests : test_conf.max_failed_requests,
         ban_duration: 300
     };
 
-    Config makeMainConfig (size_t idx, NodeConfig self, NodeConfig[] node_confs)
+    Config makeMainConfig (size_t idx, NodeConfig self, NodeConfig[] node_confs,
+        ValidatorConfig validator_self)
     {
         auto other_nodes =
             node_confs
@@ -1274,6 +1297,7 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
         {
             banman : ban_conf,
             node : self,
+            validator : validator_self,
             network : assumeUnique(network),
         };
 
@@ -1284,35 +1308,58 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
     auto keys = refRange(&key_range);
 
     NodeConfig[] node_configs;
+    ValidatorConfig[] validator_configs;
     Config[] main_configs;
 
     keys.take(test_conf.validators)
-        .each!(key => node_configs ~= makeNodeConfig(true, key));
-    keys.take(test_conf.full_nodes)
-        .each!(key => node_configs ~= makeNodeConfig(false, key));
+        .each!(key => node_configs ~= makeNodeConfig(validatorAddress(key)));
+    iota(test_conf.full_nodes)
+        .each!(_ => node_configs ~= makeNodeConfig(fullNodeAddress()));
+
+    // keys.take(test_conf.validators)
+    //     .each!(key => validator_configs ~= makeValidatorConfig(key));
+    key_range.take(test_conf.validators)
+        .each!(key => validator_configs ~= makeValidatorConfig(key));
 
     // network these nodes together using the configured NetworkTopology
-    node_configs.enumerate.each!(
-        pair => main_configs ~= makeMainConfig(
-            pair.index, pair.value, node_configs));
+    node_configs.take(test_conf.validators).zip(key_range).enumerate
+        .each!(pair => main_configs ~= makeMainConfig(
+            pair.index, pair.value[0], node_configs,
+                makeValidatorConfig(pair.value[1])));
+
+    node_configs.drop(test_conf.validators).enumerate
+        .each!(pair => main_configs ~= makeMainConfig(
+            pair.index, pair.value, node_configs,
+                makeFalseValidatorConfig()));
 
     NodeConfig[] extra_node_configs;
     keys.take(test_conf.outsider_validators)
-        .each!(key => extra_node_configs ~= makeNodeConfig(true, key));
-    keys.take(test_conf.outsider_full_nodes)
-        .each!(key => extra_node_configs ~= makeNodeConfig(false, key));
+        .each!(key => extra_node_configs ~= makeNodeConfig(validatorAddress(key)));
+    iota(test_conf.outsider_full_nodes)
+        .each!(_ => extra_node_configs ~= makeNodeConfig(fullNodeAddress()));
 
     // generate the outsider main_configs. pair.index is correct here despite
     // passing 'node_configs'. in 'MinimallyConnected' mode the connection will be
     // n2 <- n1 <- n2 and n1 <- o1 and n2 <- o2, (o = outsider).
     // otherwise it will be [n1 <-> n2] <- o1 and [n1 <-> n2] <- o2
-    extra_node_configs.enumerate.each!(
+
+    extra_node_configs.zip(key_range.drop(test_conf.validators)).enumerate
+        .each!(pair => main_configs ~= makeMainConfig(
+            pair.index % node_configs.length, pair.value[0], node_configs,
+                makeValidatorConfig(pair.value[1])));
+
+    extra_node_configs.drop(test_conf.validators).enumerate.each!(
         pair => main_configs ~= makeMainConfig(
-            pair.index % node_configs.length, pair.value, node_configs));
+            pair.index % node_configs.length, pair.value, node_configs,
+                makeFalseValidatorConfig()));
+
+    /*extra_node_configs.enumerate.each!(
+        pair => main_configs ~= makeMainConfig(
+            pair.index % node_configs.length, pair.value, node_configs));*/
 
     auto gen_block = makeGenesisBlock(
-        node_configs
-            .filter!(conf => conf.is_validator)
+        validator_configs
+            // .filter!(conf => conf.validator.enabled)
             .map!(conf => conf.key_pair)
             .array, test_conf.validator_cycle);
 

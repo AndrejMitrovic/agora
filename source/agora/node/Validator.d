@@ -75,13 +75,13 @@ public class Validator : FullNode, API
     /// Ctor
     public this (const Config config)
     {
-        assert(config.node.is_validator);
+        assert(config.validator.enabled == true);
         super(config);
         this.quorum_params = QuorumParams(this.params.MaxQuorumNodes,
             this.params.QuorumThreshold);
 
         this.nominator = this.getNominator(this.network,
-            this.config.node.key_pair, this.ledger, this.taskman);
+            this.config.validator.key_pair, this.ledger, this.taskman);
 
         // currently we are not saving preimage info,
         // we only have the commitment in the genesis block
@@ -123,7 +123,7 @@ public class Validator : FullNode, API
         static QuorumConfig[] other_qcs;
         this.rebuildQuorumConfig(this.qc, other_qcs, height);
         this.nominator.setQuorumConfig(this.qc, other_qcs);
-        buildRequiredKeys(this.config.node.key_pair.address, this.qc,
+        buildRequiredKeys(this.config.validator.key_pair.address, this.qc,
             this.required_peer_keys);
     }
 
@@ -151,7 +151,7 @@ public class Validator : FullNode, API
         }
 
         const rand_seed = this.enroll_man.getRandomSeed(keys, height);
-        qc = buildQuorumConfig(this.config.node.key_pair.address,
+        qc = buildQuorumConfig(this.config.validator.key_pair.address,
             keys, this.utxo_set.getUTXOFinder(), rand_seed,
             this.quorum_params);
 
@@ -160,7 +160,7 @@ public class Validator : FullNode, API
         () @trusted { assumeSafeAppend(other_qcs); }();
 
         foreach (pub_key; pub_keys.filter!(
-            pk => pk != this.config.node.key_pair.address))  // skip our own
+            pk => pk != this.config.validator.key_pair.address))  // skip our own
         {
             other_qcs ~= buildQuorumConfig(pub_key, keys,
                 this.utxo_set.getUTXOFinder(), rand_seed, this.quorum_params);
@@ -225,7 +225,7 @@ public class Validator : FullNode, API
     /// GET /public_key
     public override PublicKey getPublicKey () pure nothrow @safe @nogc
     {
-        return this.config.node.key_pair.address;
+        return this.config.validator.key_pair.address;
     }
 
     /***************************************************************************

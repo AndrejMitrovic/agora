@@ -246,7 +246,7 @@ unittest
         {
             if (this.nodes.length == 0)
             {
-                assert(conf.node.is_validator);
+                assert(conf.validator.enabled == true);
                 auto node = RemoteAPI!TestAPI.spawn!TestNode(
                     conf, &this.reg, this.blocks, this.test_conf.txs_to_nominate,
                     conf.node.timeout);
