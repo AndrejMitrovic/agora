@@ -1252,18 +1252,6 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
         return conf;
     }
 
-    ValidatorConfig makeFalseValidatorConfig ()
-    {
-        ValidatorConfig conf =
-        {
-            enabled : false,
-            key_pair : KeyPair.init,
-            // preimage_reveal_interval : 1.seconds,  // check revealing frequently
-        };
-
-        return conf;
-    }
-
     BanManager.Config ban_conf =
     {
         max_failed_requests : test_conf.max_failed_requests,
@@ -1271,7 +1259,7 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
     };
 
     Config makeMainConfig (size_t idx, NodeConfig self, NodeConfig[] node_confs,
-        ValidatorConfig validator_self)
+        ValidatorConfig validator_self = ValidatorConfig.init)
     {
         auto other_nodes =
             node_confs
@@ -1334,8 +1322,7 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
 
     node_configs.drop(test_conf.validators).enumerate(test_conf.validators)
         .each!(pair => main_configs ~= makeMainConfig(
-            pair.index, pair.value, node_configs,
-                makeFalseValidatorConfig()));
+            pair.index, pair.value, node_configs));
 
     NodeConfig[] extra_node_configs;
     outsider_validator_keys
@@ -1355,8 +1342,7 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
 
     extra_node_configs.drop(test_conf.validators).enumerate(test_conf.validators).each!(
         pair => main_configs ~= makeMainConfig(
-            pair.index % node_configs.length, pair.value, node_configs,
-                makeFalseValidatorConfig()));
+            pair.index % node_configs.length, pair.value, node_configs));
 
     /*extra_node_configs.enumerate.each!(
         pair => main_configs ~= makeMainConfig(
