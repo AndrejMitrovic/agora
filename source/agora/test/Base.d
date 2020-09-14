@@ -1304,36 +1304,41 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
         return conf;
     }
 
-    auto key_range = WK.Keys.byRange();
-    auto keys = refRange(&key_range);
+    auto key_range = WK.Keys.byRange().takeExactly(test_conf.validators +
+        test_conf.outsider_validators)
+        .array;
+
+    auto validator_keys = key_range[0 .. test_conf.validators];
+    key_range.popFrontN(test_conf.validators);
+
+    auto outsider_validator_keys = key_range[0 .. test_conf.outsider_validators];
+    key_range.popFrontN(test_conf.outsider_validators);
 
     NodeConfig[] node_configs;
     ValidatorConfig[] validator_configs;
     Config[] main_configs;
 
-    keys.take(test_conf.validators)
+    validator_keys
         .each!(key => node_configs ~= makeNodeConfig(validatorAddress(key)));
     iota(test_conf.full_nodes)
         .each!(_ => node_configs ~= makeNodeConfig(fullNodeAddress()));
 
-    // keys.take(test_conf.validators)
-    //     .each!(key => validator_configs ~= makeValidatorConfig(key));
-    key_range.take(test_conf.validators)
+    validator_keys
         .each!(key => validator_configs ~= makeValidatorConfig(key));
 
     // network these nodes together using the configured NetworkTopology
-    node_configs.take(test_conf.validators).zip(key_range).enumerate
+    node_configs.take(test_conf.validators).zip(validator_keys).enumerate
         .each!(pair => main_configs ~= makeMainConfig(
             pair.index, pair.value[0], node_configs,
                 makeValidatorConfig(pair.value[1])));
 
-    node_configs.drop(test_conf.validators).enumerate
+    node_configs.drop(test_conf.validators).enumerate(test_conf.validators)
         .each!(pair => main_configs ~= makeMainConfig(
             pair.index, pair.value, node_configs,
                 makeFalseValidatorConfig()));
 
     NodeConfig[] extra_node_configs;
-    keys.take(test_conf.outsider_validators)
+    outsider_validator_keys
         .each!(key => extra_node_configs ~= makeNodeConfig(validatorAddress(key)));
     iota(test_conf.outsider_full_nodes)
         .each!(_ => extra_node_configs ~= makeNodeConfig(fullNodeAddress()));
@@ -1343,12 +1348,12 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
     // n2 <- n1 <- n2 and n1 <- o1 and n2 <- o2, (o = outsider).
     // otherwise it will be [n1 <-> n2] <- o1 and [n1 <-> n2] <- o2
 
-    extra_node_configs.zip(key_range.drop(test_conf.validators)).enumerate
+    extra_node_configs.zip(outsider_validator_keys).enumerate
         .each!(pair => main_configs ~= makeMainConfig(
             pair.index % node_configs.length, pair.value[0], node_configs,
                 makeValidatorConfig(pair.value[1])));
 
-    extra_node_configs.drop(test_conf.validators).enumerate.each!(
+    extra_node_configs.drop(test_conf.validators).enumerate(test_conf.validators).each!(
         pair => main_configs ~= makeMainConfig(
             pair.index % node_configs.length, pair.value, node_configs,
                 makeFalseValidatorConfig()));
