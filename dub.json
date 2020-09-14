@@ -66,7 +66,8 @@
 
     "dflags": [ "-extern-std=c++14" ],
     "lflags-posix": [ "-lstdc++", "-lsqlite3" ],
-    "lflags-windows": [  "sqlite3.lib", "/nodefaultlib:msvcetd.lib" ],
+    "lflags-windows": [  "sqlite3.lib", "/nodefaultlib:msvcetd.lib"],
+    "libs-windows": [ "iphlpapi" ],
     "buildRequirements": [ "allowWarnings" ],
 
 	"toolchainRequirements": {
@@ -80,7 +81,13 @@
             "name": "server",
             "targetName": "agora",
             "mainSourceFile": "source/agora/node/main.d",
-            "excludedSourceFiles": ["source/agora/cli/*/*"]
+            "excludedSourceFiles": ["source/agora/cli/*/*", "source/agora/registry/NameRegistryServer.d"]
+        },
+        {
+            "name": "name-registry",
+            "targetName": "name-registry",
+            "mainSourceFile": "source/agora/registry/NameRegistryServer.d",
+            "excludedSourceFiles": ["source/agora/cli/*/*", "source/agora/node/main.d"]
         },
         {
             "name": "client",
@@ -100,13 +107,14 @@
                 "source/agora/consensus/protocol/*",
                 "source/agora/cli/checkvtable/*",
                 "source/agora/cli/multi/*",
-                "source/agora/cli/vanity/*"
+                "source/agora/cli/vanity/*",
+                "source/agora/registry/NameRegistryServer.d"
             ]
         },
         {
             "name": "unittest",
             "targetName": "agora-unittests",
-            "excludedSourceFiles": ["source/agora/cli/*/main.d"],
+            "excludedSourceFiles": ["source/agora/cli/*/main.d", "source/agora/registry/NameRegistryServer.d"],
             "sourceFiles-posix": [
                 "source/scpp/build/DSizeChecks.o",
                 "source/scpp/build/DLayoutChecks.o"
@@ -125,7 +133,8 @@
                 "source/agora/cli/checkvtable/*",
                 "source/agora/cli/client/*",
                 "source/agora/cli/vanity/*",
-                "source/agora/node/main.d"
+                "source/agora/node/main.d",
+                "source/agora/registry/NameRegistryServer.d"
             ]
         },
         {
@@ -139,7 +148,8 @@
                 "source/agora/cli/client/*",
                 "source/agora/cli/multi/*",
                 "source/agora/cli/vanity/*",
-                "source/agora/node/main.d"
+                "source/agora/node/main.d",
+                "source/agora/registry/NameRegistryServer.d"
             ]
         },
         {
@@ -154,7 +164,8 @@
                 "source/agora/cli/client/*",
                 "source/agora/cli/multi/*",
                 "source/agora/cli/vanity/*",
-                "source/agora/node/main.d"
+                "source/agora/node/main.d",
+                "source/agora/registry/NameRegistryServer.d"
             ]
         }
     ],

@@ -35,10 +35,18 @@ import agora.network.NetworkManager;
 import agora.node.BlockStorage;
 import agora.node.FullNode;
 import agora.node.Ledger;
+import agora.registry.NameRegistryAPI;
+import agora.registry.NameRegistryClient;
+import agora.utils.InetUtils;
 import agora.utils.Log;
+import agora.utils.Utility;
 import agora.utils.PrettyPrinter;
 
 import scpd.types.Stellar_SCP;
+
+import vibe.http.client;
+import vibe.web.rest;
+import vibe.inet.url : URL;
 
 import core.stdc.stdlib : abort;
 import core.time;
@@ -91,6 +99,50 @@ public class Validator : FullNode, API
         // currently we are not saving preimage info,
         // we only have the commitment in the genesis block
         this.regenerateQuorums(Height(0));
+
+        if(config.validator.registry_address.length && config.validator.addresses_to_register.length)
+        {
+            auto name_registry_client = new NameRegistryClient(network.getNameRegistryClient(
+                    config.validator.registry_address, 5.seconds));
+
+            auto register_public_key_dg = delegate ()
+            {
+                auto addresses_to_register = config.validator.addresses_to_register.dup();
+                if(!addresses_to_register.length)
+                    addresses_to_register = InetUtils.get_all_public_ips();
+                // trying to register the addresses a couple of times
+                retry!(
+                    {
+                        log.info("Trying to register network addresses {} into registry running on {}",
+                            addresses_to_register, config.validator.registry_address);
+
+                        auto result = name_registry_client.registerNetworkAddresses(this.config.validator.key_pair,
+                            addresses_to_register);
+                        if(!result.length)
+                        {
+                            log.error("Unable to register network addresses: {}", result);
+                            return false;
+                        }
+                        log.info("Name registration finished");
+                        return true;
+                    },
+                    5,
+                    5.seconds
+                )(taskman);
+            };
+
+            taskman.setTimer(0.minutes, register_public_key_dg, Periodic.No);
+            // Periodically re-register the network addresses, in case the registry
+            // server is restarted or new interfaces added to the machine.
+            // This will also take care of the rare edge case in which we were
+            //  not able to register the address due to netwrork problems.
+            taskman.setTimer(5.minutes, register_public_key_dg, Periodic.Yes);
+        }
+        else
+        {
+            log.error("Unable to register network addresses for validator, as the " ~
+                "config file is missing registry_address or addresses_to_register or both");
+        }
     }
 
     /***************************************************************************

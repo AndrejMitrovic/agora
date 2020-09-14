@@ -106,7 +106,7 @@ unittest
         }
 
         /// set base class
-        public override void createNewNode (Config conf, string file, int line)
+        public override RemoteAPI!TestAPI createNewNode (Config conf, string file, int line)
         {
             if (this.nodes.length == 0)
             {
@@ -116,9 +116,10 @@ unittest
                     time, conf.node.timeout);
                 this.reg.register(conf.node.address, api.tid());
                 this.nodes ~= NodePair(conf.node.address, api, time);
+                return api;
             }
             else
-                super.createNewNode(conf, file, line);
+                return super.createNewNode(conf, file, line);
         }
     }
 

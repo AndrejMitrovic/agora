@@ -128,7 +128,7 @@ unittest
         }
 
         /// see base class
-        public override void createNewNode (Config conf, string file, int line)
+        public override RemoteAPI!TestAPI createNewNode (Config conf, string file, int line)
         {
             RemoteAPI!TestAPI api;
             auto time = new shared(time_t)(this.initial_time);
@@ -156,6 +156,7 @@ unittest
 
             this.reg.register(conf.node.address, api.tid());
             this.nodes ~= NodePair(conf.node.address, api, time);
+            return api;        
         }
     }
 

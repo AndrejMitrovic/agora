@@ -38,6 +38,7 @@ import agora.common.Task;
 import agora.consensus.data.Transaction;
 import agora.network.NetworkClient;
 import agora.node.Ledger;
+import agora.registry.NameRegistryAPI;
 import agora.utils.Log;
 
 import scpd.types.Stellar_SCP;
@@ -716,6 +717,39 @@ public class NetworkManager
         settings.httpClientSettings.readTimeout = timeout;
 
         return new RestInterfaceClient!API(settings);
+    }
+
+    /***************************************************************************
+
+        Instantiates a client object implementing `NameRegistryAPI`
+
+        This function simply returns a name registry object implementing
+        `NameRegistryAPI`. In the default implementation, this returns a
+        `RestInterfaceClient`. However, it can be overriden in test code to
+        return an in-memory client.
+
+        Params:
+          address = The address of the name registry server
+          timeout = the timeout duration to use for requests
+
+        Returns:
+          An object to communicate with the name registry server
+
+    ***************************************************************************/
+
+    public NameRegistryAPI getNameRegistryClient (Address address, Duration timeout)
+    {
+        import vibe.http.client;
+
+        auto rest_interface_settings = new RestInterfaceSettings();
+        rest_interface_settings.baseURL = URL(address);
+        rest_interface_settings.httpClientSettings = new HTTPClientSettings();
+        with(rest_interface_settings.httpClientSettings)
+        {
+            connectTimeout = timeout;
+            readTimeout = timeout;
+        }
+        return new RestInterfaceClient!NameRegistryAPI(rest_interface_settings);
     }
 
     /***************************************************************************

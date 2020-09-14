@@ -52,6 +52,9 @@ import agora.node.BlockStorage;
 import agora.node.FullNode;
 import agora.node.Ledger;
 import agora.node.Validator;
+import agora.registry.NameRegistryAPI;
+import agora.registry.NameRegistryClient;
+import agora.registry.NameRegistryImpl;
 import agora.utils.Log;
 import agora.utils.PrettyPrinter;
 import agora.api.FullNode : NodeInfo, NetworkState;
@@ -488,6 +491,9 @@ public class TestAPIManager
     /// Also kept here to avoid any eager garbage collection.
     public NodePair[] nodes;
 
+    /// Name registry
+    public RemoteAPI!NameRegistryAPI name_registry;
+
     /// Contains the initial blockchain state of all nodes
     public immutable(Block)[] blocks;
 
@@ -633,9 +639,12 @@ public class TestAPIManager
         Params:
             conf = the configuration passed on to the Node constructor
 
+        Returns:
+            object implementing TestAPI using LocalRest
+
     ***************************************************************************/
 
-    public void createNewNode (Config conf, string file = __FILE__, int line = __LINE__)
+   public RemoteAPI!TestAPI createNewNode (Config conf, string file = __FILE__, int line = __LINE__)
     {
         RemoteAPI!TestAPI api;
         auto time = new shared(time_t)(this.initial_time);
@@ -653,6 +662,24 @@ public class TestAPIManager
 
         this.reg.register(conf.node.address, api.tid());
         this.nodes ~= NodePair(conf.node.address, api, time);
+        return api;
+    }
+
+    /***************************************************************************
+
+    Create a new name registry
+
+    Returns:
+        object implementing NameRegistryAPI using LocalRest
+
+    ***************************************************************************/
+
+    public RemoteAPI!NameRegistryAPI createNameRegistry ()
+    {
+        auto api = RemoteAPI!NameRegistryAPI.spawn!NameRegistryImpl();
+        this.reg.register("name.registry", api.tid());
+        name_registry = api;
+        return api;
     }
 
     /***************************************************************************
@@ -710,6 +737,9 @@ public class TestAPIManager
         }
 
         this.nodes = null;
+
+        enforce(this.reg.unregister("name.registry"));
+        name_registry.ctrl.shutdown();
     }
 
     /***************************************************************************
@@ -862,6 +892,16 @@ public class TestNetworkManager : NetworkManager
         if (tid != typeof(tid).init)
             return new RemoteAPI!TestAPI(tid, timeout);
         assert(0, "Trying to access node at address '" ~ address ~
+               "' without first creating it");
+    }
+
+    ///
+    public final override RemoteAPI!NameRegistryAPI getNameRegistryClient (Address address, Duration timeout)
+    {
+        auto tid = this.registry.locate(address);
+        if (tid != typeof(tid).init)
+            return new RemoteAPI!NameRegistryAPI(tid, timeout);
+        assert(0, "Trying to access name registry at address '" ~ address ~
                "' without first creating it");
     }
 
@@ -1296,6 +1336,9 @@ public struct TestConf
     /// max retries before a request is considered failed
     size_t max_retries = 20;
 
+    /// address of the name registry
+    string registry_address = "name.registry";
+
     /// request timeout for each node
     Duration timeout = 5.seconds;
 
@@ -1395,6 +1438,7 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
         {
             enabled : true,
             key_pair : node_key,
+            registry_address : test_conf.registry_address,
         };
 
         return conf;
@@ -1509,8 +1553,17 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
         test_conf.extra_blocks);
 
     auto net = new APIManager(blocks, test_conf, genesis_start_time);
+    auto name_registry_client = new NameRegistryClient(net.createNameRegistry());
     foreach (ref conf; main_configs)
-        net.createNewNode(conf, file, line);
+    {
+        auto node_api = net.createNewNode(conf, file, line);
+        if(conf.validator.enabled)
+        {
+            string tid_sink;
+            node_api.tid().toString((const(char)[] tid){tid_sink = to!string(tid);});
+            name_registry_client.registerNetworkAddresses(conf.validator.key_pair, [tid_sink]);
+        }
+    }
 
     return net;
 }

@@ -165,6 +165,12 @@ public struct ValidatorConfig
 
     /// The seed to use for the keypair of this node
     public immutable KeyPair key_pair;
+
+    // Network addresses that will be registered with the public key (Validator only)
+    public immutable string[] addresses_to_register;
+
+    // Registry address
+    public string registry_address = "http://127.0.0.1:3003";
 }
 
 /// Admin API config
@@ -279,35 +285,13 @@ network:
 /// ditto
 private Config parseConfigImpl (ref const CommandLine cmdln, Node root)
 {
-    const(string)[] parseSequence (string section, bool optional = false)
-    {
-        if (auto val = section in cmdln.overrides)
-            return *val;
-
-        if (auto node = section in root)
-            enforce(root[section].type == NodeType.sequence,
-                format("`%s` section must be a sequence", section));
-        else if (optional)
-            return null;
-        else
-            throw new Exception(
-                format("The '%s' section is mandatory and must " ~
-                    "specify at least one item", section));
-
-        string[] result;
-        foreach (string item; root[section])
-            result ~= item;
-
-        return result;
-    }
-
     Config conf =
     {
         banman : parseBanManagerConfig("banman" in root, cmdln),
         node : parseNodeConfig("node" in root, cmdln),
         validator : parseValidatorConfig("validator" in root, cmdln),
-        network : assumeUnique(parseSequence("network")),
-        dns_seeds : assumeUnique(parseSequence("dns", true)),
+        network : assumeUnique(parseSequence("network", cmdln, root)),
+        dns_seeds : assumeUnique(parseSequence("dns", cmdln, root, true)),
         logging: parseLoggingSection("logging" in root, cmdln),
         event_handlers: parserEventHandlers("event_handlers" in root, cmdln),
     };
@@ -324,12 +308,37 @@ private Config parseConfigImpl (ref const CommandLine cmdln, Node root)
     return conf;
 }
 
+///
+private const(string)[] parseSequence (string section, ref const CommandLine cmdln,
+        Node root, bool optional = false)
+{
+    if (auto val = section in cmdln.overrides)
+        return *val;
+
+    if (auto node = section in root)
+        enforce(root[section].type == NodeType.sequence,
+            format("`%s` section must be a sequence", section));
+    else if (optional)
+        return null;
+    else
+        throw new Exception(
+            format("The '%s' section is mandatory and must " ~
+                "specify at least one item", section));
+
+    string[] result;
+    foreach (string item; root[section])
+        result ~= item;
+
+    return result;
+}
+
 /// Parse the node config section
 private NodeConfig parseNodeConfig (Node* node, const ref CommandLine cmdln)
 {
     auto min_listeners = get!(size_t, "node", "min_listeners")(cmdln, node);
     auto max_listeners = get!(size_t, "node", "max_listeners")(cmdln, node);
     auto address = get!(string, "node", "address")(cmdln, node);
+
     auto genesis_block = opt!(string, "node", "genesis_block")(cmdln, node);
     auto genesis_start_time = get!(time_t, "node", "genesis_start_time",
         str => SysTime(DateTime.fromISOString(str)).toUnixTime)(cmdln, node);
@@ -404,13 +413,16 @@ node:
 private ValidatorConfig parseValidatorConfig (Node* node, const ref CommandLine cmdln)
 {
     const enabled = get!(bool, "validator", "enabled")(cmdln, node);
-    if (!enabled)
+    if (!enabled || node is null)
         return ValidatorConfig(false);
 
+    auto registry_address = get!(string, "validator", "registry_address")(cmdln, node);
     ValidatorConfig result = {
         enabled: true,
         key_pair:
             KeyPair.fromSeed(Seed.fromString(get!(string, "validator", "seed")(cmdln, node))),
+        registry_address: registry_address,
+        addresses_to_register : assumeUnique(parseSequence("addresses_to_register", cmdln, *node, true)),
     };
     return result;
 }

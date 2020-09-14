@@ -104,7 +104,7 @@ public struct PublicKey
     /// Alias to the BitBlob type
     private alias DataType = BitBlob!(crypto_sign_ed25519_PUBLICKEYBYTES * 8);
 
-    /*private*/ DataType data;
+    DataType data;
     alias data this;
 
     /// Construct an instance from binary data
