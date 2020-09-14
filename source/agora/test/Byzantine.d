@@ -14,8 +14,6 @@
 
 module agora.test.Byzantine;
 
-version (none):
-
 import agora.api.Validator;
 import agora.common.Config;
 import agora.common.Task;
@@ -25,6 +23,7 @@ import agora.consensus.data.Block;
 import agora.consensus.data.ConsensusParams;
 import agora.consensus.data.Transaction;
 import agora.consensus.protocol.Nominator;
+import agora.network.Clock;
 import agora.network.NetworkClient;
 import agora.network.NetworkManager;
 import agora.node.Ledger;
@@ -35,77 +34,94 @@ import scpd.types.Stellar_SCP;
 import geod24.Registry;
 
 import std.algorithm;
-import std.datetime;
 import std.exception;
 import std.format;
 import std.range;
 import std.stdio;
+
 import core.exception;
+import core.stdc.time;
 
 /// node which refuses to co-operate: doesn't sign / forges the signature / etc
-class BynzantineNode : TestValidatorNode
+class ByzantineNode : TestValidatorNode
 {
     public this (Config config, Registry* reg, immutable(Block)[] blocks,
-        immutable(ConsensusParams) params = null)
+        ulong txs_to_nominate, shared(time_t)* cur_time)
     {
-        super(config, reg, blocks, params);
+        super(config, reg, blocks, txs_to_nominate, cur_time);
     }
 
-    protected override Nominator getNominator (NetworkManager network,
-        KeyPair key_pair, Ledger ledger, TaskManager taskman)
+    protected override TestNominator getNominator (immutable(ConsensusParams) params,
+        Clock clock, NetworkManager network, KeyPair key_pair, Ledger ledger,
+        TaskManager taskman)
     {
-        return new class Nominator
+        return new class TestNominator
         {
-            extern(D) this ()
+            public this ()
             {
-                super(network, key_pair, ledger, taskman);
-            }
-
-            // refuse to sign
-            extern(C++) override void signEnvelope (ref SCPEnvelope envelope)
-            {
+                super(params, clock, network, key_pair, ledger,
+                    taskman, this.txs_to_nominate);
             }
         };
     }
 }
 
-class ByzantineManager : TestAPIManager
+/// creates `bad_count` nodes which will refuse to sign
+class ByzantineManager (size_t bad_count) : TestAPIManager
 {
     ///
-    public this (immutable(Block)[] blocks, immutable(ConsensusParams) params)
+    public this (immutable(Block)[] blocks, TestConf test_conf,
+        time_t genesis_start_time)
     {
-        super(blocks, params);
+        super(blocks, test_conf, genesis_start_time);
     }
 
-    public override void createNewNode (Config conf)
+    public override void createNewNode (Config conf,
+        string file = __FILE__, int line = __LINE__)
     {
-        RemoteAPI!TestAPI api;
-        if (this.nodes.length == 0)  // first node is byzantine
-            api = RemoteAPI!TestAPI.spawn!BynzantineNode(conf, &this.reg,
-                this.blocks, this.params, conf.node.timeout.msecs);
+        if (this.nodes.length < bad_count)
+        {
+            auto time = new shared(time_t)(this.initial_time);
+            assert(conf.node.is_validator);
+            auto node = RemoteAPI!TestAPI.spawn!ByzantineNode(
+                conf, &this.reg, this.blocks, this.test_conf.txs_to_nominate,
+                time, conf.node.timeout);
+            this.reg.register(conf.node.address, node.ctrl.tid());
+            this.nodes ~= NodePair(conf.node.address, node, time);
+        }
         else
-            api = RemoteAPI!TestAPI.spawn!TestValidatorNode(conf, &this.reg,
-                this.blocks, this.params, conf.node.timeout.msecs);
-
-        this.reg.register(conf.node.address, api.tid());
-        this.nodes ~= NodePair(conf.node.address, api);
+            super.createNewNode(conf, file, line);
     }
 }
 
-/// 1 byzantine => fail
+///
 unittest
 {
-    TestConf conf = { nodes : 4 };
-    auto network = makeTestNetwork!ByzantineManager(conf);
+    TestConf conf = { validators : 4, quorum_threshold : 66 };
+    auto network = makeTestNetwork!(ByzantineManager!1)(conf);
     network.start();
     scope(exit) network.shutdown();
     scope(failure) network.printLogs();
     network.waitForDiscovery();
-
     auto nodes = network.clients;
     auto node_1 = nodes[$ - 1];
-
     auto txes = genesisSpendable().map!(txb => txb.sign()).array();
     txes.each!(tx => node_1.putTransaction(tx));
-    network.expectBlock(Height(1), 2.seconds);
+    network.expectBlock(Height(1), 5.seconds);
+}
+
+///
+unittest
+{
+    TestConf conf = { validators : 4, quorum_threshold : 66 };
+    auto network = makeTestNetwork!(ByzantineManager!2)(conf);
+    network.start();
+    scope(exit) network.shutdown();
+    scope(failure) network.printLogs();
+    network.waitForDiscovery();
+    auto nodes = network.clients;
+    auto node_1 = nodes[$ - 1];
+    auto txes = genesisSpendable().map!(txb => txb.sign()).array();
+    txes.each!(tx => node_1.putTransaction(tx));
+    assertThrown!AssertError(network.expectBlock(Height(1), 5.seconds));
 }
