@@ -48,12 +48,12 @@ static class NameRegistryImpl: NameRegistryAPI
 
     ***************************************************************************/
 
-    public override Address[] getNetworkAddresses (PublicKey public_key)
+    public override const(Address)[] getNetworkAddresses (PublicKey public_key)
     {
-        if(public_key in registry_map)
-            return registry_map[public_key].addresses;
-        else
-            return [];
+        if (auto payload = public_key in this.registry_map)
+            return payload.addresses;
+
+        return null;
     }
 
     /***************************************************************************

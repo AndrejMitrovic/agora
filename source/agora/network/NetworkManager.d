@@ -39,6 +39,7 @@ import agora.consensus.data.Transaction;
 import agora.network.NetworkClient;
 import agora.node.Ledger;
 import agora.registry.NameRegistryAPI;
+import agora.utils.InetUtils;
 import agora.utils.Log;
 
 import scpd.types.Stellar_SCP;
@@ -317,6 +318,8 @@ public class NetworkManager
     /// Config instance
     protected const NodeConfig node_config = NodeConfig.init;
 
+    protected const ValidatorConfig validator_config = ValidatorConfig.init;
+
     /// Task manager
     private TaskManager taskman;
 
@@ -355,19 +358,23 @@ public class NetworkManager
     ///
     private Metadata metadata;
 
+    /// registry client
+    private NameRegistryAPI registry_client;
+
     /// Maximum connection tasks to run in parallel
     private enum MaxConnectionTasks = 10;
 
     /// Ctor
-    public this (in NodeConfig node_config, in BanManager.Config banman_conf,
-        in string[] seed_peers, in string[] dns_seeds, Metadata metadata,
-        TaskManager taskman)
+    public this (in Config config, Metadata metadata, TaskManager taskman)
     {
         this.taskman = taskman;
-        this.node_config = node_config;
+        this.node_config = config.node;
+        this.validator_config = config.validator;
         this.metadata = metadata;
-        this.banman = this.getBanManager(banman_conf, node_config.data_dir);
+        this.banman = this.getBanManager(config.banman, node_config.data_dir);
         this.discovery_task = new AddressDiscoveryTask(&this.addAddresses);
+        this.registry_client = this.getNameRegistryClient(
+            config.validator.registry_address, 5.seconds);
 
         this.banman.load();
 
@@ -382,11 +389,11 @@ public class NetworkManager
         else
         {
             // add the IP seeds
-            this.addAddresses(Set!Address.from(seed_peers));
+            this.addAddresses(Set!Address.from(config.network));
 
             // add the DNS seeds
-            if (dns_seeds.length > 0)
-                this.addAddresses(resolveDNSSeeds(dns_seeds));
+            if (config.dns_seeds.length > 0)
+                this.addAddresses(resolveDNSSeeds(config.dns_seeds));
         }
     }
 
@@ -416,6 +423,41 @@ public class NetworkManager
         client.registerListener();
     }
 
+    private void onRegisterName () nothrow
+    {
+        const(Address)[] addresses = this.validator_config.addresses_to_register;
+        if (!addresses.length)
+            addresses = InetUtils.getPublicIPs();
+
+        RegistryPayload payload =
+        {
+            data:
+            {
+                public_key : this.validator_config.key_pair.address,
+                addresses : addresses,
+                seq : time(null)
+            }
+        };
+
+        payload.sign_payload(this.validator_config.key_pair.secret);
+
+        try
+        {
+            this.registry_client.registerNetworkAddresses(payload);
+        }
+        catch (Exception ex)
+        {
+            log.info("Couldn't register our address: {}. Trying again later..",
+                ex);
+        }
+    }
+
+    public void startPeriodicNameRegistration ()
+    {
+        this.onRegisterName();  // avoid delay
+        this.taskman.setTimer(5.seconds, &this.onRegisterName, Periodic.Yes);
+    }
+
     /// Discover the network, connect to all required peers
     /// Some nodes may want to connect to specific peers before
     /// discovery() is considered complete
@@ -426,6 +468,16 @@ public class NetworkManager
         this.required_peer_keys = required_peer_keys;
         foreach (key; this.connected_validator_keys)
             this.required_peer_keys.remove(key);
+
+        foreach (key; this.required_peer_keys)
+        {
+            // todo: error handling, and should likely periodically retry
+            // and run in its own task
+            scope (failure) assert(0);
+            auto addrs = this.registry_client.getNetworkAddresses(key);
+            foreach (addr; addrs)
+                this.addAddress(addr);
+        }
 
         // actually just runs it once, but we need the scheduler to run first
         // and it doesn't run in the constructor yet (LocalRest)

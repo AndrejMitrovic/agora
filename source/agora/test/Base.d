@@ -53,7 +53,6 @@ import agora.node.FullNode;
 import agora.node.Ledger;
 import agora.node.Validator;
 import agora.registry.NameRegistryAPI;
-import agora.registry.NameRegistryClient;
 import agora.registry.NameRegistryImpl;
 import agora.utils.Log;
 import agora.utils.PrettyPrinter;
@@ -492,7 +491,7 @@ public class TestAPIManager
     public NodePair[] nodes;
 
     /// Name registry
-    public RemoteAPI!NameRegistryAPI name_registry;
+    private RemoteAPI!NameRegistryAPI name_registry;
 
     /// Contains the initial blockchain state of all nodes
     public immutable(Block)[] blocks;
@@ -523,6 +522,7 @@ public class TestAPIManager
         this.genesis_start_time = genesis_start_time;
         this.initial_time = this.getBlockTime(blocks[$ - 1].header.height);
         this.reg.initialize();
+        this.createNameRegistry();
     }
 
     /***************************************************************************
@@ -674,12 +674,10 @@ public class TestAPIManager
 
     ***************************************************************************/
 
-    public RemoteAPI!NameRegistryAPI createNameRegistry ()
+    private void createNameRegistry ()
     {
-        auto api = RemoteAPI!NameRegistryAPI.spawn!NameRegistryImpl();
-        this.reg.register("name.registry", api.tid());
-        name_registry = api;
-        return api;
+        this.name_registry = RemoteAPI!NameRegistryAPI.spawn!NameRegistryImpl();
+        this.reg.register("name.registry", this.name_registry.tid());
     }
 
     /***************************************************************************
@@ -870,12 +868,11 @@ public class TestNetworkManager : NetworkManager
     public Registry* registry;
 
     /// Constructor
-    public this (NodeConfig config, BanManager.Config ban_conf,
-        in string[] peers, in string[] dns_seeds, Metadata metadata,
-        TaskManager taskman, Registry* reg)
+    public this (Config config, Metadata metadata, TaskManager taskman,
+        Registry* reg)
     {
         this.registry = reg;
-        super(config, ban_conf, peers, dns_seeds, metadata, taskman);
+        super(config, metadata, taskman);
     }
 
     /// No "http://" in unittests, we just use the string as-is
@@ -1101,13 +1098,10 @@ private mixin template TestNodeMixin ()
 
     /// Return an instance of the custom TestNetworkManager
     protected override NetworkManager getNetworkManager (
-        in NodeConfig node_config, in BanManager.Config banman_conf,
-        in string[] peers, in string[] dns_seeds, Metadata metadata,
-        TaskManager taskman)
+        in Config config, Metadata metadata, TaskManager taskman)
     {
         assert(taskman !is null);
-        return new TestNetworkManager(node_config, banman_conf, peers,
-            dns_seeds, metadata, taskman, this.registry);
+        return new TestNetworkManager(config, metadata, taskman, this.registry);
     }
 
     /// Return an enrollment manager backed by an in-memory SQLite db
@@ -1396,12 +1390,11 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
     assert(TotalNodes >= 2, "Creating a network require at least 2 nodes");
 
     size_t full_node_idx;
-    size_t validator_idx;
 
-    string validatorAddress (KeyPair node_key)
+    string validatorAddress (size_t idx, KeyPair node_key)
     {
         return format("Validator #%s (%s)",
-            validator_idx++, node_key.address.prettify);
+            idx, node_key.address.prettify);
     }
     string fullNodeAddress ()
     {
@@ -1432,13 +1425,14 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
         return conf;
     }
 
-    ValidatorConfig makeValidatorConfig (KeyPair node_key)
+    ValidatorConfig makeValidatorConfig (size_t idx, KeyPair node_key)
     {
         ValidatorConfig conf =
         {
             enabled : true,
             key_pair : node_key,
             registry_address : test_conf.registry_address,
+            addresses_to_register : [validatorAddress(idx, node_key)]
         };
 
         return conf;
@@ -1496,9 +1490,9 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
     Config[] main_configs;
 
     validator_keys
-        .each!(key => validator_configs ~= makeValidatorConfig(key));
+        .enumerate.each!(en => validator_configs ~= makeValidatorConfig(en.index, en.value));
     validator_keys
-        .each!(key => node_configs ~= makeNodeConfig(validatorAddress(key)));
+        .enumerate.each!(en => node_configs ~= makeNodeConfig(validatorAddress(en.index, en.value)));
     iota(test_conf.full_nodes)
         .each!(_ => node_configs ~= makeNodeConfig(fullNodeAddress()));
 
@@ -1506,7 +1500,7 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
     node_configs.take(test_conf.validators).zip(validator_keys).enumerate
         .each!(pair => main_configs ~= makeMainConfig(
             pair.index, pair.value[0], node_configs,
-                makeValidatorConfig(pair.value[1])));
+                makeValidatorConfig(pair.index, pair.value[1])));
     node_configs.drop(test_conf.validators).enumerate(test_conf.validators)
         .each!(pair => main_configs ~= makeMainConfig(
             pair.index, pair.value, node_configs));
@@ -1515,7 +1509,8 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
     NodeConfig[] extra_node_configs;
 
     outsider_validator_keys
-        .each!(key => extra_validator_configs ~= makeNodeConfig(validatorAddress(key)));
+        .enumerate(validator_keys.length)
+        .each!(en => extra_validator_configs ~= makeNodeConfig(validatorAddress(en.index, en.value)));
     iota(test_conf.outsider_full_nodes)
         .each!(_ => extra_node_configs ~= makeNodeConfig(fullNodeAddress()));
 
@@ -1527,7 +1522,7 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
     extra_validator_configs.zip(outsider_validator_keys).enumerate
         .each!(pair => main_configs ~= makeMainConfig(
             pair.index % node_configs.length, pair.value[0], node_configs,
-                makeValidatorConfig(pair.value[1])));
+                makeValidatorConfig(pair.index, pair.value[1])));
     extra_node_configs.enumerate(test_conf.outsider_validators).each!(
         pair => main_configs ~= makeMainConfig(
             pair.index % node_configs.length, pair.value, node_configs));
@@ -1553,17 +1548,8 @@ public APIManager makeTestNetwork (APIManager : TestAPIManager = TestAPIManager,
         test_conf.extra_blocks);
 
     auto net = new APIManager(blocks, test_conf, genesis_start_time);
-    auto name_registry_client = new NameRegistryClient(net.createNameRegistry());
     foreach (ref conf; main_configs)
-    {
-        auto node_api = net.createNewNode(conf, file, line);
-        if(conf.validator.enabled)
-        {
-            string tid_sink;
-            node_api.tid().toString((const(char)[] tid){tid_sink = to!string(tid);});
-            name_registry_client.registerNetworkAddresses(conf.validator.key_pair, [tid_sink]);
-        }
-    }
+        net.createNewNode(conf, file, line);
 
     return net;
 }

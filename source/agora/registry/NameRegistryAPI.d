@@ -27,7 +27,7 @@ struct RegistryPayloadData
     public PublicKey public_key;
 
     /// network addresses associated with the public key
-    public Address[] addresses;
+    public const(Address)[] addresses;
 
     /// monotonically increasing sequence number
     public long seq;
@@ -43,7 +43,7 @@ struct RegistryPayload
     public Signature signature;
 
     ///
-    public void sign_payload(const ref SecretKey secret_key)
+    public void sign_payload(const ref SecretKey secret_key) nothrow
     {
         signature = secret_key.sign(hashFull(data)[]);
     }
@@ -70,7 +70,7 @@ static interface NameRegistryAPI
 
     ***************************************************************************/
 
-    public Address[] getNetworkAddresses (PublicKey public_key);
+    public const(Address)[] getNetworkAddresses (PublicKey public_key);
 
     /***************************************************************************
 

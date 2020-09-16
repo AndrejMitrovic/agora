@@ -129,8 +129,9 @@ import core.stdc.string: strlen;
     }
 }
 
-    public static string[] get_all_public_ips()
+    public static string[] getPublicIPs() nothrow
     {
+        scope (failure) assert(0);  // todo: these should be nothrow
         return filter_ips(ip => !is_private_ip(ip));
     }
 

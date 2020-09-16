@@ -161,8 +161,8 @@ public class FullNode : API
         this.config = config;
         this.taskman = this.getTaskManager();
         this.clock = this.getClock();
-        this.network = this.getNetworkManager(config.node, config.banman,
-            config.network, config.dns_seeds, this.metadata, this.taskman);
+        this.network = this.getNetworkManager(config, this.metadata,
+            this.taskman);
         this.storage = this.getBlockStorage(config.node.data_dir);
         this.pool = this.getPool(config.node.data_dir);
         this.utxo_set = this.getUtxoSet(config.node.data_dir);
@@ -327,12 +327,10 @@ public class FullNode : API
 
     ***************************************************************************/
 
-    protected NetworkManager getNetworkManager (in NodeConfig node_config,
-        in BanManager.Config banman_conf, in string[] peers,
-        in string[] dns_seeds, Metadata metadata, TaskManager taskman)
+    protected NetworkManager getNetworkManager (in Config config,
+        Metadata metadata, TaskManager taskman)
     {
-        return new NetworkManager(node_config, banman_conf, peers,
-            dns_seeds, metadata, taskman);
+        return new NetworkManager(config, metadata, taskman);
     }
 
     /***************************************************************************
