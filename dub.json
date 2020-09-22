@@ -62,14 +62,6 @@
             "name": "unittest",
             "targetName": "agora-unittests",
             "excludedSourceFiles": ["source/agora/cli/*/main.d", "source/agora/registry/main.d"],
-            "sourceFiles-posix": [
-                "source/scpp/build/DSizeChecks.o",
-                "source/scpp/build/DLayoutChecks.o"
-            ],
-            "sourceFiles-windows": [
-                "source/scpp/build/DSizeChecks.obj",
-                "source/scpp/build/DLayoutChecks.obj"
-            ],
             "dflags-ldc": [ "--link-defaultlib-debug" ],
         },
         {
@@ -77,39 +69,7 @@
             "targetName": "agora-multi",
             "mainSourceFile": "source/agora/cli/multi/main.d",
             "excludedSourceFiles": [
-                "source/agora/cli/checkvtable/*",
                 "source/agora/cli/client/*",
-                "source/agora/cli/vanity/*",
-                "source/agora/node/main.d",
-                "source/agora/registry/main.d"
-            ]
-        },
-        {
-            "name": "checkvtable-gen",
-            "targetName": "agora-checkvtable-gen",
-            "mainSourceFile": "source/agora/cli/checkvtable/generate.d",
-            "sourceFiles": [
-            ],
-            "excludedSourceFiles": [
-                "source/agora/cli/checkvtable/check.d",
-                "source/agora/cli/client/*",
-                "source/agora/cli/multi/*",
-                "source/agora/cli/vanity/*",
-                "source/agora/node/main.d",
-                "source/agora/registry/main.d"
-            ]
-        },
-        {
-            "name": "checkvtable-run",
-            "targetName": "agora-checkvtable-run",
-            "mainSourceFile": "source/agora/cli/checkvtable/check.d",
-            "sourceFiles": [
-                "source/scpp/build/DVMChecks.o"
-            ],
-            "excludedSourceFiles": [
-                "source/agora/cli/checkvtable/generate.d",
-                "source/agora/cli/client/*",
-                "source/agora/cli/multi/*",
                 "source/agora/cli/vanity/*",
                 "source/agora/node/main.d",
                 "source/agora/registry/main.d"

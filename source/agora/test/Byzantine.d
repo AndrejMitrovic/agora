@@ -24,6 +24,7 @@ import agora.common.crypto.Key;
 import agora.common.crypto.Schnorr;
 import agora.consensus.data.Block;
 import agora.consensus.data.ConsensusParams;
+import agora.consensus.data.SCPTypes;
 import agora.consensus.data.Transaction;
 import agora.consensus.data.ConsensusData;
 import agora.consensus.protocol.Nominator;
@@ -34,8 +35,8 @@ import agora.node.Ledger;
 import agora.test.Base;
 import agora.utils.SCPPrettyPrinter;
 
-import scpd.types.Stellar_SCP;
-import scpd.types.Stellar_types : NodeID;
+import dscp.xdr.Stellar_SCP;
+import dscp.xdr.Stellar_types;
 
 import geod24.Registry;
 
@@ -66,11 +67,11 @@ struct EnvelopeTypeCounts
     size_t externalize_count;
 }
 
-private extern(C++) class ByzantineNominator : TestNominator
+private class ByzantineNominator : TestNominator
 {
     private ByzantineReason reason;
 
-    extern(D) this (immutable(ConsensusParams) params,
+    this (immutable(ConsensusParams) params,
         Clock clock, NetworkManager network, KeyPair key_pair, Ledger ledger,
         TaskManager taskman, string data_dir, ByzantineReason reason)
     {
@@ -80,7 +81,7 @@ private extern(C++) class ByzantineNominator : TestNominator
     }
 
     // override signing with Byzantine behaviour of not signing or signing with invalid signature
-    extern(C++) override void signEnvelope (ref SCPEnvelope envelope)
+    override void signEnvelope (ref SCPEnvelope envelope)
     {
         final switch (reason)
         {
@@ -137,9 +138,9 @@ private class SpyNominator : TestNominator
     public override void receiveEnvelope (scope ref const(SCPEnvelope) envelope) @trusted
     {
         // Make sure we don't count for same node more than once
-        if (nodes_received[envelope.statement.pledges.type_].count(envelope.statement.nodeID) > 0) return;
-        nodes_received[envelope.statement.pledges.type_] ~= envelope.statement.nodeID;
-        final switch (envelope.statement.pledges.type_) {
+        if (nodes_received[envelope.statement.pledges.type].count(envelope.statement.nodeID) > 0) return;
+        nodes_received[envelope.statement.pledges.type] ~= envelope.statement.nodeID;
+        final switch (envelope.statement.pledges.type) {
             case SCPStatementType.SCP_ST_NOMINATE:
                 atomicOp!("+=")(this.envelope_type_counts.nominate_count, 1);
                 break;

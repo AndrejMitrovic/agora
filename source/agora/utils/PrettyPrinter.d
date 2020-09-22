@@ -25,6 +25,7 @@ import agora.common.crypto.Key;
 import agora.consensus.data.Block;
 import agora.consensus.data.ConsensusData;
 import agora.consensus.data.Enrollment;
+import agora.consensus.data.SCPTypes;
 version (unittest) import agora.consensus.data.genesis.Test;
 import agora.consensus.data.Transaction;
 

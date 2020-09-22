@@ -23,6 +23,7 @@ import agora.common.Config;
 import agora.common.Task;
 import agora.consensus.data.Block;
 import agora.consensus.data.ConsensusParams;
+import agora.consensus.data.SCPTypes;
 import agora.consensus.protocol.Nominator;
 import agora.common.crypto.Key;
 import agora.common.Hash;
@@ -39,18 +40,16 @@ import core.thread;
 
 import geod24.Registry;
 
-import scpd.types.Stellar_types;
-import scpd.types.Stellar_SCP;
+import dscp.xdr.Stellar_types;
+import dscp.xdr.Stellar_types;
 
 /// ditto
 unittest
 {
-    extern (C++) static class CustomNominator : TestNominator
+    static class CustomNominator : TestNominator
     {
         // To see how many voting rounds are needed to reach consensus
         public __gshared int round_number;
-
-    extern (D):
 
         /// Ctor
         public this (immutable(ConsensusParams) params, Clock clock,
@@ -62,13 +61,12 @@ unittest
                 data_dir, txs_to_nominate);
         }
 
-    extern (C++):
-
         ///
-        public override uint64_t computeHashNode (uint64_t slot_idx,
+        public override uint64 computeHashNode (uint64 slot_idx,
             ref const(Value) prev, bool is_priority, int32_t round_num,
             ref const(NodeID) node_id) nothrow
         {
+            scope (failure) assert(0);
             this.round_number = round_num;
             return super.computeHashNode(slot_idx, prev, is_priority,
                 round_num, node_id);

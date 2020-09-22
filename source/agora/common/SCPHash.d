@@ -15,14 +15,12 @@
 module agora.common.SCPHash;
 
 import agora.common.Hash;
+import agora.consensus.data.SCPTypes;
 
-import scpd.types.Stellar_SCP;
-import scpd.types.Stellar_types;
-import scpd.types.Utils;
+import dscp.xdr.Stellar_SCP;
+import dscp.xdr.Stellar_types;
 
 import core.stdc.inttypes;
-
-extern(C++, `stellar`):
 
 /*******************************************************************************
 
@@ -36,27 +34,27 @@ extern(C++, `stellar`):
 
 *******************************************************************************/
 
-public uint512 getHashOf (ref const(SCPQuorumSet) qset)
+public Hash getHashOf (ref const(SCPQuorumSet) qset) @safe
 {
-    return uint512(hashFull(qset));
+    return hashFull(qset);
 }
 
 /// Ditto
-public uint512 getHashOf (ref const(Value) value)
+public Hash getHashOf (ref const(Value) value) @safe
 {
-    return uint512(hashFull(value));
+    return hashFull(value);
 }
 
 /// Ditto
-public uint512 getHashOf (uint64_t slot_idx, ref const(Value) prev, uint32_t hash,
-    int32_t round_num, ref const(NodeID) node_id)
+public Hash getHashOf (uint64 slot_idx, ref const(Value) prev, uint32_t hash,
+    int32_t round_num, ref const(NodeID) node_id) @safe
 {
-    return uint512(hashMulti(slot_idx, prev[], hash, round_num, node_id));
+    return hashMulti(slot_idx, prev, hash, round_num, node_id);
 }
 
 /// Ditto
-public uint512 getHashOf (uint64_t slot_idx, ref const(Value) prev, uint32_t hash,
-    int32_t round_num, ref const(Value) value)
+public Hash getHashOf (uint64 slot_idx, ref const(Value) prev, uint32_t hash,
+    int32_t round_num, ref const(Value) value) @safe
 {
-    return uint512(hashMulti(slot_idx, prev[], hash, round_num, value[]));
+    return hashMulti(slot_idx, prev, hash, round_num, value);
 }

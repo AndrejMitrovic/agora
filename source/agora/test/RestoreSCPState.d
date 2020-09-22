@@ -13,7 +13,7 @@
 
 module agora.test.RestoreSCPState;
 
-version (unittest):
+version (none):
 
 import agora.common.Config;
 import agora.common.Serializer;
@@ -105,10 +105,10 @@ unittest
             }
             super.restoreSCPState();
         }
-        protected override SCPEnvelopeStore getSCPEnvelopeStore (string)
-        {
-            return new TestSCPEnvelopeStore();
-        }
+        //protected override SCPEnvelopeStore getSCPEnvelopeStore (string)
+        //{
+        //    return new TestSCPEnvelopeStore();
+        //}
     }
 
     static class ReValidator : TestValidatorNode

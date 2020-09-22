@@ -25,6 +25,7 @@ import agora.consensus.data.Block;
 import agora.consensus.data.ConsensusParams;
 import agora.consensus.data.Enrollment;
 import agora.consensus.data.PreImageInfo;
+import agora.consensus.data.SCPTypes;
 import agora.consensus.data.Transaction;
 import agora.consensus.data.UTXOSetValue;
 import agora.consensus.EnrollmentManager;
@@ -39,7 +40,7 @@ import agora.registry.NameRegistryAPI;
 import agora.utils.Log;
 import agora.utils.PrettyPrinter;
 
-import scpd.types.Stellar_SCP;
+import dscp.xdr.Stellar_types;
 
 import core.stdc.stdlib : abort;
 import core.stdc.time;

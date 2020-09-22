@@ -21,16 +21,12 @@ import agora.common.Hash;
 import agora.common.Set;
 import agora.common.Types;
 import agora.consensus.data.Enrollment;
+import agora.consensus.data.SCPTypes;
 import agora.consensus.data.Transaction;
 import agora.consensus.data.UTXOSetValue;
 import agora.consensus.EnrollmentManager;
 
-import scpd.Cpp;
-import scpd.types.Stellar_SCP;
-import scpd.types.Stellar_types : uint256, NodeID;
-import scpd.types.Utils;
-import scpd.types.XDRBase;
-import scpd.quorum.QuorumTracker;
+import dscp.xdr.Stellar_types;
 
 import ocean.core.Test;
 
@@ -563,22 +559,23 @@ private size_t[] countNodeInclusions (QuorumConfig[PublicKey] quorums,
 version (unittest)
 private void verifyQuorumsSanity (const ref QuorumConfig[PublicKey] quorums)
 {
-    import scpd.scp.QuorumSetUtils;
+    // todo: port
+    //import dscp.scp.QuorumSetUtils;
 
-    foreach (key, quorum; quorums)
-    {
-        auto scp_quorum = toSCPQuorumSet(quorum);
-        const bool ExtraChecks = true;
-        const(char)* fail_reason;
-        enforce(isQuorumSetSane(scp_quorum, ExtraChecks, &fail_reason),
-            format("Quorum %s fails sanity check before normalization: %s",
-                    quorum, fail_reason.fromStringz));
+    //foreach (key, quorum; quorums)
+    //{
+    //    auto scp_quorum = toSCPQuorumSet(quorum);
+    //    const bool ExtraChecks = true;
+    //    const(char)* fail_reason;
+    //    enforce(isQuorumSetSane(scp_quorum, ExtraChecks, &fail_reason),
+    //        format("Quorum %s fails sanity check before normalization: %s",
+    //                quorum, fail_reason.fromStringz));
 
-        normalizeQSet(scp_quorum);
-        enforce(isQuorumSetSane(scp_quorum, ExtraChecks, &fail_reason),
-            format("Quorum %s fails sanity check after normalization: %s",
-                    quorum, fail_reason.fromStringz));
-    }
+    //    normalizeQSet(scp_quorum);
+    //    enforce(isQuorumSetSane(scp_quorum, ExtraChecks, &fail_reason),
+    //        format("Quorum %s fails sanity check after normalization: %s",
+    //                quorum, fail_reason.fromStringz));
+    //}
 }
 
 /*******************************************************************************
@@ -591,6 +588,12 @@ private void verifyQuorumsSanity (const ref QuorumConfig[PublicKey] quorums)
 
 *******************************************************************************/
 
+private void verifyQuorumsIntersect (QuorumConfig[PublicKey] quorums)
+{
+    // todo: port
+}
+
+version (none):
 version (unittest):
 version (Windows)
 private void verifyQuorumsIntersect (QuorumConfig[PublicKey] quorums)
@@ -600,7 +603,7 @@ private void verifyQuorumsIntersect (QuorumConfig[PublicKey] quorums)
 else
 private void verifyQuorumsIntersect (QuorumConfig[PublicKey] quorums)
 {
-    import scpd.quorum.QuorumIntersectionChecker;
+    import dscp.quorum.QuorumIntersectionChecker;
 
     auto qm = QuorumTracker.QuorumMap.create();
     foreach (key, quorum; quorums)

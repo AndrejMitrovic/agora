@@ -21,34 +21,31 @@ import agora.common.Hash : Hash, HashDg, hashPart, hashFull, hashMulti;
 import agora.common.ManagedDatabase;
 import agora.common.SCPHash;
 import agora.common.Serializer;
-import agora.common.Set;
 import agora.common.Task;
 import agora.common.Types;
 import agora.consensus.data.Block;
 import agora.consensus.data.ConsensusData;
 import agora.consensus.data.ConsensusParams;
 import agora.consensus.data.Enrollment;
+import agora.consensus.data.SCPTypes;
 import agora.consensus.data.Transaction;
-import agora.consensus.SCPEnvelopeStore;
+//import agora.consensus.SCPEnvelopeStore;
 import agora.network.Clock;
 import agora.network.NetworkManager;
 import agora.node.Ledger;
 import agora.utils.Log;
 import agora.utils.SCPPrettyPrinter;
 
-import scpd.Cpp;
-import scpd.scp.SCP;
-import scpd.scp.SCPDriver;
-import scpd.scp.Slot;
-import scpd.scp.Utils;
-import scpd.types.Stellar_types;
-import scpd.types.Stellar_types : StellarHash = Hash;
-import scpd.types.Stellar_SCP;
-import scpd.types.Utils;
+import dscp.scp.SCP;
+import dscp.scp.SCPDriver;
+import dscp.scp.Slot;
+import dscp.xdr.Stellar_SCP;
+import dscp.xdr.Stellar_types;
 
 import core.stdc.stdint;
 import core.stdc.stdlib : abort;
 import core.stdc.time;
+import core.time;
 
 import std.conv;
 import std.format;
@@ -58,7 +55,7 @@ import core.time : msecs, seconds;
 mixin AddLogger!();
 
 /// Ditto
-public extern (C++) class Nominator : SCPDriver
+public class Nominator : SCPDriver
 {
     /// Consensus parameters
     private immutable(ConsensusParams) params;
@@ -67,7 +64,7 @@ public extern (C++) class Nominator : SCPDriver
     private Clock clock;
 
     /// SCP instance
-    protected SCP* scp;
+    protected SCP scp;
 
     /// Network manager for gossiping SCPEnvelopes
     private NetworkManager network;
@@ -82,9 +79,9 @@ public extern (C++) class Nominator : SCPDriver
     protected Ledger ledger;
 
     /// The mapping of all known quorum sets
-    private SCPQuorumSetPtr[Hash] known_quorums;
+    private SCPQuorumSet[Hash] known_quorums;
 
-    private alias TimerType = Slot.timerIDs;
+    private alias TimerType = TimerID;
     static assert(TimerType.max == 1);
 
     /// Currently active timers grouped by type
@@ -101,9 +98,9 @@ public extern (C++) class Nominator : SCPDriver
     private ITimer nomination_timer;
 
     /// SCPEnvelopeStore instance
-    protected SCPEnvelopeStore scp_envelope_store;
+    //protected SCPEnvelopeStore scp_envelope_store;
 
-extern(D):
+
 
     /***************************************************************************
 
@@ -128,13 +125,13 @@ extern(D):
         this.clock = clock;
         this.network = network;
         this.schnorr_pair = Pair.fromScalar(secretKeyToCurveScalar(key_pair.secret));
-        auto node_id = NodeID(uint256(key_pair.address));
+        auto node_id = key_pair.address;
         const IsValidator = true;
-        const no_quorum = SCPQuorumSet.init;  // will be configured by setQuorumConfig()
-        this.scp = createSCP(this, node_id, IsValidator, no_quorum);
+        auto no_quorum = SCPQuorumSet.init;  // will be configured by setQuorumConfig()
+        this.scp = new SCP(this, node_id, IsValidator, no_quorum, LogWrapper(*log));
         this.taskman = taskman;
         this.ledger = ledger;
-        this.scp_envelope_store = this.getSCPEnvelopeStore(data_dir);
+        //this.scp_envelope_store = this.getSCPEnvelopeStore(data_dir);
         this.restoreSCPState();
     }
 
@@ -161,15 +158,13 @@ extern(D):
         foreach (qc; other_quorums)
         {
             auto quorum_set = buildSCPConfig(qc);
-            auto shared_set = makeSharedSCPQuorumSet(quorum_set);
-            this.known_quorums[hashFull(quorum_set)] = shared_set;
+            this.known_quorums[hashFull(quorum_set)] = quorum_set;
         }
 
         // set up our own quorum
         auto quorum_set = buildSCPConfig(quorum);
         () @trusted { this.scp.updateLocalQuorumSet(quorum_set); }();
-        auto shared_set = makeSharedSCPQuorumSet(quorum_set);
-        this.known_quorums[hashFull(quorum_set)] = shared_set;
+        this.known_quorums[hashFull(quorum_set)] = quorum_set;
     }
 
     /***************************************************************************
@@ -229,6 +224,7 @@ extern(D):
 
     public void stopNominationRound (Height height) @safe nothrow
     {
+        scope (failure) assert(0);
         this.is_nominating = false;
         () @trusted { this.scp.stopNomination(height); }();
 
@@ -350,12 +346,14 @@ extern(D):
     ***************************************************************************/
 
     private static SCPQuorumSet buildSCPConfig (ref const QuorumConfig config)
-        @safe nothrow
+        @trusted nothrow
     {
-        import scpd.scp.QuorumSetUtils;
-        auto scp_quorum = toSCPQuorumSet(config);
-        () @trusted { normalizeQSet(scp_quorum); }();
-        return scp_quorum;
+        scope (failure) assert(0);
+        import dscp.scp.QuorumSetUtils;
+
+        auto normalized = config.serializeFull.deserializeFull!QuorumConfig;
+        normalizeQSet(normalized);
+        return normalized;
     }
 
     /***************************************************************************
@@ -373,11 +371,10 @@ extern(D):
     {
         log.info("{}(): Proposing tx set for slot {}", __FUNCTION__, slot_idx);
 
-        auto prev_value = ConsensusData.init.serializeFull().toVec();
-        auto next_value = next.serializeFull().toVec();
-        auto prev_dup = duplicate_value(&prev_value);
-        auto next_dup = duplicate_value(&next_value);
-        if (this.scp.nominate(slot_idx, next_dup, prev_dup))
+        auto prev_value = Value(ConsensusData.init);
+        prev_value.tx_set.length = 1;  // to silence mPreviousValue being null
+        auto next_value = Value(next);
+        if (this.scp.nominate(slot_idx, next_value, prev_value))
         {
             log.info("{}(): Tx set nominated", __FUNCTION__);
         }
@@ -395,13 +392,13 @@ extern(D):
 
     protected void restoreSCPState ()
     {
-        foreach (const ref SCPEnvelope envelope; this.scp_envelope_store)
-        {
-            this.scp.setStateFromEnvelope(envelope.statement.slotIndex,
-                envelope);
-            if (!this.scp.isSlotFullyValidated(envelope.statement.slotIndex))
-                assert(0);
-        }
+        //foreach (const ref SCPEnvelope envelope; this.scp_envelope_store)
+        //{
+        //    this.scp.setStateFromEnvelope(envelope.statement.slotIndex,
+        //        envelope);
+        //    if (!this.scp.isSlotFullyValidated(envelope.statement.slotIndex))
+        //        assert(0);
+        //}
     }
 
     /***************************************************************************
@@ -437,12 +434,12 @@ extern(D):
 
         if (!verify(K, envelope.signature, challenge))
         {
-            log.trace("Envelope signature is invalid for {}: {}", key, scpPrettify(&envelope));
+            log.trace("Envelope signature is invalid for {}: {}", key, envelope);
             return;
         }
 
         if (this.scp.receiveEnvelope(envelope) != SCP.EnvelopeState.VALID)
-            log.info("Rejected invalid envelope: {}", scpPrettify(&envelope));
+            log.info("Rejected invalid envelope: {}", envelope);
     }
 
     /***************************************************************************
@@ -453,26 +450,26 @@ extern(D):
 
     public void storeLatestState () @safe
     {
-        vector!SCPEnvelope envelopes;
+        //vector!SCPEnvelope envelopes;
 
-        () @trusted
-        {
-            if (this.scp.empty())
-                return;
-            envelopes = this.scp.getLatestMessagesSend(this.scp.getHighSlotIndex());
-        }();
+        //() @trusted
+        //{
+        //    if (this.scp.empty())
+        //        return;
+        //    envelopes = this.scp.getLatestMessagesSend(this.scp.getHighSlotIndex());
+        //}();
 
-        ManagedDatabase.beginBatch();
-        scope (failure) ManagedDatabase.rollback();
+        //ManagedDatabase.beginBatch();
+        //scope (failure) ManagedDatabase.rollback();
 
-        // Clean the previous envelopes from the DB
-        this.scp_envelope_store.removeAll();
+        //// Clean the previous envelopes from the DB
+        //this.scp_envelope_store.removeAll();
 
-        // Store the latest envelopes
-        foreach (const ref env; envelopes)
-            this.scp_envelope_store.add(env);
+        //// Store the latest envelopes
+        //foreach (const ref env; envelopes)
+        //    this.scp_envelope_store.add(env);
 
-        ManagedDatabase.commitBatch();
+        //ManagedDatabase.commitBatch();
     }
 
     /***************************************************************************
@@ -487,13 +484,10 @@ extern(D):
 
     ***************************************************************************/
 
-    protected SCPEnvelopeStore getSCPEnvelopeStore (string data_dir)
-    {
-        return new SCPEnvelopeStore(buildPath(data_dir, "scp_envelopes.dat"));
-    }
-
-    extern (C++):
-
+    //protected SCPEnvelopeStore getSCPEnvelopeStore (string data_dir)
+    //{
+    //    return new SCPEnvelopeStore(buildPath(data_dir, "scp_envelopes.dat"));
+    //}
 
     /***************************************************************************
 
@@ -523,7 +517,7 @@ extern(D):
 
     ***************************************************************************/
 
-    public override ValidationLevel validateValue (uint64_t slot_idx,
+    public override ValidationLevel validateValue (uint64 slot_idx,
         ref const(Value) value, bool nomination) nothrow
     {
         const cur_time = this.clock.networkTime();
@@ -531,18 +525,16 @@ extern(D):
 
         try
         {
-            auto data = deserializeFull!ConsensusData(value[]);
-            if (auto fail_reason = this.ledger.validateConsensusData(data))
+            if (auto fail_reason = this.ledger.validateConsensusData(value))
             {
                 log.error("validateValue(): Validation failed: {}. Data: {}",
-                    fail_reason, data);
+                    fail_reason, value);
                 return ValidationLevel.kInvalidValue;
             }
         }
         catch (Exception ex)
         {
-            log.error("validateValue(): Received un-deserializable tx set. " ~
-                "Error: {}", ex.msg);
+            log.error("Unexpected error in validateValue: {}", ex.msg);
             return ValidationLevel.kInvalidValue;
         }
 
@@ -579,34 +571,25 @@ extern(D):
 
     ***************************************************************************/
 
-    public override void valueExternalized (uint64_t slot_idx,
+    public override void valueExternalized (uint64 slot_idx,
         ref const(Value) value) nothrow
     {
         if (slot_idx <= this.ledger.getBlockHeight())
             return;  // slot was already externalized
 
-        ConsensusData data = void;
-        try
-            data = deserializeFull!ConsensusData(value[]);
-        catch (Exception exc)
-        {
-            log.fatal("Deserialization of C++ Value failed: {}", exc);
-            abort();
-        }
-
         // enrollment data may be empty, but not transaction set
-        if (data.tx_set.length == 0)
+        if (value.tx_set.length == 0)
             assert(0, "Transaction set empty");
 
-        log.info("Externalized consensus data set at {}: {}", slot_idx, data);
+        log.info("Externalized consensus data set at {}: {}", slot_idx, value);
         try
         {
-            if (!this.ledger.onExternalized(data))
+            if (!this.ledger.onExternalized(value))
                 assert(0);
         }
         catch (Exception exc)
         {
-            log.fatal("Externalization of SCP data failed: {}", exc);
+            log.fatal("Externalization of consensus data failed: {}", exc);
             abort();
         }
     }
@@ -621,12 +604,9 @@ extern(D):
 
     ***************************************************************************/
 
-    public override SCPQuorumSetPtr getQSet (ref const(StellarHash) qSetHash)
+    public override SCPQuorumSet* getQSet (ref const(Hash) qSetHash)
     {
-        if (auto scp_quroum = qSetHash in this.known_quorums)
-            return *scp_quroum;
-
-        return SCPQuorumSetPtr.init;
+        return qSetHash in this.known_quorums;
     }
 
     /***************************************************************************
@@ -670,37 +650,29 @@ extern(D):
 
     ***************************************************************************/
 
-    public override Value combineCandidates (uint64_t slot_idx,
-        ref const(set!Value) candidates)
+    public override Value combineCandidates (uint64 slot_idx,
+        ref const(ValueSet) candidates)
     {
-        try
+        scope (failure) assert(0);
+
+        foreach (ref const(Value) candidate; candidates)
         {
-            foreach (ref const(Value) candidate; candidates)
+            if (auto msg = this.ledger.validateConsensusData(candidate))
             {
-                auto data = deserializeFull!ConsensusData(candidate[]);
-
-                if (auto msg = this.ledger.validateConsensusData(data))
-                {
-                    log.error("combineCandidates(): Invalid consensus data: {}", msg);
-                    continue;
-                }
-                else
-                {
-                    log.info("combineCandidates: {}", slot_idx);
-                }
-
-                // todo: currently we just pick the first of the candidate values,
-                // but we should ideally pick tx's out of the combined set
-                return duplicate_value(&candidate);
+                log.error("combineCandidates(): Invalid consensus data: {}", msg);
+                continue;
             }
-        } catch (Exception ex)
-        {
-            assert(0, format!"[%s:%s] combineCandidates: slot %u. Exception: %s"(
-                __FILE__, __LINE__, slot_idx, ex.to!string));
+            else
+            {
+                log.info("combineCandidates: {}", slot_idx);
+            }
+
+            // todo: currently we just pick the first of the candidate values,
+            // but we should ideally pick tx's out of the combined set
+            return duplicate(candidate);
         }
-        // should not reach here
-        assert(0, format!"[%s]:[%s] combineCandidates: no valid candidate for slot %u."(
-            __FILE__, __LINE__, slot_idx));
+
+        assert(0);  // should not reach here
     }
 
     /***************************************************************************
@@ -714,14 +686,14 @@ extern(D):
 
         Params:
             slot_idx = the slot index we're currently reaching consensus for.
-            timer_type = the timer type (see Slot.timerIDs).
+            timer_type = the timer type (see TimerID).
             timeout = the timeout of the timer, in milliseconds.
-            callback = the C++ callback to call.
+            callback = the callback to call.
 
     ***************************************************************************/
 
     public override void setupTimer (ulong slot_idx, int timer_type,
-        milliseconds timeout, CPPDelegate!SCPCallback* callback)
+        Duration timeout, void delegate () callback)
     {
         scope (failure) assert(0);
 
@@ -733,56 +705,9 @@ extern(D):
             this.active_timers[type] = null;
         }
 
-        if (callback is null || timeout == 0)
+        if (callback is null || timeout == Duration.init)
             return;
-        this.active_timers[type] = this.taskman.setTimer(
-            timeout.msecs, { callCPPDelegate(callback); });
-    }
-
-    /***************************************************************************
-
-        Used by the nomination protocol to randomize the order of messages
-        between nodes.
-
-        Params:
-            slot_idx = the slot index we're currently reaching consensus for.
-            prev = the previous data set for the provided slot index.
-            is_priority = the flag to check that this call is for priority.
-            round_num = the nomination round
-            node_id = the id of the node for which this computation is being made
-
-        Returns:
-            the 8-byte hash
-
-    ***************************************************************************/
-
-    public override uint64_t computeHashNode (uint64_t slot_idx,
-        ref const(Value) prev, bool is_priority, int32_t round_num,
-        ref const(NodeID) node_id) nothrow
-    {
-        const uint hash_N = 1;
-        const uint hash_P = 2;
-
-        const seed = this.ledger.getValidatorRandomSeed(Height(slot_idx - 1));
-        uint512 hash;
-        try
-        {
-            hash = uint512(hashMulti(slot_idx, prev[],
-                is_priority ? hash_P : hash_N, round_num, node_id, seed));
-        }
-        catch (Exception ex)
-        {
-            log.fatal("Computing hash of the node({}) failed: {}, Data was: " ~
-                "slot_idx: {}, prev: {}, is_priority: {}, seed: {}",
-                node_id, ex.msg, slot_idx, prev, is_priority, seed);
-            assert(0);
-        }
-
-        uint64_t res = 0;
-        for (size_t i = 0; i < res.sizeof; i++)
-            res = (res << 8) | hash[][i];
-
-        return res;
+        this.active_timers[type] = this.taskman.setTimer(timeout, callback);
     }
 }
 
@@ -791,7 +716,7 @@ private struct SCPStatementHash
 {
     // sanity check in case a new field gets added.
     // todo: use .tupleof tricks for a more reliable field layout change check
-    static assert(SCPNomination.sizeof == 112);
+    static assert(SCPNomination.sizeof == 96);
 
     /// instance pointer
     private const SCPStatement* st;
@@ -817,24 +742,24 @@ private struct SCPStatementHash
     {
         hashPart(this.st.nodeID, dg);
         hashPart(this.st.slotIndex, dg);
-        hashPart(this.st.pledges.type_, dg);
+        hashPart(this.st.pledges.type, dg);
 
-        final switch (this.st.pledges.type_)
+        final switch (this.st.pledges.type)
         {
             case SCPStatementType.SCP_ST_PREPARE:
-                computeHash(this.st.pledges.prepare_, dg);
+                computeHash(this.st.pledges.prepare, dg);
                 break;
 
             case SCPStatementType.SCP_ST_CONFIRM:
-                computeHash(this.st.pledges.confirm_, dg);
+                computeHash(this.st.pledges.confirm, dg);
                 break;
 
             case SCPStatementType.SCP_ST_EXTERNALIZE:
-                computeHash(this.st.pledges.externalize_, dg);
+                computeHash(this.st.pledges.externalize, dg);
                 break;
 
             case SCPStatementType.SCP_ST_NOMINATE:
-                computeHash(this.st.pledges.nominate_, dg);
+                computeHash(this.st.pledges.nominate, dg);
                 break;
         }
     }
@@ -966,10 +891,10 @@ private struct SCPEnvelopeHash
     import std.conv;
 
     () @trusted {
-        st.pledges.prepare_ = SCPStatement._pledges_t._prepare_t.init;
-        st.pledges.prepare_.prepared = &prep;
-        st.pledges.prepare_.preparedPrime = &prep_prime;
-        st.pledges.type_ = SCPStatementType.SCP_ST_PREPARE;
+        st.pledges.prepare = SCPStatement._pledges_t._prepare_t.init;
+        st.pledges.prepare.prepared = &prep;
+        st.pledges.prepare.preparedPrime = &prep_prime;
+        st.pledges.type = SCPStatementType.SCP_ST_PREPARE;
     }();
 
     auto getStHash () @trusted { return SCPStatementHash(&st); }
@@ -991,34 +916,34 @@ private struct SCPEnvelopeHash
         "fa2bc782576dfcb96f83ea38d290e5ce8191d10b5d5b7fa11265e0615fa155b"),
         getStHash().hashFull().to!string);
 
-    () @trusted { st.pledges.prepare_.prepared = null; }();
+    () @trusted { st.pledges.prepare.prepared = null; }();
     assert(getStHash().hashFull() == Hash.fromString(
         "0x1512e21205de2f043bf9b206e6675daef9fa9126efa4d1221fe5cab8f3a67e382" ~
         "0b5ebd89b29c5d92178ff7bf5e85e73ad5568889c5dbe0256c503c69e7c2639"),
         getStHash().hashFull().to!string);
 
-    () @trusted { st.pledges.prepare_.preparedPrime = null; }();
+    () @trusted { st.pledges.prepare.preparedPrime = null; }();
     assert(getStHash().hashFull() == Hash.fromString(
         "0xd3dc2318365e55ea3a62b403fcbe22d447402741a5151a703326dbf852350dcd0" ~
         "e020a762ae12a871473aed80d82f51c1cd3942c0b2360c2d609279a2867fe68"),
         getStHash().hashFull().to!string);
 
-    () @trusted { st.pledges.nominate_ = SCPNomination.init; }();
-    st.pledges.type_ = SCPStatementType.SCP_ST_NOMINATE;
+    () @trusted { st.pledges.nominate = SCPNomination.init; }();
+    st.pledges.type = SCPStatementType.SCP_ST_NOMINATE;
     assert(getStHash().hashFull() == Hash.fromString(
         "0x3eda5ff9f07c12a1e039048ebfbc6716019cb481bafe43ffb3009efd3c6fa3106" ~
         "ef36b3e124e0760e5f1395fbf689e452e23451355c8625618da03219994d100"),
         getStHash().hashFull().to!string);
 
-    () @trusted { st.pledges.confirm_ = SCPStatement._pledges_t._confirm_t.init; }();
-    st.pledges.type_ = SCPStatementType.SCP_ST_CONFIRM;
+    () @trusted { st.pledges.confirm = SCPStatement._pledges_t._confirm_t.init; }();
+    st.pledges.type = SCPStatementType.SCP_ST_CONFIRM;
     assert(getStHash().hashFull() == Hash.fromString(
         "0x37bdd725b95a333ece6ac157b4ec4cec448908fe84ef2fcd759dac3bab77ce6ae" ~
         "c985025c80e8443f570553cfa6d21a7137d48068cf649d562ce9aec7b960aee"),
         getStHash().hashFull().to!string);
 
-    () @trusted { st.pledges.externalize_ = SCPStatement._pledges_t._externalize_t.init; }();
-    st.pledges.type_ = SCPStatementType.SCP_ST_EXTERNALIZE;
+    () @trusted { st.pledges.externalize = SCPStatement._pledges_t._externalize_t.init; }();
+    st.pledges.type = SCPStatementType.SCP_ST_EXTERNALIZE;
     assert(getStHash().hashFull() == Hash.fromString(
         "0xbba4bdee0e083e6e5f56ddc2815afcd509f597f45d6ae5c83af747de2d568a26d" ~
         "bc1f0792c8c6f990816bf9f2fc913ccc700c0a022644f8bd25835a6b439944c"),

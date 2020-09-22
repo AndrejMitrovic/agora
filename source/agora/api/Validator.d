@@ -45,9 +45,11 @@ module agora.api.Validator;
 import agora.common.crypto.Key;
 import agora.common.Hash;
 import agora.consensus.data.PreImageInfo;
+import agora.consensus.data.SCPTypes;
 static import agora.api.FullNode;
 
-import scpd.types.Stellar_SCP;
+import dscp.xdr.Stellar_SCP;
+import dscp.xdr.Stellar_types;
 
 import vibe.web.rest;
 

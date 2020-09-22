@@ -201,10 +201,12 @@ public class Ledger
 
     ***************************************************************************/
 
-    public bool onExternalized (ConsensusData data)
+    public bool onExternalized (in ConsensusData data_)
         @trusted
     {
-        auto block = makeNewBlock(this.last_block, data.tx_set, data.enrolls);
+        auto data = *cast(ConsensusData*)&data_;  // todo: make const-correct
+        auto block = makeNewBlock(this.last_block, data.tx_set.dup,
+            data.enrolls.dup);
         return this.acceptBlock(block);
     }
 
@@ -402,7 +404,7 @@ public class Ledger
 
     ***************************************************************************/
 
-    public string validateConsensusData (ConsensusData data) @trusted
+    public string validateConsensusData (in ConsensusData data) @trusted
     {
         const expect_height = Height(this.getBlockHeight() + 1);
         auto utxo_finder = this.utxo_set.getUTXOFinder();

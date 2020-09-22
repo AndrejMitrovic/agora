@@ -23,6 +23,7 @@ import agora.common.crypto.Key;
 import agora.common.Hash;
 import agora.consensus.data.Block;
 import agora.consensus.data.Enrollment;
+import agora.consensus.data.SCPTypes;
 import agora.consensus.data.Transaction;
 import agora.consensus.data.genesis.Test;
 import agora.node.FullNode;

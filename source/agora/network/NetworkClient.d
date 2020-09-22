@@ -18,12 +18,13 @@ import agora.common.BanManager;
 import agora.consensus.data.Block;
 import agora.consensus.data.Enrollment;
 import agora.consensus.data.PreImageInfo;
+import agora.consensus.data.SCPTypes;
 import agora.common.crypto.Key;
 import agora.common.Types;
 import agora.common.Set;
 import agora.common.Task;
 import agora.consensus.data.Transaction;
-import scpd.types.Stellar_SCP;
+import dscp.xdr.Stellar_types;
 
 import agora.utils.Log;
 

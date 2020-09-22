@@ -29,6 +29,7 @@ import agora.common.BanManager;
 import agora.consensus.data.Block;
 import agora.consensus.data.Enrollment;
 import agora.consensus.data.PreImageInfo;
+import agora.consensus.data.SCPTypes;
 import agora.common.crypto.Key;
 import agora.common.Config;
 import agora.common.Types;
@@ -44,7 +45,7 @@ import agora.utils.InetUtils;
 import agora.utils.Log;
 import agora.utils.Utility;
 
-import scpd.types.Stellar_SCP;
+import dscp.xdr.Stellar_types;
 
 import vibe.http.common;
 import vibe.web.rest;

@@ -13,8 +13,25 @@
 
 module agora.consensus.data.ConsensusData;
 
+import agora.common.Hash;
 import agora.consensus.data.Enrollment;
 import agora.consensus.data.Transaction;
+
+/// Create a shorthash from a 64-byte blob for RNG initialization
+private ulong toShortHash (const ref Hash hash) @trusted nothrow
+{
+    import libsodium.crypto_shorthash;
+    import std.bitmanip;
+
+    // using a once-generated initialization vector
+    static immutable ubyte[crypto_shorthash_KEYBYTES] IV =
+        [111, 165, 189, 80, 37, 5, 16, 194, 39, 214, 156, 169, 235, 221, 21, 126];
+    ubyte[ulong.sizeof] short_hash;
+    crypto_shorthash(short_hash.ptr, hash[].ptr, hash[].length, IV.ptr);
+
+    // assume a specific endianess for consistency in how we convert to ulong
+    return littleEndianToNative!ulong(short_hash[]);
+}
 
 /// Consensus data which is nominated & voted on
 public struct ConsensusData
@@ -24,6 +41,16 @@ public struct ConsensusData
 
     /// The enrollments that are being nominated / voted on
     public Enrollment[] enrolls;
+
+    int opCmp (in ConsensusData data) const
+    {
+        const lhs_hash = hashFull(this);
+        const rhs_hash = hashFull(data);
+
+        return toShortHash(lhs_hash) < toShortHash(rhs_hash);
+    }
+
+    bool empty () const { return this == typeof(this).init; }
 }
 
 /// ConsensusData type testSymmetry check

@@ -55,19 +55,6 @@ unittest
     static assert(Hash.sizeof == crypto_generichash_BYTES_MAX);
 }
 
-/// The definition of a Quorum
-public struct QuorumConfig
-{
-    /// Threshold of this quorum set
-    public uint threshold = 1;
-
-    /// List of nodes in this quorum
-    public PublicKey[] nodes;
-
-    /// List of any sub-quorums
-    public QuorumConfig[] quorums;
-}
-
 /// A type to ensure that height and other integer values aren't mixed
 public struct Height
 {

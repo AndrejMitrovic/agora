@@ -16,6 +16,8 @@
 
 module agora.utils.SCPPrettyPrinter;
 
+version (none):
+
 import agora.common.Types;
 import agora.common.Amount;
 import agora.common.Config;
@@ -25,12 +27,12 @@ import agora.common.crypto.Key;
 import agora.consensus.data.Block;
 import agora.consensus.data.ConsensusData;
 import agora.consensus.data.Enrollment;
+import agora.consensus.data.SCPTypes;
 import agora.consensus.data.Transaction;
 import agora.utils.PrettyPrinter;
 
-import scpd.Cpp;
-import scpd.types.Stellar_SCP;
-import scpd.types.Stellar_types : StellarHash = Hash;
+import dscp.xdr.Stellar_SCP;
+import dscp.xdr.Stellar_types;
 
 import std.algorithm;
 import std.format;
@@ -367,7 +369,7 @@ private struct SCPEnvelopeFmt
 }
 
 /// ditto
-unittest
+version (none) unittest
 {
     import agora.common.Config;
     import agora.common.Hash;
@@ -375,8 +377,6 @@ unittest
     import agora.common.Set;
     import agora.consensus.data.Enrollment;
     import agora.consensus.data.genesis.Test;
-    import scpd.types.Stellar_types : NodeID, uint256, StellarHash = Hash;
-    import scpd.types.Utils;
 
     Hash quorumSetHash;
 
@@ -616,10 +616,10 @@ GCOQ...LRIJ(61,000,000), GCOQ...LRIJ(61,000,000)], enrolls: [{ utxo: 0x0000...e2
 
     auto value = cd.serializeFull[].toVec();
 
-    env.statement.pledges.nominate_.votes.push_back(value);
-    env.statement.pledges.nominate_.votes.push_back(value);
-    env.statement.pledges.nominate_.accepted.push_back(value);
-    env.statement.pledges.nominate_.accepted.push_back(value);
+    env.statement.pledges.nominate_.votes ~= value;
+    env.statement.pledges.nominate_.votes ~= value;
+    env.statement.pledges.nominate_.accepted ~= value;
+    env.statement.pledges.nominate_.accepted ~= value;
 
     // unknown hash
     assert(NomRes1 == format("%s", scpPrettify(&env, &getQSet)),

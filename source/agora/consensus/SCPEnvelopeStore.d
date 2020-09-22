@@ -23,13 +23,14 @@ import d2sqlite3.library;
 import d2sqlite3.results;
 import d2sqlite3.sqlite3;
 
-import scpd.types.Stellar_SCP;
+//import scpd.types.Stellar_SCP;
 
 import std.file : exists;
 import std.range;
 
 mixin AddLogger!();
 
+version (none):
 
 /// Ditto
 public class SCPEnvelopeStore

@@ -38,6 +38,7 @@ import agora.consensus.data.Enrollment;
 import agora.consensus.data.ConsensusData;
 import agora.consensus.data.ConsensusParams;
 import agora.consensus.data.PreImageInfo;
+import agora.consensus.data.SCPTypes;
 import agora.consensus.data.Transaction;
 import agora.consensus.data.UTXOSetValue;
 import agora.consensus.UTXOSet;
@@ -61,7 +62,7 @@ public import agora.utils.Utility : retryFor;
 import agora.api.FullNode : NodeInfo, NetworkState;
 import agora.api.Validator : ValidatorAPI = API;
 
-import scpd.types.Stellar_SCP;
+import dscp.xdr.Stellar_types;
 
 static import geod24.LocalRest;
 import geod24.Registry;
@@ -143,7 +144,7 @@ private UnitTestResult customModuleUnitTester ()
             continue;
 
         if (mod.name.startsWith("agora") ||
-            mod.name.startsWith("scpd"))
+            mod.name.startsWith("dscp"))
         {
             if (filter.length > 0 &&
                 !canFind(mod.name.toLower(), filter.save))
@@ -403,9 +404,8 @@ public class TestBanManager : BanManager
 }
 
 /// Nominator with custom rules for when blocks should be nominated
-public extern (C++) class TestNominator : Nominator
+public class TestNominator : Nominator
 {
-extern(D):
     /// number of txs required for nomination
     protected ulong txs_to_nominate;
 
@@ -437,16 +437,16 @@ extern(D):
     }
 
     // set the DB instance of SCPEnvelopeStore
-    protected void setSCPEnvelopeStore (SCPEnvelopeStore envelope_store)
-    {
-        this.scp_envelope_store = envelope_store;
-    }
+    //protected void setSCPEnvelopeStore (SCPEnvelopeStore envelope_store)
+    //{
+    //    this.scp_envelope_store = envelope_store;
+    //}
 
-    // return a SCPEnvelopeStore backed by an in-memory SQLite db
-    protected override SCPEnvelopeStore getSCPEnvelopeStore (string data_dir)
-    {
-        return new SCPEnvelopeStore(":memory:");
-    }
+    //// return a SCPEnvelopeStore backed by an in-memory SQLite db
+    //protected override SCPEnvelopeStore getSCPEnvelopeStore (string data_dir)
+    //{
+    //    return new SCPEnvelopeStore(":memory:");
+    //}
 }
 
 /// We use a pair of (key, client) rather than a hashmap client[key],
