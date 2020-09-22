@@ -46,3 +46,6 @@
 [submodule "ocean"]
 	path = submodules/ocean
 	url = https://github.com/bpfkorea/ocean.git
+[submodule "dscp"]
+	path = submodules/dscp
+	url = git@github.com:AndrejMitrovic/dscp.git
