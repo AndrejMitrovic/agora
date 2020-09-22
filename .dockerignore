@@ -8,7 +8,6 @@ tests/
 .dub/
 build/
 docs/
-source/scpp/build/
 
 # Dependency build files
 submodules/*/.dub/
