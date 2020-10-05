@@ -9,9 +9,9 @@
 using namespace xdr;
 using namespace stellar;
 
-SCP* createSCP(SCPDriver* driver, NodeID const& nodeID, bool isValidator, SCPQuorumSet const& qSetLocal)
+SCP* createSCP(SCPDriver* driver, NodeID const& nodeID, bool isValidator, SCPQuorumSet const& qSetLocal, int id)
 {
-    return new stellar::SCP(*driver, nodeID, isValidator, qSetLocal);
+    return new stellar::SCP(*driver, nodeID, isValidator, qSetLocal, id);
 }
 
 #define PUSHBACKINST3(T, V) template void push_back<T, V<T>>(V<T>&, T&);

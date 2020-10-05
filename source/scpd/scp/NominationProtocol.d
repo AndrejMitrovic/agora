@@ -30,6 +30,7 @@ extern(C++, class) public struct NominationProtocol
 {
 nothrow:
     Slot* mSlot;
+    int mId;
 
     int32_t mRoundNumber;
     set!Value mVotes;                             // X
@@ -100,7 +101,7 @@ nothrow:
     // note: must call C++ ctor to properly call default ctors for
     // all the fields of this class
     @disable this();
-    this(ref Slot slot);
+    this(ref Slot slot, int id);
 
     SCP.EnvelopeState processEnvelope(const ref SCPEnvelope envelope);
 

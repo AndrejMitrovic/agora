@@ -23,8 +23,9 @@ using namespace std::placeholders;
 // max number of transitions that can occur from processing one message
 static const int MAX_ADVANCE_SLOT_RECURSION = 50;
 
-BallotProtocol::BallotProtocol(Slot& slot)
+BallotProtocol::BallotProtocol(Slot& slot, int id)
     : mSlot(slot)
+    , mId(id)
     , mHeardFromQuorum(false)
     , mPhase(SCP_PHASE_PREPARE)
     , mCurrentMessageLevel(0)
@@ -34,6 +35,10 @@ BallotProtocol::BallotProtocol(Slot& slot)
 bool
 BallotProtocol::isNewerStatement(NodeID const& nodeID, SCPStatement const& st)
 {
+    if (mId == 1)
+        CLOG(ERROR, "SCP") << "BallotProtocol.isNewerStatement(nodeID: " << nodeID <<
+        ", st: " << st << ")\n";
+
     auto oldp = mLatestEnvelopes.find(nodeID);
     bool res = false;
 

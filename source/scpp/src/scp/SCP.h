@@ -24,10 +24,11 @@ typedef std::shared_ptr<SCPQuorumSet> SCPQuorumSetPtr;
 class SCP
 {
     SCPDriver& mDriver;
+    int mId;
 
   public:
     SCP(SCPDriver& driver, NodeID const& nodeID, bool isValidator,
-        SCPQuorumSet const& qSetLocal);
+        SCPQuorumSet const& qSetLocal, int id);
 
     SCPDriver&
     getDriver()
@@ -129,7 +130,7 @@ class SCP
     std::map<uint64, std::shared_ptr<Slot>> mKnownSlots;
 
     // Slot getter
-    std::shared_ptr<Slot> getSlot(uint64 slotIndex, bool create);
+    std::shared_ptr<Slot> getSlot(uint64 slotIndex, bool create, int mId);
 
     friend class TestSCP;
 };

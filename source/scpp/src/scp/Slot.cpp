@@ -20,11 +20,12 @@ namespace stellar
 {
 using namespace std::placeholders;
 
-Slot::Slot(uint64 slotIndex, SCP& scp)
+Slot::Slot(uint64 slotIndex, SCP& scp, int id)
     : mSlotIndex(slotIndex)
+    , mId(id)
     , mSCP(scp)
-    , mBallotProtocol(*this)
-    , mNominationProtocol(*this)
+    , mBallotProtocol(*this, id)
+    , mNominationProtocol(*this, id)
     , mFullyValidated(scp.getLocalNode()->isValidator())
 {
 }

@@ -130,7 +130,33 @@ extern(D):
         auto node_id = NodeID(uint256(key_pair.address));
         const IsValidator = true;
         const no_quorum = SCPQuorumSet.init;  // will be configured by setQuorumConfig()
-        this.scp = createSCP(this, node_id, IsValidator, no_quorum);
+
+        int id;
+
+        import std.stdio;
+        switch (key_pair.address.to!string)
+        {
+            case "GDA225RGC4GOCVASSAMROSWJSGNOZX2IGPXZG52ESDSKQW2VN6UJFKWI":
+                id = 1;
+                break;
+
+            case "GDB22QJ4NHOHPOGWZG2Y5IFXKW6DCBEFX6QNBR6NSCT6E7CYU66IDGJJ":
+                id = 2;
+                break;
+
+            case "GDC22CFFKB4ZNRZUP6EMRIGVZSQEPSNH2CBMWLU5GLGKE36M3KX5YD36":
+                id = 3;
+                break;
+
+            case "GDD22H4TGRGS5ENN3DHBGMMCSZELKORKEZT4SZKTKHZESTVQMONREB2D":
+                id = 4;
+                break;
+
+            default:
+                break;
+        }
+
+        this.scp = createSCP(this, node_id, IsValidator, no_quorum, id);
         this.taskman = taskman;
         this.ledger = ledger;
         this.scp_envelope_store = this.getSCPEnvelopeStore(data_dir);

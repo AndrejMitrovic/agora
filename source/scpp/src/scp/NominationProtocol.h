@@ -18,6 +18,7 @@ class NominationProtocol
 {
   protected:
     Slot& mSlot;
+    int mId;
 
     int32 mRoundNumber;
     std::set<Value> mVotes;                           // X
@@ -84,7 +85,7 @@ class NominationProtocol
     Value getNewValueFromNomination(SCPNomination const& nom);
 
   public:
-    NominationProtocol(Slot& slot);
+    NominationProtocol(Slot& slot, int id);
 
     SCP::EnvelopeState processEnvelope(SCPEnvelope const& envelope);
 

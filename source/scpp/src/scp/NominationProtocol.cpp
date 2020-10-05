@@ -21,8 +21,8 @@ namespace stellar
 {
 using namespace std::placeholders;
 
-NominationProtocol::NominationProtocol(Slot& slot)
-    : mSlot(slot), mRoundNumber(0), mNominationStarted(false)
+NominationProtocol::NominationProtocol(Slot& slot, int id)
+    : mId(id), mSlot(slot), mRoundNumber(0), mNominationStarted(false)
 {
 }
 

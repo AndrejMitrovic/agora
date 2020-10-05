@@ -29,6 +29,7 @@ class Slot : public std::enable_shared_from_this<Slot>
   public:
 
     const uint64 mSlotIndex; // the index this slot is tracking
+    int mId;
     SCP& mSCP;
 
     BallotProtocol mBallotProtocol;
@@ -49,7 +50,7 @@ class Slot : public std::enable_shared_from_this<Slot>
     bool mFullyValidated;
 
   public:
-    Slot(uint64 slotIndex, SCP& SCP);
+    Slot(uint64 slotIndex, SCP& SCP, int id);
 
     uint64
     getSlotIndex() const

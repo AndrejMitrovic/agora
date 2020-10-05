@@ -14,14 +14,18 @@
 
 #include <algorithm>
 #include <lib/json/json.h>
+#include <stdio.h>
 
 namespace stellar
 {
 
 SCP::SCP(SCPDriver& driver, NodeID const& nodeID, bool isValidator,
-         SCPQuorumSet const& qSetLocal)
-    : mDriver(driver)
+         SCPQuorumSet const& qSetLocal, int id)
+    : mDriver(driver), mId(id)
 {
+    if (id == 1)
+        std::cout << "ID is 1" << "\n";
+
     mLocalNode =
         std::make_shared<LocalNode>(nodeID, isValidator, qSetLocal, this);
 }
@@ -30,20 +34,20 @@ SCP::EnvelopeState
 SCP::receiveEnvelope(SCPEnvelope const& envelope)
 {
     uint64 slotIndex = envelope.statement.slotIndex;
-    return getSlot(slotIndex, true)->processEnvelope(envelope, false);
+    return getSlot(slotIndex, true, mId)->processEnvelope(envelope, false);
 }
 
 bool
 SCP::nominate(uint64 slotIndex, Value const& value, Value const& previousValue)
 {
     dbgAssert(isValidator());
-    return getSlot(slotIndex, true)->nominate(value, previousValue, false);
+    return getSlot(slotIndex, true, mId)->nominate(value, previousValue, false);
 }
 
 void
 SCP::stopNomination(uint64 slotIndex)
 {
-    auto s = getSlot(slotIndex, false);
+    auto s = getSlot(slotIndex, false, mId);
     if (s)
     {
         s->stopNomination();
@@ -92,7 +96,7 @@ SCP::getLocalNode()
 }
 
 std::shared_ptr<Slot>
-SCP::getSlot(uint64 slotIndex, bool create)
+SCP::getSlot(uint64 slotIndex, bool create, int mId)
 {
     std::shared_ptr<Slot> res;
     auto it = mKnownSlots.find(slotIndex);
@@ -100,7 +104,7 @@ SCP::getSlot(uint64 slotIndex, bool create)
     {
         if (create)
         {
-            res = std::make_shared<Slot>(slotIndex, *this);
+            res = std::make_shared<Slot>(slotIndex, *this, mId);
             mKnownSlots[slotIndex] = res;
         }
     }
@@ -142,7 +146,7 @@ SCP::getJsonQuorumInfo(NodeID const& id, bool summary, bool fullKeys,
     }
     else
     {
-        auto s = getSlot(index, false);
+        auto s = getSlot(index, false, mId);
         if (s)
         {
             ret = s->getJsonQuorumInfo(id, summary, fullKeys);
@@ -161,7 +165,7 @@ SCP::isValidator()
 bool
 SCP::isSlotFullyValidated(uint64 slotIndex)
 {
-    auto slot = getSlot(slotIndex, false);
+    auto slot = getSlot(slotIndex, false, mId);
     if (slot)
     {
         return slot->isFullyValidated();
@@ -192,7 +196,7 @@ SCP::getCumulativeStatemtCount() const
 std::vector<SCPEnvelope>
 SCP::getLatestMessagesSend(uint64 slotIndex)
 {
-    auto slot = getSlot(slotIndex, false);
+    auto slot = getSlot(slotIndex, false, mId);
     if (slot)
     {
         return slot->getLatestMessagesSend();
@@ -206,7 +210,7 @@ SCP::getLatestMessagesSend(uint64 slotIndex)
 void
 SCP::setStateFromEnvelope(uint64 slotIndex, SCPEnvelope const& e)
 {
-    auto slot = getSlot(slotIndex, true);
+    auto slot = getSlot(slotIndex, true, mId);
     slot->setStateFromEnvelope(e);
 }
 
@@ -235,7 +239,7 @@ SCP::getHighSlotIndex() const
 std::vector<SCPEnvelope>
 SCP::getCurrentState(uint64 slotIndex)
 {
-    auto slot = getSlot(slotIndex, false);
+    auto slot = getSlot(slotIndex, false, mId);
     if (slot)
     {
         return slot->getCurrentState();
@@ -264,7 +268,7 @@ SCP::getLatestMessage(NodeID const& id)
 std::vector<SCPEnvelope>
 SCP::getExternalizingState(uint64 slotIndex)
 {
-    auto slot = getSlot(slotIndex, false);
+    auto slot = getSlot(slotIndex, false, mId);
     if (slot)
     {
         return slot->getExternalizingState();

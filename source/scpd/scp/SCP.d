@@ -39,10 +39,11 @@ extern(C++, `shortHash`) private void initialize_byteslice_hasher ();
 extern(C++, class) public struct SCP
 {
     private SCPDriver mDriver;
+    private int mId;
     protected shared_ptr!LocalNode mLocalNode;
     protected map!(uint64_t, shared_ptr!Slot) mKnownSlots;
     /// Slot getter
-    public inout(shared_ptr!Slot) getSlot(uint64_t slotIndex, bool create) inout;
+    public inout(shared_ptr!Slot) getSlot(uint64_t slotIndex, bool create, int mId) inout;
 
 nothrow:
     /*
@@ -131,4 +132,4 @@ nothrow:
     vector!SCPEnvelope getExternalizingState(uint64_t slotIndex);
 }
 
-static assert(SCP.sizeof == 48);
+static assert(SCP.sizeof == 56);

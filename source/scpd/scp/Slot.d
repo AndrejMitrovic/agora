@@ -38,6 +38,7 @@ private:
     void*[2] base_class_data;
 
     const uint64_t mSlotIndex; // the index this slot is tracking
+    int mId;
     SCP* mSCP;
 
     BallotProtocol mBallotProtocol;
@@ -120,4 +121,4 @@ private:
     vector!SCPEnvelope getEntireCurrentState();
 }
 
-static assert(Slot.sizeof == 400);
+static assert(Slot.sizeof == 408);

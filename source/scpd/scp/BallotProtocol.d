@@ -43,6 +43,7 @@ version (none)
 extern(C++, class) public struct BallotProtocol
 {
     Slot* mSlot;
+    int mId;
 
     bool mHeardFromQuorum;
 
@@ -76,7 +77,7 @@ extern(C++, class) public struct BallotProtocol
 
   public:
     /// Construct a new entity linked to a Slot
-    this(ref Slot slot);
+    this(ref Slot slot, int id);
 
     // Process a newly received envelope for this slot and update the state of
     // the slot accordingly.

@@ -27,6 +27,7 @@ typedef std::function<bool(SCPStatement const& st)> StatementPredicate;
 class BallotProtocol
 {
     Slot& mSlot;
+    int mId;
 
     bool mHeardFromQuorum;
 
@@ -59,7 +60,7 @@ class BallotProtocol
         mLastEnvelopeEmit; // last envelope emitted by this node
 
   public:
-    BallotProtocol(Slot& slot);
+    BallotProtocol(Slot& slot, int id);
 
     // Process a newly received envelope for this slot and update the state of
     // the slot accordingly.
