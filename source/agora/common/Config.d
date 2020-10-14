@@ -22,8 +22,7 @@ import agora.common.Types;
 import agora.consensus.data.SCPTypes;
 import agora.utils.Log;
 
-import dscp.xdr.Stellar_SCP;
-import dscp.xdr.Stellar_types;
+import dscp.Types;
 
 import dyaml.node;
 import dyaml.loader;

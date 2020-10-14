@@ -17,8 +17,7 @@ module agora.common.SCPHash;
 import agora.common.Hash;
 import agora.consensus.data.SCPTypes;
 
-import dscp.xdr.Stellar_SCP;
-import dscp.xdr.Stellar_types;
+import dscp.Types;
 
 import core.stdc.inttypes;
 
@@ -34,7 +33,7 @@ import core.stdc.inttypes;
 
 *******************************************************************************/
 
-public Hash getHashOf (ref const(SCPQuorumSet) qset) @safe
+public Hash getHashOf (ref const(QuorumSet) qset) @safe
 {
     return hashFull(qset);
 }
@@ -46,15 +45,14 @@ public Hash getHashOf (ref const(Value) value) @safe
 }
 
 /// Ditto
-public Hash getHashOf (uint64 slot_idx, ref const(Value) prev, uint32_t hash,
-    int32_t round_num, ref const(NodeID) node_id) @safe
+public Hash getHashOf (ulong slot_idx, ref const(Value) prev, uint hash, int round_num, ref const(NodeID) node_id) @safe
 {
     return hashMulti(slot_idx, prev, hash, round_num, node_id);
 }
 
 /// Ditto
-public Hash getHashOf (uint64 slot_idx, ref const(Value) prev, uint32_t hash,
-    int32_t round_num, ref const(Value) value) @safe
+public Hash getHashOf (ulong slot_idx, ref const(Value) prev, uint hash,
+    int round_num, ref const(Value) value) @safe
 {
     return hashMulti(slot_idx, prev, hash, round_num, value);
 }

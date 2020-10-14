@@ -48,8 +48,7 @@ import agora.consensus.data.PreImageInfo;
 import agora.consensus.data.SCPTypes;
 static import agora.api.FullNode;
 
-import dscp.xdr.Stellar_SCP;
-import dscp.xdr.Stellar_types;
+import dscp.Types;
 
 import vibe.web.rest;
 
@@ -98,5 +97,5 @@ public interface API : agora.api.FullNode.API
 
     ***************************************************************************/
 
-    public void receiveEnvelope (SCPEnvelope envelope);
+    public void receiveEnvelope (Envelope envelope);
 }

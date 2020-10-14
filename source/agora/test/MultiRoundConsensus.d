@@ -34,14 +34,14 @@ import agora.network.NetworkManager;
 import agora.node.Ledger;
 import agora.test.Base;
 
+import dscp.Types;
+
 import core.stdc.inttypes;
 import core.stdc.time;
 import core.thread;
 
 import geod24.Registry;
 
-import dscp.xdr.Stellar_types;
-import dscp.xdr.Stellar_types;
 
 /// ditto
 unittest
@@ -62,8 +62,8 @@ unittest
         }
 
         ///
-        public override uint64 computeHashNode (uint64 slot_idx,
-            ref const(Value) prev, bool is_priority, int32_t round_num,
+        public override ulong computeHashNode (ulong slot_idx,
+            ref const(Value) prev, bool is_priority, int round_num,
             ref const(NodeID) node_id) nothrow
         {
             scope (failure) assert(0);

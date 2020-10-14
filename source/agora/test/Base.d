@@ -62,7 +62,7 @@ public import agora.utils.Utility : retryFor;
 import agora.api.FullNode : NodeInfo, NetworkState;
 import agora.api.Validator : ValidatorAPI = API;
 
-import dscp.xdr.Stellar_types;
+import dscp.Types;
 
 static import geod24.LocalRest;
 import geod24.Registry;
@@ -1280,7 +1280,7 @@ public class TestFullNode : FullNode, TestAPI
     }
 
     /// FullNode does not implement this
-    public override void receiveEnvelope (SCPEnvelope envelope) @safe
+    public override void receiveEnvelope (Envelope envelope) @safe
     {
         assert(0);
     }

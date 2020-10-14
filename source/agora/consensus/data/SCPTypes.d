@@ -23,10 +23,10 @@ import agora.common.Serializer;
 import agora.consensus.data.ConsensusData;
 import agora.utils.Log;
 
-import dscp.scp.SCP;
-import dscp.scp.SCPDriver;
-import dscp.scp.Slot;
-import dscp.xdr.Stellar_SCP;
+import dscp.SCP;
+import dscp.Driver;
+import dscp.Slot;
+import dscp.Types;
 
 import std.container : RedBlackTree, redBlackTree;
 import std.traits;
@@ -82,13 +82,29 @@ struct LogWrapper
 }
 
 public alias ValueSet = SetT!Value;
-public alias SCPEnvelope = SCPEnvelopeT!(NodeID, Hash, Value, Signature);
-public alias SCPQuorumSet = SCPQuorumSetT!(NodeID, hashPart);
-public alias SCPQuorumSetPtr = SCPQuorumSet*;
-public alias SCPBallot = SCPBallotT!Value;
-public alias SCPStatement = SCPStatementT!(NodeID, Hash, Value);
-public alias SCPNomination = SCPNominationT!(Hash, Value);
-public alias SCPDriver = SCPDriverT!(NodeID, Hash, Value, Signature, SetT, makeSetT, getHashOf, hashPart, duplicate, LogWrapper);
-public alias SCP = SCPT!(NodeID, Hash, Value, Signature, SetT, makeSetT, getHashOf, hashPart, duplicate, LogWrapper);
-public alias Slot = SlotT!(NodeID, Hash, Value, Signature, SetT, makeSetT, getHashOf, hashPart, duplicate, LogWrapper);
-public alias QuorumConfig = SCPQuorumSet;
+
+public struct Policy
+{
+    alias NodeID = .NodeID;
+    alias Hash = .Hash;
+    alias Value = .Value;
+    alias Signature = .Signature;
+    alias Set = .SetT;
+    alias makeSet = .makeSetT;
+    alias getHashOf = .getHashOf;
+    alias hashPart = .hashPart;
+    alias duplicate = .duplicate;
+    alias Logger = .LogWrapper;
+}
+
+public alias Envelope = EnvelopeT!Policy;
+public alias QuorumSet = QuorumSetT!Policy;
+public alias Ballot = BallotT!Policy;
+public alias Statement = StatementT!Policy;
+public alias Nomination = NominationT!Policy;
+public alias Driver = DriverT!Policy;
+public alias SCP = SCPT!Policy;
+public alias Slot = SlotT!Policy;
+
+// convenience
+public alias QuorumConfig = QuorumSet;

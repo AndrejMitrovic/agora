@@ -24,7 +24,8 @@ import agora.common.Types;
 import agora.common.Set;
 import agora.common.Task;
 import agora.consensus.data.Transaction;
-import dscp.xdr.Stellar_types;
+
+import dscp.Types;
 
 import agora.utils.Log;
 
@@ -238,7 +239,7 @@ class NetworkClient
 
     ***************************************************************************/
 
-    public void sendEnvelope (SCPEnvelope envelope) nothrow
+    public void sendEnvelope (Envelope envelope) nothrow
     {
         this.taskman.runTask(
         {

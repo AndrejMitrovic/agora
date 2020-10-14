@@ -42,14 +42,14 @@ import core.thread;
 /// Class containing gshared store for SCPEnvelopeStoreTest
 public class TestSCPEnvelopeStore : SCPEnvelopeStore
 {
-    __gshared const(SCPEnvelope)[] store;
+    __gshared const(Envelope)[] store;
 
     this ()
     {
         super(":memory:");
     }
 
-    public override bool add (const ref SCPEnvelope envelope) @trusted nothrow
+    public override bool add (const ref Envelope envelope) @trusted nothrow
     {
         store ~= envelope;
         return true;
@@ -60,7 +60,7 @@ public class TestSCPEnvelopeStore : SCPEnvelopeStore
         // no-op
     }
 
-    public override int opApply (scope int delegate(const ref SCPEnvelope) dg) @trusted
+    public override int opApply (scope int delegate(const ref Envelope) dg) @trusted
     {
         foreach (ref env; store)
         {

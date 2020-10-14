@@ -35,8 +35,7 @@ import agora.node.Ledger;
 import agora.test.Base;
 import agora.utils.SCPPrettyPrinter;
 
-import dscp.xdr.Stellar_SCP;
-import dscp.xdr.Stellar_types;
+import dscp.Types;
 
 import geod24.Registry;
 
@@ -81,7 +80,7 @@ private class ByzantineNominator : TestNominator
     }
 
     // override signing with Byzantine behaviour of not signing or signing with invalid signature
-    override void signEnvelope (ref SCPEnvelope envelope)
+    override void signEnvelope (ref Envelope envelope)
     {
         final switch (reason)
         {
@@ -121,7 +120,7 @@ private class SpyNominator : TestNominator
 {
     private shared(EnvelopeTypeCounts)* envelope_type_counts;
 
-    private NodeID[][SCPStatementType.max + 1] nodes_received;
+    private NodeID[][StatementType.max + 1] nodes_received;
 
     /// Ctor
     public this (immutable(ConsensusParams) params, Clock clock,
@@ -135,22 +134,22 @@ private class SpyNominator : TestNominator
         txs_to_nominate);
     }
 
-    public override void receiveEnvelope (scope ref const(SCPEnvelope) envelope) @trusted
+    public override void receiveEnvelope (scope ref const(Envelope) envelope) @trusted
     {
         // Make sure we don't count for same node more than once
-        if (nodes_received[envelope.statement.pledges.type].count(envelope.statement.nodeID) > 0) return;
-        nodes_received[envelope.statement.pledges.type] ~= envelope.statement.nodeID;
+        if (nodes_received[envelope.statement.pledges.type].count(envelope.statement.node_id) > 0) return;
+        nodes_received[envelope.statement.pledges.type] ~= envelope.statement.node_id;
         final switch (envelope.statement.pledges.type) {
-            case SCPStatementType.SCP_ST_NOMINATE:
+            case StatementType.Nominate:
                 atomicOp!("+=")(this.envelope_type_counts.nominate_count, 1);
                 break;
-            case SCPStatementType.SCP_ST_PREPARE:
+            case StatementType.Prepare:
                 atomicOp!("+=")(this.envelope_type_counts.prepare_count, 1);
                 break;
-            case SCPStatementType.SCP_ST_CONFIRM:
+            case StatementType.Confirm:
                 atomicOp!("+=")(this.envelope_type_counts.confirm_count, 1);
                 break;
-            case SCPStatementType.SCP_ST_EXTERNALIZE:
+            case StatementType.Externalize:
                 atomicOp!("+=")(this.envelope_type_counts.externalize_count, 1);
                 break;
         }

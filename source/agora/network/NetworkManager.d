@@ -45,7 +45,7 @@ import agora.utils.InetUtils;
 import agora.utils.Log;
 import agora.utils.Utility;
 
-import dscp.xdr.Stellar_types;
+import dscp.Types;
 
 import vibe.http.common;
 import vibe.web.rest;
@@ -1006,14 +1006,14 @@ public class NetworkManager
 
     /***************************************************************************
 
-        Gossips the SCPEnvelope to the network of connected validators.
+        Gossips the Envelope to the network of connected validators.
 
         Params:
-            envelope = the SCPEnvelope to gossip to the network.
+            envelope = the Envelope to gossip to the network.
 
     ***************************************************************************/
 
-    public void gossipEnvelope (SCPEnvelope envelope)
+    public void gossipEnvelope (Envelope envelope)
     {
         foreach (client; this.validators[])
         {

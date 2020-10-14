@@ -74,7 +74,7 @@ public class SCPEnvelopeStore
 
     ***************************************************************************/
 
-    public bool add (const ref SCPEnvelope envelope) @safe nothrow
+    public bool add (const ref Envelope envelope) @safe nothrow
     {
         static ubyte[] envelope_bytes;
 
@@ -135,7 +135,7 @@ public class SCPEnvelopeStore
 
     ***************************************************************************/
 
-    public int opApply (scope int delegate(const ref SCPEnvelope) dg)
+    public int opApply (scope int delegate(const ref Envelope) dg)
     {
         () @trusted
         {
@@ -144,7 +144,7 @@ public class SCPEnvelopeStore
 
             foreach (ref row; results)
             {
-                auto env = deserializeFull!(const SCPEnvelope)(row.peek!(ubyte[])(0));
+                auto env = deserializeFull!(const Envelope)(row.peek!(ubyte[])(0));
 
                 if (auto ret = dg(env))
                     return ret;
@@ -176,11 +176,11 @@ unittest
 {
     auto envelope_store = new SCPEnvelopeStore(":memory:");
 
-    SCPEnvelope[] envelopes;
+    Envelope[] envelopes;
 
     foreach (_; 0 .. 2)
     {
-        envelopes ~= SCPEnvelope.init;
+        envelopes ~= Envelope.init;
     }
 
     foreach (env; envelopes)
@@ -190,9 +190,9 @@ unittest
 
     assert(envelope_store.length == 2);
 
-    foreach (const ref SCPEnvelope env; envelope_store)
+    foreach (const ref Envelope env; envelope_store)
     {
-        assert(env == SCPEnvelope.init);
+        assert(env == Envelope.init);
     }
 
     envelope_store.removeAll();

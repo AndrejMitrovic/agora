@@ -26,7 +26,7 @@ import agora.consensus.data.Transaction;
 import agora.consensus.data.UTXOSetValue;
 import agora.consensus.EnrollmentManager;
 
-import dscp.xdr.Stellar_types;
+import dscp.Types;
 
 import ocean.core.Test;
 
@@ -560,7 +560,7 @@ version (unittest)
 private void verifyQuorumsSanity (const ref QuorumConfig[PublicKey] quorums)
 {
     // todo: port
-    //import dscp.scp.QuorumSetUtils;
+    //import dscp.QuorumSetUtils;
 
     //foreach (key, quorum; quorums)
     //{

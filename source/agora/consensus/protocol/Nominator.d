@@ -36,11 +36,10 @@ import agora.node.Ledger;
 import agora.utils.Log;
 import agora.utils.SCPPrettyPrinter;
 
-import dscp.scp.SCP;
-import dscp.scp.SCPDriver;
-import dscp.scp.Slot;
-import dscp.xdr.Stellar_SCP;
-import dscp.xdr.Stellar_types;
+import dscp.SCP;
+import dscp.Driver;
+import dscp.Slot;
+import dscp.Types;
 
 import core.stdc.stdint;
 import core.stdc.stdlib : abort;
@@ -55,7 +54,7 @@ import core.time : msecs, seconds;
 mixin AddLogger!();
 
 /// Ditto
-public class Nominator : SCPDriver
+public class Nominator : Driver
 {
     /// Consensus parameters
     private immutable(ConsensusParams) params;
@@ -79,7 +78,7 @@ public class Nominator : SCPDriver
     protected Ledger ledger;
 
     /// The mapping of all known quorum sets
-    private SCPQuorumSet[Hash] known_quorums;
+    private QuorumSet[Hash] known_quorums;
 
     private alias TimerType = TimerID;
     static assert(TimerType.max == 1);
@@ -127,7 +126,7 @@ public class Nominator : SCPDriver
         this.schnorr_pair = Pair.fromScalar(secretKeyToCurveScalar(key_pair.secret));
         auto node_id = key_pair.address;
         const IsValidator = true;
-        auto no_quorum = SCPQuorumSet.init;  // will be configured by setQuorumConfig()
+        auto no_quorum = QuorumSet.init;  // will be configured by setQuorumConfig()
         this.scp = new SCP(this, node_id, IsValidator, no_quorum, LogWrapper(*log));
         this.taskman = taskman;
         this.ledger = ledger;
@@ -345,14 +344,14 @@ public class Nominator : SCPDriver
 
     ***************************************************************************/
 
-    private static SCPQuorumSet buildSCPConfig (ref const QuorumConfig config)
+    private static QuorumSet buildSCPConfig (ref const QuorumConfig config)
         @trusted nothrow
     {
         scope (failure) assert(0);
-        import dscp.scp.QuorumSetUtils;
+        import dscp.QuorumSetUtils;
 
         auto normalized = config.serializeFull.deserializeFull!QuorumConfig;
-        normalizeQSet(normalized);
+        normalizeQSet!(Policy, Policy.NodeID)(normalized);
         return normalized;
     }
 
@@ -392,11 +391,11 @@ public class Nominator : SCPDriver
 
     protected void restoreSCPState ()
     {
-        //foreach (const ref SCPEnvelope envelope; this.scp_envelope_store)
+        //foreach (const ref Envelope envelope; this.scp_envelope_store)
         //{
-        //    this.scp.setStateFromEnvelope(envelope.statement.slotIndex,
+        //    this.scp.setStateFromEnvelope(envelope.statement.slot_idx,
         //        envelope);
-        //    if (!this.scp.isSlotFullyValidated(envelope.statement.slotIndex))
+        //    if (!this.scp.isSlotFullyValidated(envelope.statement.slot_idx))
         //        assert(0);
         //}
     }
@@ -413,7 +412,7 @@ public class Nominator : SCPDriver
 
     ***************************************************************************/
 
-    public void receiveEnvelope (scope ref const(SCPEnvelope) envelope) @trusted
+    public void receiveEnvelope (scope ref const(Envelope) envelope) @trusted
     {
         // ignore messages if `startNominatingTimer` was never called or
         // if `stopNominatingTimer` was called
@@ -421,15 +420,15 @@ public class Nominator : SCPDriver
             return;
 
         const cur_height = this.ledger.getBlockHeight();
-        if (envelope.statement.slotIndex <= cur_height)
+        if (envelope.statement.slot_idx <= cur_height)
         {
             log.trace("Rejected envelope with outdated slot #{} (ledger: #{})",
-                envelope.statement.slotIndex, cur_height);
+                envelope.statement.slot_idx, cur_height);
             return;  // slot was already externalized, ignore outdated message
         }
 
         const challenge = SCPStatementHash(&envelope.statement).hashFull();
-        PublicKey key = PublicKey(envelope.statement.nodeID);
+        PublicKey key = PublicKey(envelope.statement.node_id);
         Point K = Point(key[]);
 
         if (!verify(K, envelope.signature, challenge))
@@ -438,7 +437,7 @@ public class Nominator : SCPDriver
             return;
         }
 
-        if (this.scp.receiveEnvelope(envelope) != SCP.EnvelopeState.VALID)
+        if (this.scp.receiveEnvelope(envelope) != EnvelopeState.Valid)
             log.info("Rejected invalid envelope: {}", envelope);
     }
 
@@ -450,7 +449,7 @@ public class Nominator : SCPDriver
 
     public void storeLatestState () @safe
     {
-        //vector!SCPEnvelope envelopes;
+        //vector!Envelope envelopes;
 
         //() @trusted
         //{
@@ -491,14 +490,14 @@ public class Nominator : SCPDriver
 
     /***************************************************************************
 
-        Signs the SCPEnvelope with the node's private key.
+        Signs the Envelope with the node's private key.
 
         Params:
-            envelope = the SCPEnvelope to sign
+            envelope = the Envelope to sign
 
     ***************************************************************************/
 
-    public override void signEnvelope (ref SCPEnvelope envelope)
+    public override void signEnvelope (ref Envelope envelope)
     {
         envelope.signature = sign(this.schnorr_pair,
             SCPStatementHash(&envelope.statement).hashFull());
@@ -517,7 +516,7 @@ public class Nominator : SCPDriver
 
     ***************************************************************************/
 
-    public override ValidationLevel validateValue (uint64 slot_idx,
+    public override ValidationLevel validateValue (ulong slot_idx,
         ref const(Value) value, bool nomination) nothrow
     {
         const cur_time = this.clock.networkTime();
@@ -571,7 +570,7 @@ public class Nominator : SCPDriver
 
     ***************************************************************************/
 
-    public override void valueExternalized (uint64 slot_idx,
+    public override void valueExternalized (ulong slot_idx,
         ref const(Value) value) nothrow
     {
         if (slot_idx <= this.ledger.getBlockHeight())
@@ -600,32 +599,32 @@ public class Nominator : SCPDriver
             qSetHash = the hash of the quorum set
 
         Returns:
-            the SCPQuorumSet pointer for the provided quorum set hash
+            the QuorumSet pointer for the provided quorum set hash
 
     ***************************************************************************/
 
-    public override SCPQuorumSet* getQSet (ref const(Hash) qSetHash)
+    public override QuorumSet* getQSet (ref const(Hash) qSetHash)
     {
         return qSetHash in this.known_quorums;
     }
 
     /***************************************************************************
 
-        Floods the given SCPEnvelope to the network of connected peers.
+        Floods the given Envelope to the network of connected peers.
 
         Params:
-            envelope = the SCPEnvelope to flood to the network.
+            envelope = the Envelope to flood to the network.
 
     ***************************************************************************/
 
-    public override void emitEnvelope (ref const(SCPEnvelope) envelope)
+    public override void emitEnvelope (ref const(Envelope) envelope)
     {
         try
         {
-            SCPEnvelope env = cast()envelope;
+            Envelope env = cast()envelope;
 
             // deep-dup as SCP stores pointers to memory on the stack
-            env.statement.pledges = deserializeFull!(SCPStatement._pledges_t)(
+            env.statement.pledges = deserializeFull!(Statement.Pledges)(
                 serializeFull(env.statement.pledges));
             this.network.gossipEnvelope(env);
         }
@@ -650,7 +649,7 @@ public class Nominator : SCPDriver
 
     ***************************************************************************/
 
-    public override Value combineCandidates (uint64 slot_idx,
+    public override Value combineCandidates (ulong slot_idx,
         ref const(ValueSet) candidates)
     {
         scope (failure) assert(0);
@@ -711,18 +710,18 @@ public class Nominator : SCPDriver
     }
 }
 
-/// Adds hashing support to SCPStatement
+/// Adds hashing support to Statement
 private struct SCPStatementHash
 {
     // sanity check in case a new field gets added.
     // todo: use .tupleof tricks for a more reliable field layout change check
-    static assert(SCPNomination.sizeof == 96);
+    static assert(Nomination.sizeof == 96);
 
     /// instance pointer
-    private const SCPStatement* st;
+    private const Statement* st;
 
     /// Ctor
-    public this (const SCPStatement* st) @safe @nogc nothrow pure
+    public this (const Statement* st) @safe @nogc nothrow pure
     {
         assert(st !is null);
         this.st = st;
@@ -730,7 +729,7 @@ private struct SCPStatementHash
 
     /***************************************************************************
 
-        Compute the hash for SCPStatement.
+        Compute the hash for Statement.
         Note: trusted due to union access.
 
         Params:
@@ -740,25 +739,25 @@ private struct SCPStatementHash
 
     public void computeHash (scope HashDg dg) const nothrow @trusted @nogc
     {
-        hashPart(this.st.nodeID, dg);
-        hashPart(this.st.slotIndex, dg);
+        hashPart(this.st.node_id, dg);
+        hashPart(this.st.slot_idx, dg);
         hashPart(this.st.pledges.type, dg);
 
         final switch (this.st.pledges.type)
         {
-            case SCPStatementType.SCP_ST_PREPARE:
+            case StatementType.Prepare:
                 computeHash(this.st.pledges.prepare, dg);
                 break;
 
-            case SCPStatementType.SCP_ST_CONFIRM:
+            case StatementType.Confirm:
                 computeHash(this.st.pledges.confirm, dg);
                 break;
 
-            case SCPStatementType.SCP_ST_EXTERNALIZE:
+            case StatementType.Externalize:
                 computeHash(this.st.pledges.externalize, dg);
                 break;
 
-            case SCPStatementType.SCP_ST_NOMINATE:
+            case StatementType.Nominate:
                 computeHash(this.st.pledges.nominate, dg);
                 break;
         }
@@ -775,10 +774,10 @@ private struct SCPStatementHash
     ***************************************************************************/
 
     public static void computeHash (
-        const ref SCPStatement._pledges_t._prepare_t prep,
+        const ref Statement.Pledges.Prepare prep,
         scope HashDg dg) nothrow @safe @nogc
     {
-        hashPart(prep.quorumSetHash[], dg);
+        hashPart(prep.quorum_hash[], dg);
         hashPart(prep.ballot, dg);
 
         /// these two can legitimately be null in the protocol
@@ -786,8 +785,8 @@ private struct SCPStatementHash
             hashPart(*prep.prepared, dg);
 
         /// ditto
-        if (prep.preparedPrime !is null)
-            hashPart(*prep.preparedPrime, dg);
+        if (prep.prepared_prime !is null)
+            hashPart(*prep.prepared_prime, dg);
 
         hashPart(prep.nC, dg);
         hashPart(prep.nH, dg);
@@ -804,14 +803,14 @@ private struct SCPStatementHash
     ***************************************************************************/
 
     public static void computeHash (
-        const ref SCPStatement._pledges_t._confirm_t conf,
+        const ref Statement.Pledges.Confirm conf,
         scope HashDg dg) nothrow @safe @nogc
     {
         hashPart(conf.ballot, dg);
         hashPart(conf.nPrepared, dg);
         hashPart(conf.nCommit, dg);
         hashPart(conf.nH, dg);
-        hashPart(conf.quorumSetHash[], dg);
+        hashPart(conf.quorum_hash[], dg);
     }
 
     /***************************************************************************
@@ -825,12 +824,12 @@ private struct SCPStatementHash
     ***************************************************************************/
 
     public static void computeHash (
-        const ref SCPStatement._pledges_t._externalize_t ext, scope HashDg dg)
+        const ref Statement.Pledges.Externalize ext, scope HashDg dg)
         nothrow @safe @nogc
     {
         hashPart(ext.commit, dg);
         hashPart(ext.nH, dg);
-        hashPart(ext.commitQuorumSetHash[], dg);
+        hashPart(ext.commit_quorum_hash[], dg);
     }
 
     /***************************************************************************
@@ -843,23 +842,23 @@ private struct SCPStatementHash
 
     ***************************************************************************/
 
-    public static void computeHash (const ref SCPNomination nom, scope HashDg dg)
+    public static void computeHash (const ref Nomination nom, scope HashDg dg)
         nothrow @safe @nogc
     {
-        hashPart(nom.quorumSetHash[], dg);
+        hashPart(nom.quorum_hash[], dg);
         hashPart(nom.votes[], dg);
         hashPart(nom.accepted[], dg);
     }
 }
 
-/// Adds hashing support to SCPEnvelope
+/// Adds hashing support to Envelope
 private struct SCPEnvelopeHash
 {
     /// instance pointer
-    private const SCPEnvelope* env;
+    private const Envelope* env;
 
     /// Ctor
-    public this (const SCPEnvelope* env) @safe @nogc pure nothrow
+    public this (const Envelope* env) @safe @nogc pure nothrow
     {
         assert(env !is null);
         this.env = env;
@@ -867,7 +866,7 @@ private struct SCPEnvelopeHash
 
     /***************************************************************************
 
-        Compute the hash for SCPEnvelope
+        Compute the hash for Envelope
 
         Params:
             dg = Hashing function accumulator
@@ -884,17 +883,17 @@ private struct SCPEnvelopeHash
 /// ditto
 @safe unittest
 {
-    SCPStatement st;
-    SCPBallot prep;
-    SCPBallot prep_prime;
+    Statement st;
+    Ballot prep;
+    Ballot prep_prime;
 
     import std.conv;
 
     () @trusted {
-        st.pledges.prepare = SCPStatement._pledges_t._prepare_t.init;
+        st.pledges.prepare = Statement.Pledges.Prepare.init;
         st.pledges.prepare.prepared = &prep;
-        st.pledges.prepare.preparedPrime = &prep_prime;
-        st.pledges.type = SCPStatementType.SCP_ST_PREPARE;
+        st.pledges.prepare.prepared_prime = &prep_prime;
+        st.pledges.type = StatementType.Prepare;
     }();
 
     auto getStHash () @trusted { return SCPStatementHash(&st); }
@@ -922,34 +921,34 @@ private struct SCPEnvelopeHash
         "0b5ebd89b29c5d92178ff7bf5e85e73ad5568889c5dbe0256c503c69e7c2639"),
         getStHash().hashFull().to!string);
 
-    () @trusted { st.pledges.prepare.preparedPrime = null; }();
+    () @trusted { st.pledges.prepare.prepared_prime = null; }();
     assert(getStHash().hashFull() == Hash.fromString(
         "0xd3dc2318365e55ea3a62b403fcbe22d447402741a5151a703326dbf852350dcd0" ~
         "e020a762ae12a871473aed80d82f51c1cd3942c0b2360c2d609279a2867fe68"),
         getStHash().hashFull().to!string);
 
-    () @trusted { st.pledges.nominate = SCPNomination.init; }();
-    st.pledges.type = SCPStatementType.SCP_ST_NOMINATE;
+    () @trusted { st.pledges.nominate = Nomination.init; }();
+    st.pledges.type = StatementType.Nominate;
     assert(getStHash().hashFull() == Hash.fromString(
         "0x3eda5ff9f07c12a1e039048ebfbc6716019cb481bafe43ffb3009efd3c6fa3106" ~
         "ef36b3e124e0760e5f1395fbf689e452e23451355c8625618da03219994d100"),
         getStHash().hashFull().to!string);
 
-    () @trusted { st.pledges.confirm = SCPStatement._pledges_t._confirm_t.init; }();
-    st.pledges.type = SCPStatementType.SCP_ST_CONFIRM;
+    () @trusted { st.pledges.confirm = Statement.Pledges.Confirm.init; }();
+    st.pledges.type = StatementType.Confirm;
     assert(getStHash().hashFull() == Hash.fromString(
         "0x37bdd725b95a333ece6ac157b4ec4cec448908fe84ef2fcd759dac3bab77ce6ae" ~
         "c985025c80e8443f570553cfa6d21a7137d48068cf649d562ce9aec7b960aee"),
         getStHash().hashFull().to!string);
 
-    () @trusted { st.pledges.externalize = SCPStatement._pledges_t._externalize_t.init; }();
-    st.pledges.type = SCPStatementType.SCP_ST_EXTERNALIZE;
+    () @trusted { st.pledges.externalize = Statement.Pledges.Externalize.init; }();
+    st.pledges.type = StatementType.Externalize;
     assert(getStHash().hashFull() == Hash.fromString(
         "0xbba4bdee0e083e6e5f56ddc2815afcd509f597f45d6ae5c83af747de2d568a26d" ~
         "bc1f0792c8c6f990816bf9f2fc913ccc700c0a022644f8bd25835a6b439944c"),
         getStHash().hashFull().to!string);
 
-    SCPEnvelope env;
+    Envelope env;
     auto getEnvHash () @trusted { return SCPEnvelopeHash(&env); }
 
     // empty envelope

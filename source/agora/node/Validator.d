@@ -40,7 +40,7 @@ import agora.registry.NameRegistryAPI;
 import agora.utils.Log;
 import agora.utils.PrettyPrinter;
 
-import dscp.xdr.Stellar_types;
+import dscp.Types;
 
 import core.stdc.stdlib : abort;
 import core.stdc.time;
@@ -259,7 +259,7 @@ public class Validator : FullNode, API
 
     ***************************************************************************/
 
-    public override void receiveEnvelope (SCPEnvelope envelope) @safe
+    public override void receiveEnvelope (Envelope envelope) @safe
     {
         this.nominator.receiveEnvelope(envelope);
     }
