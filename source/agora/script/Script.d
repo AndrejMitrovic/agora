@@ -14,19 +14,18 @@
 module agora.script.Script;
 
 import agora.script.Codes;
+import agora.script.Stack;
 
+import std.bitmanip;
 import std.conv;
 import std.range;
+import std.traits;
 
-//
+/// Script
 public struct Script
 {
+    /// opcodes + any associated data for each push opcode
     private ubyte[] data;
-
-    // todo: need to iterate over all opcodes
-    // when we have a push opcode we need to read the size,
-    // and then the data after it, and then we can iterate over it.
-    // todo: perhaps use a range for this
 
     /***************************************************************************
 
@@ -39,35 +38,81 @@ public struct Script
 
     ***************************************************************************/
 
-    public bool isValidSyntax () const nothrow
+    public bool isValidSyntax () const nothrow pure @safe @nogc
     {
-        if (this.data.length == 0)
-            return false;
+        return this.isInvalidSyntaxReason() is null;
+    }
 
-        auto bytes = this.data;
-        while (!bytes.empty())
+    /***************************************************************************
+
+        Ditto, but returns the string reason when the script is
+        considered syntactically invalid.
+
+    ***************************************************************************/
+
+    public string isInvalidSyntaxReason () const nothrow pure @safe @nogc
+    {
+        const(ubyte)[] bytes = this.data[];
+        if (bytes.empty)
+            return "Script is empty";
+
+        string isInvalidPushReason (OP op)()
         {
-            //const OP opcode = bytes.front.toOPCode();
-            //if (opcode == OP.INVALID)
-            //    return false;
+            alias T = Select!(op == OP.PUSH_DATA_1, ubyte, ushort);
 
-            //bytes.popFront();
-            //switch (opcode)
-            //{
-            //    case OP.PUSH_DATA_1:
-            //    {
-            //        if (bytes.empty)
-            //            return false;
+            if (bytes.length < T.sizeof)
+                return op.stringof ~ " requires "
+                    ~ T.sizeof.stringof ~ " bytes for the size";
 
-            //        const ubyte size = bytes.front;
-            //        bytes.popFront();
-            //    }
+            const T size = littleEndianToNative!T(bytes[0 .. T.sizeof]);
+            if (size == 0 || size > MAX_STACK_ITEM_SIZE)
+                return op.stringof ~ " requires size value between 1 and " ~
+                    MAX_STACK_ITEM_SIZE.stringof;
 
-            //    case OP.PUSH_DATA_2:
-            //    case OP.PUSH_DATA_4:
-            //}
+            bytes.popFrontN(T.sizeof);
+            if (bytes.length < size)
+                return op.stringof ~ " size value exceeds script size";
+
+            bytes.popFrontN(size);
+            return null;
         }
 
-        return true;
+        while (!bytes.empty())
+        {
+            const OP opcode = bytes.front.toOPCode();
+            if (opcode == OP.INVALID)
+                return "Script contains an invalid opcode";
+
+            bytes.popFront();
+            switch (opcode)
+            {
+                case OP.PUSH_DATA_1:
+                    if (auto reason = isInvalidPushReason!(OP.PUSH_DATA_1))
+                        return reason;
+                    else break;
+
+                case OP.PUSH_DATA_2:
+                    if (auto reason = isInvalidPushReason!(OP.PUSH_DATA_2))
+                        return reason;
+                    else break;
+
+                default:
+                    break;
+            }
+        }
+
+        return null;
     }
+}
+
+///
+unittest
+{
+    assert(!Script.init.isValidSyntax());
+    assert(!Script([255]).isValidSyntax());
+    assert(!Script([OP.INVALID]).isValidSyntax());
+    assert(!Script([OP.PUSH_DATA_1]).isValidSyntax());
+    assert(!Script([OP.PUSH_DATA_1, 0]).isValidSyntax());
+    assert(!Script([OP.PUSH_DATA_1, 1]).isValidSyntax());
+    assert(Script([OP.PUSH_DATA_1, 1, 1]).isValidSyntax());
 }

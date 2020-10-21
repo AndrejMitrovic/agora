@@ -21,7 +21,7 @@ import std.range;
 public enum MAX_STACK_SIZE = 16_384;
 
 /// Maximum size of an item on the stack
-public enum MAX_ITEM_SIZE = 512;
+public enum MAX_STACK_ITEM_SIZE = 512;
 
 /// Supports pushing and popping arbitrary items from the stack,
 /// using the default serializer to store to the internal byte array.
@@ -38,7 +38,7 @@ struct Stack
 
     public void push (T)(auto const ref T value) @safe
     {
-        assert(T.sizeof <= MAX_ITEM_SIZE);
+        assert(T.sizeof <= MAX_STACK_ITEM_SIZE);
         assert(this.stack.length + T.sizeof <= MAX_STACK_SIZE);
         this.stack ~= value.serializeFull;
     }
