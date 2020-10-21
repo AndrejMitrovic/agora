@@ -16,6 +16,8 @@ module agora.script.Script;
 import agora.script.Codes;
 import agora.script.Stack;
 
+import ocean.core.Test;
+
 import std.bitmanip;
 import std.conv;
 import std.range;
@@ -61,17 +63,28 @@ public struct Script
             alias T = Select!(op == OP.PUSH_DATA_1, ubyte, ushort);
 
             if (bytes.length < T.sizeof)
-                return op.stringof ~ " requires "
-                    ~ T.sizeof.stringof ~ " bytes for the size";
+            {
+                static immutable err1 = op.to!string ~ " opcode requires "
+                    ~ T.sizeof.to!string ~ " bytes for the size";
+                return err1;
+            }
 
             const T size = littleEndianToNative!T(bytes[0 .. T.sizeof]);
             if (size == 0 || size > MAX_STACK_ITEM_SIZE)
-                return op.stringof ~ " requires size value between 1 and " ~
-                    MAX_STACK_ITEM_SIZE.stringof;
+            {
+                static immutable err2 = op.to!string
+                    ~ " opcode requires size value between 1 and "
+                    ~ MAX_STACK_ITEM_SIZE.to!string;
+                return err2;
+            }
 
             bytes.popFrontN(T.sizeof);
             if (bytes.length < size)
-                return op.stringof ~ " size value exceeds script size";
+            {
+                static immutable err3 = op.to!string
+                    ~ "opcode size value exceeds total script size";
+                return err3;
+            }
 
             bytes.popFrontN(size);
             return null;
@@ -108,11 +121,11 @@ public struct Script
 ///
 unittest
 {
-    assert(!Script.init.isValidSyntax());
-    assert(!Script([255]).isValidSyntax());
-    assert(!Script([OP.INVALID]).isValidSyntax());
-    assert(!Script([OP.PUSH_DATA_1]).isValidSyntax());
-    assert(!Script([OP.PUSH_DATA_1, 0]).isValidSyntax());
-    assert(!Script([OP.PUSH_DATA_1, 1]).isValidSyntax());
-    assert(Script([OP.PUSH_DATA_1, 1, 1]).isValidSyntax());
+    test!"=="(Script.init.isInvalidSyntaxReason(), "Script is empty");
+    test!"=="(Script([255]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
+    test!"=="(Script([OP.INVALID]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
+    test!"=="(Script([OP.PUSH_DATA_1]).isInvalidSyntaxReason(), "");
+    test!"=="(Script([OP.PUSH_DATA_1, 0]).isInvalidSyntaxReason(), "");
+    test!"=="(Script([OP.PUSH_DATA_1, 1]).isInvalidSyntaxReason(), "");
+    test!"=="(Script([OP.PUSH_DATA_1, 1, 1]).isInvalidSyntaxReason(), "");
 }
