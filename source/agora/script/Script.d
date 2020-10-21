@@ -170,8 +170,33 @@ unittest
 
 *******************************************************************************/
 
-public Script createP2PKH (Hash key_hash) pure nothrow @safe
+public Script createLockP2PKH (Hash key_hash) pure nothrow @safe
 {
+    // note: Bitcoin uses an optimized version of this where they use a
+    // magic marker to detect P2PKH scripts.
+    // But we use explicit PUSH opcodes for simplicity
+    Script script = { cast(ubyte[])[OP.DUP, OP.HASH, OP.PUSH_DATA_1, 64]
+        ~ key_hash[] ~ cast(ubyte[])[OP.VERIFY_EQUAL, OP.CHECK_SIG] };
+    return script;
+}
+
+/*******************************************************************************
+
+    Params:
+        key_hash = the key hash to encode in the P2PKH script
+
+    Returns:
+        a P2PKH lock script which can be unlocked with the matching
+        public key & signature
+
+*******************************************************************************/
+
+public Script createUnlockP2PKH (Hash key_hash) pure nothrow @safe
+{
+    // todo: segregate the witness, and for compatibility reasons keep
+    // the existing signature in the Input struct. Add a witness struct,
+    // and keep it out of hashing.
+
     // note: Bitcoin uses an optimized version of this where they use a
     // magic marker to detect P2PKH scripts.
     // But we use explicit PUSH opcodes for simplicity
@@ -186,6 +211,6 @@ unittest
     import agora.utils.Test;
     const key = WK.Keys.A.address;
     const key_hash = hashFull(key);
-    Script script = createP2PKH(key_hash);
+    Script script = createLockP2PKH(key_hash);
     assert(script.isValidSyntax());
 }

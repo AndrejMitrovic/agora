@@ -45,9 +45,10 @@ unittest
 {
     import agora.common.Hash;
     import agora.utils.Test;
-    //auto engine = new Engine();
-    //const key = WK.Keys.A.address;
-    //const key_hash = hashFull(key);
-    //Script script = createP2PKH(key_hash);
-    //assert(script.isValidSyntax());
+    auto engine = new Engine();
+    const key = WK.Keys.A.address;
+    const key_hash = hashFull(key);
+    Script script = createLockP2PKH(key_hash);
+
+
 }

@@ -21,6 +21,8 @@ import std.traits;
 /// Can encode up to 255 opcodes (one of which is INVALID).
 enum OP : ubyte
 {
+    // TODO: OP_0 pushes a single byte array onto the stack (examine bitcoin!)
+
     /// Using this is an error and will invalidate the transaction
     INVALID,
 
