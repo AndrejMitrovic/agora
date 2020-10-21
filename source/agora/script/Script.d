@@ -38,6 +38,9 @@ public struct Script
         The semantics of the script are not checked here. They may only be
         checked by the script execution engine.
 
+        Returns:
+            true if the script is syntactically valid
+
     ***************************************************************************/
 
     public bool isValidSyntax () const nothrow pure @safe @nogc
@@ -49,6 +52,10 @@ public struct Script
 
         Ditto, but returns the string reason when the script is
         considered syntactically invalid.
+
+        Returns:
+            null if the script is syntactically valid,
+            otherwise the string explaining the reason why it's invalid
 
     ***************************************************************************/
 
@@ -144,4 +151,9 @@ unittest
     const ubyte[2] size_overflow = nativeToLittleEndian(ushort(MAX_STACK_ITEM_SIZE + 1));
     test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_overflow[0], size_overflow[1]] ~ payload).isInvalidSyntaxReason(),
         "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
+
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_max[0], size_max[1]] ~ payload ~ OP.HASH).isInvalidSyntaxReason(),
+        null);
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_max[0], size_max[1]] ~ payload ~ OP.INVALID).isInvalidSyntaxReason(),
+        "Script contains an invalid opcode");
 }
