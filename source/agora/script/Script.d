@@ -13,6 +13,7 @@
 
 module agora.script.Script;
 
+import agora.common.Hash;
 import agora.script.Codes;
 import agora.script.Stack;
 
@@ -43,7 +44,7 @@ public struct Script
 
     ***************************************************************************/
 
-    public bool isValidSyntax () const nothrow pure @safe @nogc
+    public bool isValidSyntax () const pure nothrow @safe @nogc
     {
         return this.isInvalidSyntaxReason() is null;
     }
@@ -59,7 +60,7 @@ public struct Script
 
     ***************************************************************************/
 
-    public string isInvalidSyntaxReason () const nothrow pure @safe @nogc
+    public string isInvalidSyntaxReason () const pure nothrow @safe @nogc
     {
         const(ubyte)[] bytes = this.data[];
         if (bytes.empty)
@@ -156,4 +157,35 @@ unittest
         null);
     test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_max[0], size_max[1]] ~ payload ~ OP.INVALID).isInvalidSyntaxReason(),
         "Script contains an invalid opcode");
+}
+
+/*******************************************************************************
+
+    Params:
+        key_hash = the key hash to encode in the P2PKH script
+
+    Returns:
+        a P2PKH lock script which can be unlocked with the matching
+        public key & signature
+
+*******************************************************************************/
+
+public Script createP2PKH (Hash key_hash) pure nothrow @safe
+{
+    // note: Bitcoin uses an optimized version of this where they use a
+    // magic marker to detect P2PKH scripts.
+    // But we use explicit PUSH opcodes for simplicity
+    Script script = { cast(ubyte[])[OP.DUP, OP.HASH, OP.PUSH_DATA_1, 64]
+        ~ key_hash[] ~ cast(ubyte[])[OP.VERIFY_EQUAL, OP.CHECK_SIG] };
+    return script;
+}
+
+///
+unittest
+{
+    import agora.utils.Test;
+    const key = WK.Keys.A.address;
+    const key_hash = hashFull(key);
+    Script script = createP2PKH(key_hash);
+    assert(script.isValidSyntax());
 }
