@@ -28,7 +28,7 @@ enum OP : ubyte
     HASH,
 
     /// Duplicate the item on the stack
-    //DUP,
+    DUP,
 
     /// Checks the stack item is equal to the input value
     //CHECK_EQUAL,

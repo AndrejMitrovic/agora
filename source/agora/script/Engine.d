@@ -19,7 +19,7 @@ import agora.script.Script;
 /// The engine executes scripts, and returns a value or throws
 public class Engine
 {
-    public bool execute (Script lock, Script unlock)
+    public string execute (Script lock, Script unlock)
     {
         // non-standard scripts (meaning non-recognized ones with unexpected opcodes)
         // are not relayed to the network, even though they are technically valid.
@@ -36,6 +36,26 @@ public class Engine
 
         // for the unlocking script we have different validation rules.
 
-        return true;
+        return null;
     }
+}
+
+///
+unittest
+{
+    import agora.common.Hash;
+    import agora.utils.Test;
+    auto engine = new Engine();
+
+    static Script createP2PKH (Hash key_hash)
+    {
+        Script script = { cast(ubyte[])[OP.DUP, OP.HASH] ~ key_hash[] ~
+            cast(ubyte[])[OP.VERIFY_EQUAL, OP.CHECK_SIG] };
+        return script;
+    }
+
+    const key = WK.Keys.A.address;
+    const key_hash = hashFull(key);
+    Script script = createP2PKH(key_hash);
+    assert(script.isValidSyntax());
 }
