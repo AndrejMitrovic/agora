@@ -27,7 +27,7 @@ import std.traits;
 public struct Script
 {
     /// opcodes + any associated data for each push opcode
-    private ubyte[] data;
+    private const(ubyte)[] data;
 
     /***************************************************************************
 
@@ -60,12 +60,12 @@ public struct Script
 
         string isInvalidPushReason (OP op)()
         {
+            static assert(op == OP.PUSH_DATA_1 || op == OP.PUSH_DATA_2);
             alias T = Select!(op == OP.PUSH_DATA_1, ubyte, ushort);
-
             if (bytes.length < T.sizeof)
             {
                 static immutable err1 = op.to!string ~ " opcode requires "
-                    ~ T.sizeof.to!string ~ " bytes for the size";
+                    ~ T.sizeof.to!string ~ " byte(s) for the payload size";
                 return err1;
             }
 
@@ -73,7 +73,7 @@ public struct Script
             if (size == 0 || size > MAX_STACK_ITEM_SIZE)
             {
                 static immutable err2 = op.to!string
-                    ~ " opcode requires size value between 1 and "
+                    ~ " opcode requires payload size value to be between 1 and "
                     ~ MAX_STACK_ITEM_SIZE.to!string;
                 return err2;
             }
@@ -82,7 +82,7 @@ public struct Script
             if (bytes.length < size)
             {
                 static immutable err3 = op.to!string
-                    ~ "opcode size value exceeds total script size";
+                    ~ " opcode payload size exceeds total script size";
                 return err3;
             }
 
@@ -124,8 +124,24 @@ unittest
     test!"=="(Script.init.isInvalidSyntaxReason(), "Script is empty");
     test!"=="(Script([255]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
     test!"=="(Script([OP.INVALID]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
-    test!"=="(Script([OP.PUSH_DATA_1]).isInvalidSyntaxReason(), "");
-    test!"=="(Script([OP.PUSH_DATA_1, 0]).isInvalidSyntaxReason(), "");
-    test!"=="(Script([OP.PUSH_DATA_1, 1]).isInvalidSyntaxReason(), "");
-    test!"=="(Script([OP.PUSH_DATA_1, 1, 1]).isInvalidSyntaxReason(), "");
+    test!"=="(Script([OP.PUSH_DATA_1]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode requires 1 byte(s) for the payload size");
+    test!"=="(Script([OP.PUSH_DATA_1, 0]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode requires payload size value to be between 1 and 512");
+    test!"=="(Script([OP.PUSH_DATA_1, 1]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode payload size exceeds total script size");
+    test!"=="(Script([OP.PUSH_DATA_1, 1, 1]).isInvalidSyntaxReason(), null);
+    test!"=="(Script([OP.PUSH_DATA_2]).isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
+    test!"=="(Script([OP.PUSH_DATA_2, 0]).isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
+    test!"=="(Script([OP.PUSH_DATA_2, 0, 0]).isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
+
+    const ubyte[2] size_1 = nativeToLittleEndian(ushort(1));
+    test!"=="(Script([OP.PUSH_DATA_2, size_1[0], size_1[1]]).isInvalidSyntaxReason(),
+        "PUSH_DATA_2 opcode payload size exceeds total script size");
+    test!"=="(Script([OP.PUSH_DATA_2, size_1[0], size_1[1], 1]).isInvalidSyntaxReason(), null);
+
+    const ubyte[2] size_max = nativeToLittleEndian(ushort(MAX_STACK_ITEM_SIZE));
+    const ubyte[MAX_STACK_ITEM_SIZE] payload;
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_max[0], size_max[1]] ~ payload).isInvalidSyntaxReason(), null);
+
+    const ubyte[2] size_overflow = nativeToLittleEndian(ushort(MAX_STACK_ITEM_SIZE + 1));
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_overflow[0], size_overflow[1]] ~ payload).isInvalidSyntaxReason(),
+        "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
 }
