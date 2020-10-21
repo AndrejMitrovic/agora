@@ -16,10 +16,14 @@ module agora.script.Codes;
 /// The supported opcodes
 /// Opcodes named `CHECK_*` push their result to the stack,
 /// whereas `VERIFY_*` opcodes invalidate the transaction if the result is false.
-enum OP
+/// Can encode up to 255 opcodes (one of which is INVALID).
+enum OP : ubyte
 {
     /// Using this is an error and will invalidate the transaction
     INVALID,
+
+    /// Hash the value
+    HASH,
 
     /// Duplicate the item on the stack
     //DUP,
