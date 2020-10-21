@@ -13,6 +13,8 @@
 
 module agora.script.Codes;
 
+import std.traits;
+
 /// The supported opcodes
 /// Opcodes named `CHECK_*` push their result to the stack,
 /// whereas `VERIFY_*` opcodes invalidate the transaction if the result is false.
@@ -48,7 +50,34 @@ enum OP : ubyte
     PUSH_DATA_4,
 }
 
+/*******************************************************************************
+
+    Converts the byte to an opcode, or OP.INVALID if it's an unrecognized opcode.
+
+    Returns:
+        The opcode, or OP.INVALID if the value was an unrecognized opcode.
+
+*******************************************************************************/
+
+public OP toOPCode (ubyte value) pure nothrow @safe @nogc
+{
+    switch (value)
+    {
+        foreach (member; EnumMembers!OP)
+        {
+            case member:
+                return member;
+        }
+
+        default:
+            return OP.INVALID;
+    }
+}
+
+///
 unittest
 {
-    //assert(0);
+    assert(0.toOPCode() == OP.INVALID);
+    assert(1.toOPCode() == OP.HASH);
+    assert(255.toOPCode() == OP.INVALID);
 }
