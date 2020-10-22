@@ -142,41 +142,51 @@ unittest
     test!"=="(Script([OP.INVALID]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
 
     // PUSH_BYTES_*
-    test!"=="(Script([1]).isInvalidSyntaxReason(), "PUSH_BYTES_* opcode exceeds total script size");
+    test!"=="(Script([1]).isInvalidSyntaxReason(),
+        "PUSH_BYTES_* opcode exceeds total script size");
     test!"=="(Script([1, 255]).isInvalidSyntaxReason(), null);  // 1-byte data payload
-    test!"=="(Script([2]).isInvalidSyntaxReason(), "PUSH_BYTES_* opcode exceeds total script size");
-    test!"=="(Script([2, 255]).isInvalidSyntaxReason(), "PUSH_BYTES_* opcode exceeds total script size");
+    test!"=="(Script([2]).isInvalidSyntaxReason(),
+        "PUSH_BYTES_* opcode exceeds total script size");
+    test!"=="(Script([2, 255]).isInvalidSyntaxReason(),
+        "PUSH_BYTES_* opcode exceeds total script size");
     test!"=="(Script([2, 255, 255]).isInvalidSyntaxReason(), null);  // 2-byte data payload
     ubyte[64] payload_64;
-    test!"=="(Script([ubyte(64)] ~ payload_64[0 .. 63]).isInvalidSyntaxReason(), "PUSH_BYTES_* opcode exceeds total script size");
+    test!"=="(Script([ubyte(64)] ~ payload_64[0 .. 63]).isInvalidSyntaxReason(),
+        "PUSH_BYTES_* opcode exceeds total script size");
     test!"=="(Script([ubyte(64)] ~ payload_64).isInvalidSyntaxReason(), null);  // 64-byte data payload
 
     // PUSH_DATA_*
-    test!"=="(Script([OP.PUSH_DATA_1]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode requires 1 byte(s) for the payload size");
-    test!"=="(Script([OP.PUSH_DATA_1, 0]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode requires payload size value to be between 1 and 512");
-    test!"=="(Script([OP.PUSH_DATA_1, 1]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode payload size exceeds total script size");
-    test!"=="(Script([OP.PUSH_DATA_1, 1, 1]).isInvalidSyntaxReason(), null);
-    test!"=="(Script([OP.PUSH_DATA_2]).isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
-    test!"=="(Script([OP.PUSH_DATA_2, 0]).isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
-    test!"=="(Script([OP.PUSH_DATA_2, 0, 0]).isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
-
     const ubyte[2] size_1 = nativeToLittleEndian(ushort(1));
-    test!"=="(Script([OP.PUSH_DATA_2, size_1[0], size_1[1]]).isInvalidSyntaxReason(),
-        "PUSH_DATA_2 opcode payload size exceeds total script size");
-    test!"=="(Script([OP.PUSH_DATA_2, size_1[0], size_1[1], 1]).isInvalidSyntaxReason(), null);
-
     const ubyte[2] size_max = nativeToLittleEndian(ushort(MAX_STACK_ITEM_SIZE));
-    const ubyte[MAX_STACK_ITEM_SIZE] payload;
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_max[0], size_max[1]] ~ payload).isInvalidSyntaxReason(), null);
+    const ubyte[MAX_STACK_ITEM_SIZE] max_payload;
+    const ubyte[2] size_overflow = nativeToLittleEndian(
+        ushort(MAX_STACK_ITEM_SIZE + 1));
 
-    const ubyte[2] size_overflow = nativeToLittleEndian(ushort(MAX_STACK_ITEM_SIZE + 1));
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_overflow[0], size_overflow[1]] ~ payload).isInvalidSyntaxReason(),
+    test!"=="(Script([OP.PUSH_DATA_1]).isInvalidSyntaxReason(),
+        "PUSH_DATA_1 opcode requires 1 byte(s) for the payload size");
+    test!"=="(Script([OP.PUSH_DATA_1, 0]).isInvalidSyntaxReason(),
+        "PUSH_DATA_1 opcode requires payload size value to be between 1 and 512");
+    test!"=="(Script([OP.PUSH_DATA_1, 1]).isInvalidSyntaxReason(),
+        "PUSH_DATA_1 opcode payload size exceeds total script size");
+    test!"=="(Script([OP.PUSH_DATA_1, 1, 1]).isInvalidSyntaxReason(), null);
+    test!"=="(Script([OP.PUSH_DATA_2]).isInvalidSyntaxReason(),
+        "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
+    test!"=="(Script([OP.PUSH_DATA_2, 0]).isInvalidSyntaxReason(),
+        "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
+    test!"=="(Script([OP.PUSH_DATA_2, 0, 0]).isInvalidSyntaxReason(),
         "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
-
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_max[0], size_max[1]] ~ payload ~ OP.HASH).isInvalidSyntaxReason(),
-        null);
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_max[0], size_max[1]] ~ payload ~ OP.INVALID).isInvalidSyntaxReason(),
-        "Script contains an invalid opcode");
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_1).isInvalidSyntaxReason(),
+        "PUSH_DATA_2 opcode payload size exceeds total script size");
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_1 ~ [ubyte(1)])
+        .isInvalidSyntaxReason(), null);
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_max ~ max_payload)
+        .isInvalidSyntaxReason(), null);
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_overflow ~ max_payload)
+        .isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_max ~ max_payload ~ OP.HASH)
+        .isInvalidSyntaxReason(), null);
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_max ~ max_payload ~ OP.INVALID)
+        .isInvalidSyntaxReason(), "Script contains an invalid opcode");
 }
 
 /*******************************************************************************
