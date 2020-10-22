@@ -29,6 +29,7 @@ struct Stack
 {
     /// The actual stack
     private ubyte[] stack;
+    //private ubyte[][] stack;  // todo: needs to be array of array
 
     /***************************************************************************
 

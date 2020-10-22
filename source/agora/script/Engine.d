@@ -39,6 +39,9 @@ public class Engine
         // might want to calculate the weight in an out parameter in
         // isInvalidSyntaxReason()
 
+        // todo: check *executed* instructions and that they don't
+        // go over the configured (consensus) limit
+
         // non-standard scripts (meaning non-recognized ones with unexpected opcodes)
         // are not relayed to the network, even though they are technically valid.
         // see: https://bitcoin.stackexchange.com/questions/73728/why-can-non-standard-transactions-be-mined-but-not-relayed/
@@ -70,6 +73,27 @@ public class Engine
 
         // for a description on how code flow control works,
         // see: https://building-on-bitcoin.com/docs/slides/Thomas_Kerin_BoB_2018.pdf
+
+        // if *any* items are false, then the current execution
+        // state is false, and we continue executing next
+        // instructions. however the fExec level is set to false,
+        // until an ELSE or ENDIF sets it to true (I think),
+        // and then we can execute code again.
+
+        // todo: verify stack data pushes via CheckMinimalPush(),
+        // it seems it's related to BIP62 where pushes can be
+        // encoded in different ways. Note: BIP141 (segwit)
+        // largely replaces BIP62, so we may not require
+        // the validation in CheckMinimalPush(). It is likely
+        // still there for compatibility reasons.
+
+        // todo: check max stack size
+        // todo: do not implement alt stack, it's unnecessary
+
+        // todo: do not add any more support other than the bare
+        // minimum for script validation. e.g. don't add OP_ADD support
+        // because this requires emulating a specific virtual machine
+        // platform which handles integer arithmetic the same on all platforms.
 
         //while (!opcodes.empty())
         //{
