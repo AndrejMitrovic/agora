@@ -81,18 +81,6 @@ public class Engine
         // until an ELSE or ENDIF sets it to true (I think),
         // and then we can execute code again.
 
-        // essentially:
-        // pc -> IF
-        // pc ->    DO  // exec if fExec is 1
-        // pc ->    DO  // exec if fExec is 1
-        // pc -> ELSE   // toggles fExec
-        // pc ->    DO  // exec if fExec is 1
-        // pc ->    DO  // exec if fExec is 1
-        // pc -> ENDIF
-        //
-        // unlike in C-like programming languages, there are no goto's and
-        // we may only increment the program counter by 1
-
         // todo: verify stack data pushes via CheckMinimalPush(),
         // it seems it's related to BIP62 where pushes can be
         // encoded in different ways. Note: BIP141 (segwit)
@@ -118,14 +106,12 @@ public class Engine
             switch (opcode)
             {
                 case OP.PUSH_DATA_1:
-                    if (auto reason = pushToStack!(OP.PUSH_DATA_1)(bytes))
-                        return reason;
-                    else break;
+                    pushToStack!(OP.PUSH_DATA_1)(stack, bytes);
+                    break;
 
                 case OP.PUSH_DATA_2:
-                    if (auto reason = pushToStack!(OP.PUSH_DATA_2)(bytes))
-                        return reason;
-                    else break;
+                    pushToStack!(OP.PUSH_DATA_2)(stack, bytes);
+                    break;
 
                 case OP.PUSH_BYTES_1: .. case OP.PUSH_BYTES_64:
                     const payload_size = opcode;  // encoded in the opcode
@@ -151,6 +137,7 @@ public class Engine
         to the next opcode.
 
         Params:
+            OP = the associated `PUSH_DATA_*` opcode
             stack = the stack to push the payload to
             bytes = the opcode / data byte array
 

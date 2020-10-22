@@ -28,7 +28,7 @@ public enum MAX_STACK_ITEM_SIZE = 512;
 struct Stack
 {
     /// The actual stack
-    private ubyte[][] stack;
+    private const(ubyte)[][] stack;
 
     /// Used stack size
     private size_t used_size;
@@ -39,7 +39,7 @@ struct Stack
 
     ***************************************************************************/
 
-    public void push (ubyte[] data) @safe nothrow
+    public void push (const(ubyte)[] data) @safe nothrow
     {
         assert(data.sizeof <= MAX_STACK_ITEM_SIZE);
         assert(this.used_size + data.length <= MAX_STACK_TOTAL_SIZE);
@@ -53,11 +53,13 @@ struct Stack
 
     ***************************************************************************/
 
-    public ubyte[] pop () @safe nothrow
+    public const(ubyte)[] pop () @safe nothrow
     {
         assert(this.stack.length > 0);
-        auto value = this.stack.back();
-        this.stack.popBackN(T.sizeof);
+        auto value = this.stack.back().dup;  // note: workaround for below note
+        this.stack.popBack();
+
+        // todo: this might actually be unsafe if we POP and later PUSH
         () @trusted { this.stack.assumeSafeAppend(); }();
         return value;
     }

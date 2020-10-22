@@ -122,6 +122,7 @@ public struct Script
         the `bytes` array if the payload does not exceed the array.
 
         Params:
+            OP = the associated `PUSH_DATA_*` opcode
             bytes = the opcode byte array
 
         Returns:
@@ -131,7 +132,7 @@ public struct Script
     ***************************************************************************/
 
     private static string isInvalidPushReason (OP op)(ref const(ubyte)[] bytes)
-        const pure nothrow @safe @nogc
+        pure nothrow @safe @nogc
     {
         static assert(op == OP.PUSH_DATA_1 || op == OP.PUSH_DATA_2);
         alias T = Select!(op == OP.PUSH_DATA_1, ubyte, ushort);
