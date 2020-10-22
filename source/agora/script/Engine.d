@@ -168,7 +168,7 @@ unittest
 
 *******************************************************************************/
 
-struct ConditionScope
+private struct ConditionScope
 {
     /// Current number of scopes
     private uint scope_count;
