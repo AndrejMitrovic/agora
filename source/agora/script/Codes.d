@@ -112,7 +112,7 @@ public bool toOPCode (ubyte value, out OP opcode) pure nothrow @safe @nogc
 
     if (value >= 1 && value <= 64)  // PUSH_BYTES_1 .. PUSH_BYTES_64
     {
-        opcode = cast(OP)value;
+        opcode = cast(OP)value;  // dirty, but avoids need to define all pushes
         return true;
     }
 
