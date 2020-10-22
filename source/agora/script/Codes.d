@@ -128,7 +128,7 @@ public OP toOPCode (ubyte value) pure nothrow @safe @nogc
 }
 
 ///
-unittest
+pure nothrow @safe @nogc unittest
 {
     OP op;
     assert(0x00.toOPCode(op) && op == OP.FALSE);
