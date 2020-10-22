@@ -219,7 +219,6 @@ public Script createUnlockP2PKH (Signature sig, Point pub_key)
 ///
 unittest
 {
-    //import agora.common.crypto.ECC;
     import agora.common.crypto.Schnorr;
     import agora.utils.Test;
 
