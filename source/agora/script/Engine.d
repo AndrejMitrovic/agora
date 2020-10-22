@@ -332,11 +332,13 @@ unittest
     //                 IF
     //                      DO -> skipped
     //                 ENDIF
+    //                 DO -> skipped
     //             ENDIF
+    //             DO -> skipped
     //         ENDIF
-    //         DO -> executed
+    //         DO -> skipped
     //     ENDIF
-    //     DO -> executed
+    //     DO -> executed (no false scopes left)
     // ENDIF
     sc = ScopeCondition.init;
     sc.push(true);
