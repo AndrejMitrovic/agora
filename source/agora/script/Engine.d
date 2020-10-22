@@ -146,10 +146,10 @@ unittest
 /*******************************************************************************
 
     Keeps track of scopes and their conditions (TRUE or FALSE).
+    This struct can be used to implement conditional (IF/ELSE/ENDIF) logic.
 
     Unlike C-like programming languages, we do not support GOTO and therefore
-    may only increment the program counter 1 instruction at a time.
-    This struct can be used to implement conditional (IF/ELSE/ENDIF) logic.
+    may only increment the program counter one instruction at a time.
 
     It does this pushing a new scope for each visited `IF` opcode,
     popping a scope for every visited `ENDIF` opcode, and toggling the scope's
@@ -168,7 +168,7 @@ unittest
 
 *******************************************************************************/
 
-private struct ConditionScope
+private struct ScopeCondition
 {
     /// Current number of scopes
     private uint scope_count;
@@ -233,8 +233,8 @@ private struct ConditionScope
     {
         assert(this.scope_count > 0);
 
-        if (this.false_idx == this.scope_count - 1)  // earliest false, toggle to true
-            this.false_idx = -1;
+        if (this.false_idx == this.scope_count - 1)
+            this.false_idx = -1;  // earliest false, toggle to true
         this.scope_count--;
     }
 
