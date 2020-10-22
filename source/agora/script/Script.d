@@ -182,7 +182,7 @@ unittest
 /*******************************************************************************
 
     Params:
-        key_hash = the key hash to encode in the P2PKH script
+        key_hash = the key hash to encode in the P2PKH lock script
 
     Returns:
         a P2PKH lock script which can be unlocked with the matching
@@ -192,9 +192,6 @@ unittest
 
 public Script createLockP2PKH (Hash key_hash) pure nothrow @safe
 {
-    // note: Bitcoin uses an optimized version of this where they use a
-    // magic marker to detect P2PKH scripts.
-    // But we use explicit PUSH opcodes for simplicity
     Script script = { cast(ubyte[])[OP.DUP, OP.HASH]
         ~ [ubyte(64)] ~ key_hash[]
         ~ cast(ubyte[])[OP.VERIFY_EQUAL, OP.CHECK_SIG] };
@@ -204,11 +201,11 @@ public Script createLockP2PKH (Hash key_hash) pure nothrow @safe
 /*******************************************************************************
 
     Params:
-        key_hash = the key hash to encode in the P2PKH script
+        sig = the signature
+        pub_key = the public key
 
     Returns:
-        a P2PKH lock script which can be unlocked with the matching
-        public key & signature
+        a P2PKH unlock script which can be used with the associated lock script
 
 *******************************************************************************/
 
