@@ -119,6 +119,9 @@ public struct Script
                     else break;
 
                 case OP.PUSH_BYTES_1: .. case OP.PUSH_BYTES_64:
+                    if (bytes.length < opcode)
+                        return "PUSH_BYTES_* opcode exceeds total script size";
+
                     bytes.popFrontN(opcode);
                     break;
 
@@ -137,6 +140,18 @@ unittest
     test!"=="(Script.init.isInvalidSyntaxReason(), "Script is empty");
     test!"=="(Script([255]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
     test!"=="(Script([OP.INVALID]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
+
+    // PUSH_BYTES_*
+    test!"=="(Script([1]).isInvalidSyntaxReason(), "PUSH_BYTES_* opcode exceeds total script size");
+    test!"=="(Script([1, 255]).isInvalidSyntaxReason(), null);  // 1-byte data payload
+    test!"=="(Script([2]).isInvalidSyntaxReason(), "PUSH_BYTES_* opcode exceeds total script size");
+    test!"=="(Script([2, 255]).isInvalidSyntaxReason(), "PUSH_BYTES_* opcode exceeds total script size");
+    test!"=="(Script([2, 255, 255]).isInvalidSyntaxReason(), null);  // 2-byte data payload
+    ubyte[64] payload_64;
+    test!"=="(Script([ubyte(64)] ~ payload_64[0 .. 63]).isInvalidSyntaxReason(), "PUSH_BYTES_* opcode exceeds total script size");
+    test!"=="(Script([ubyte(64)] ~ payload_64).isInvalidSyntaxReason(), null);  // 64-byte data payload
+
+    // PUSH_DATA_*
     test!"=="(Script([OP.PUSH_DATA_1]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode requires 1 byte(s) for the payload size");
     test!"=="(Script([OP.PUSH_DATA_1, 0]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode requires payload size value to be between 1 and 512");
     test!"=="(Script([OP.PUSH_DATA_1, 1]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode payload size exceeds total script size");
