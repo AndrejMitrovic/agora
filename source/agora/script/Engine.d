@@ -20,7 +20,9 @@ import agora.script.Stack;
 
 import ocean.core.Test;
 
+import std.bitmanip;
 import std.range;
+import std.traits;
 
 /// The engine executes scripts, and returns a value or throws
 public class Engine

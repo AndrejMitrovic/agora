@@ -17,8 +17,8 @@ import agora.common.Serializer;
 
 import std.range;
 
-/// Maximum stack size
-public enum MAX_STACK_SIZE = 16_384;
+/// Maximum total stack size
+public enum MAX_STACK_TOTAL_SIZE = 16_384;
 
 /// Maximum size of an item on the stack
 public enum MAX_STACK_ITEM_SIZE = 512;
@@ -28,8 +28,10 @@ public enum MAX_STACK_ITEM_SIZE = 512;
 struct Stack
 {
     /// The actual stack
-    private ubyte[] stack;
-    //private ubyte[][] stack;  // todo: needs to be array of array
+    private ubyte[][] stack;
+
+    /// Used stack size
+    private size_t used_size;
 
     /***************************************************************************
 
@@ -37,26 +39,24 @@ struct Stack
 
     ***************************************************************************/
 
-    public void push (T)(auto const ref T value) @safe
+    public void push (ubyte[] data) @safe nothrow
     {
-        assert(T.sizeof <= MAX_STACK_ITEM_SIZE);
-        assert(this.stack.length + T.sizeof <= MAX_STACK_SIZE);
-        this.stack ~= value.serializeFull;
+        assert(data.sizeof <= MAX_STACK_ITEM_SIZE);
+        assert(this.used_size + data.length <= MAX_STACK_TOTAL_SIZE);
+        this.stack ~= data;
     }
 
     /***************************************************************************
 
         Returns:
-            the popped item from the stack
+            the popped value from the stack
 
     ***************************************************************************/
 
-    public T pop (T)() @safe
+    public ubyte[] pop () @safe nothrow
     {
-        assert(this.stack.length >= T.sizeof);
-
-        auto data = this.stack[$ - T.sizeof .. $];
-        auto value = data.deserializeFull!T;
+        assert(this.stack.length > 0);
+        auto value = this.stack.back();
         this.stack.popBackN(T.sizeof);
         () @trusted { this.stack.assumeSafeAppend(); }();
         return value;
@@ -69,7 +69,7 @@ struct Stack
 
     ***************************************************************************/
 
-    public bool empty () @safe @nogc pure const
+    public bool empty () const pure nothrow @safe @nogc
     {
         return this.stack.length == 0;
     }
@@ -80,8 +80,8 @@ unittest
 {
     Stack stack;
     assert(stack.empty());
-    stack.push!int(42);
+    stack.push([123]);
     assert(!stack.empty());
-    assert(stack.pop!int() == 42);
+    assert(stack.pop() == [123]);
     assert(stack.empty());
 }
