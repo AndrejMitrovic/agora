@@ -85,6 +85,7 @@ enum OP : ubyte
     or returns false if it's an unrecognized opcode.
 
     Params:
+        value = the byte containing the opcode
         opcode = will contain the opcode if it was recognized
 
     Returns:
