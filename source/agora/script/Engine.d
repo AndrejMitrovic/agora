@@ -68,6 +68,9 @@ public class Engine
     {
         const(ubyte)[] opcodes = unlock[];
 
+        // for a description on how code flow control works,
+        // see: https://building-on-bitcoin.com/docs/slides/Thomas_Kerin_BoB_2018.pdf
+
         //while (!opcodes.empty())
         //{
 
