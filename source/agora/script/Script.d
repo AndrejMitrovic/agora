@@ -33,6 +33,18 @@ public struct Script
 
     /***************************************************************************
 
+        Returns:
+            the byte buffer of the script
+
+    ***************************************************************************/
+
+    public const(ubyte)[] opSlice () const pure nothrow @safe @nogc
+    {
+        return this.data[];
+    }
+
+    /***************************************************************************
+
         Validates the script syntactically, but not semantically.
         Each opcode is checked for validity, and any push opcodes have their
         length & payload checked for size constraints.
@@ -101,9 +113,9 @@ public struct Script
 
         while (!bytes.empty())
         {
-            const OP opcode = bytes.front.toOPCode();
-            if (opcode == OP.INVALID)
-                return "Script contains an invalid opcode";
+            OP opcode;
+            if (!bytes.front.toOPCode(opcode))
+                return "Script contains an unrecognized opcode";
 
             bytes.popFront();
             switch (opcode)
@@ -138,8 +150,8 @@ public struct Script
 unittest
 {
     test!"=="(Script.init.isInvalidSyntaxReason(), "Script is empty");
-    test!"=="(Script([255]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
-    test!"=="(Script([OP.INVALID]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
+    test!"=="(Script([255]).isInvalidSyntaxReason(), "Script contains an unrecognized opcode");
+    test!"=="(Script([OP.INVALID]).isInvalidSyntaxReason(), null);  // OP.INVALID is only semantically invalid
 
     // PUSH_BYTES_*
     test!"=="(Script([1]).isInvalidSyntaxReason(),
@@ -185,8 +197,8 @@ unittest
         .isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
     test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_max ~ max_payload ~ OP.HASH)
         .isInvalidSyntaxReason(), null);
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_max ~ max_payload ~ OP.INVALID)
-        .isInvalidSyntaxReason(), "Script contains an invalid opcode");
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_max ~ max_payload ~ ubyte(255))
+        .isInvalidSyntaxReason(), "Script contains an unrecognized opcode");
 }
 
 /*******************************************************************************

@@ -19,16 +19,25 @@ import agora.script.Stack;
 
 import ocean.core.Test;
 
+import std.range;
+
 /// The engine executes scripts, and returns a value or throws
 public class Engine
 {
-    public string execute (Script lock, Script unlock)
+    public string execute (in Script lock, in Script unlock)
     {
+        if (auto error = lock.isInvalidSyntaxReason())
+            return "Lock script error: " ~ error;
+
         if (auto error = unlock.isInvalidSyntaxReason())
             return "Unlock script error: " ~ error;
 
-        if (auto error = lock.isInvalidSyntaxReason())
-            return "Lock script error: " ~ error;
+        // todo: check script weight:
+        // - max opcode length
+        // - num of opcodes
+        // - weight of each opcode (e.g. sig checks more expensive than ADD)
+        // might want to calculate the weight in an out parameter in
+        // isInvalidSyntaxReason()
 
         // non-standard scripts (meaning non-recognized ones with unexpected opcodes)
         // are not relayed to the network, even though they are technically valid.
@@ -55,8 +64,15 @@ public class Engine
         return null;
     }
 
-    public string executeUnlockScript (Script unlock, out Stack stack)
+    public string executeUnlockScript (in Script unlock, out Stack stack)
     {
+        const(ubyte)[] opcodes = unlock[];
+
+        //while (!opcodes.empty())
+        //{
+
+        //}
+
         return null;
     }
 }
@@ -64,7 +80,6 @@ public class Engine
 ///
 unittest
 {
-    //import agora.common.crypto.ECC;
     import agora.common.crypto.ECC;
     import agora.common.crypto.Schnorr;
     import agora.common.Hash;
@@ -80,11 +95,11 @@ unittest
     Script unlock_script = createUnlockP2PKH(sig, kp.V);
     assert(unlock_script.isValidSyntax());
 
-    const invalid_script = Script([OP.INVALID]);
+    const invalid_script = Script([255]);
     scope engine = new Engine();
     test!("==")(engine.execute(invalid_script, unlock_script),
-        "Lock script error: Script contains an invalid opcode");
+        "Lock script error: Script contains an unrecognized opcode");
     test!("==")(engine.execute(lock_script, invalid_script),
-        "Unlock script error: Script contains an invalid opcode");
-    test!("==")(engine.execute(lock_script, unlock_script), null);
+        "Unlock script error: Script contains an unrecognized opcode");
+    //test!("==")(engine.execute(lock_script, unlock_script), null);
 }

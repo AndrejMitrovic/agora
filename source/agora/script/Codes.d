@@ -74,39 +74,51 @@ enum OP : ubyte
 
 /*******************************************************************************
 
-    Converts the byte to an opcode, or OP.INVALID if it's an unrecognized opcode.
+    Converts the byte to an opcode,
+    or returns false if it's an unrecognized opcode.
+
+    Params:
+        opcode = will contain the opcode if it was recognized
 
     Returns:
-        The opcode, or OP.INVALID if the value was an unrecognized opcode.
+        true if the value is a recognized opcode
 
 *******************************************************************************/
 
-public OP toOPCode (ubyte value) pure nothrow @safe @nogc
+public bool toOPCode (ubyte value, out OP opcode) pure nothrow @safe @nogc
 {
     switch (value)
     {
         foreach (member; EnumMembers!OP)
         {
             case member:
-                return member;
+            {
+                opcode = member;
+                return true;
+            }
         }
 
         default:
             break;
     }
 
-    if (value >= 1 && value <= 64)
-        return cast(OP)value;  // PUSH_BYTES_1 .. PUSH_BYTES_64
+    if (value >= 1 && value <= 64)  // PUSH_BYTES_1 .. PUSH_BYTES_64
+    {
+        opcode = cast(OP)value;
+        return true;
+    }
 
-    return OP.INVALID;
+    return false;
 }
 
 ///
 unittest
 {
-    assert(0.toOPCode() == OP.INVALID);
-    assert(1.toOPCode() == OP.HASH);
-    assert(255.toOPCode() == OP.INVALID);
-    assert(1.toOPCode() != OP.INVALID);
-    assert(64.toOPCode() != OP.INVALID);
+    OP op;
+    assert(0x00.toOPCode(op) && op == OP.FALSE);
+    assert(0x46.toOPCode(op) && op == OP.HASH);
+    assert(!255.toOPCode(op));
+    assert(1.toOPCode(op) && op == OP.PUSH_BYTES_1);
+    assert(32.toOPCode(op) && op == cast(OP)32);
+    assert(64.toOPCode(op) && op == OP.PUSH_BYTES_64);
 }
