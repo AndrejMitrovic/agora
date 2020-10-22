@@ -3,12 +3,12 @@
     Keeps track of scopes and their conditions (TRUE or FALSE).
     This struct can be used to implement conditional (IF/ELSE/ENDIF) logic.
 
-    Unlike C-like programming languages, we do not support GOTO and therefore
-    may only increment the program counter one instruction at a time.
-
     It does this pushing a new scope for each visited `IF` opcode,
     popping a scope for every visited `ENDIF` opcode, and toggling the scope's
     condition for every visited `ELSE` opcode.
+
+    Unlike C-like programming languages, we do not support GOTO and therefore
+    may only increment the program counter one instruction at a time.
 
     This implementation is largely based on Bitcoin's `ConditionStack`,
     as it's the most optimal O(1) solution we can think of.
