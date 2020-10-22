@@ -19,15 +19,40 @@ import std.traits;
 /// Opcodes named `CHECK_*` push their result to the stack,
 /// whereas `VERIFY_*` opcodes invalidate the transaction if the result is false.
 /// Can encode up to 255 opcodes (one of which is INVALID).
+/// Note that the range between `PUSH_BYTES_1` and `PUSH_BYTES_64` is
+/// purposefully reserved to encode a push to the stack between 1 .. 64 bytes,
+/// without having to encode it in a separate length byte.
+/// For pushes above 64 bytes
 enum OP : ubyte
 {
-    // TODO: OP_0 pushes a single byte array onto the stack (examine bitcoin!)
-
     /// Using this is an error and will invalidate the transaction
-    INVALID,
+    /// Purposefully located first to default OPs to errors.
+    INVALID = 0x44,
+
+    /// Pushes False onto the stack
+    FALSE = 0x00,
+
+    /// Pushes True onto the stack
+    TRUE = 0x45,  // 69
+
+    /// Used to encode small length of data to push to the stack (up to 64 bytes),
+    /// may be used with `case PUSH_BYTES_1 .. PUSH_BYTES_64:` syntax.
+    PUSH_BYTES_1 = 0x01,
+    PUSH_BYTES_64 = 0x40, // 64 decimal
+
+    /// The next 1 byte contains the number of bytes to push onto the stack
+    PUSH_DATA_16 = 0x41,
+
+    /// The next 2 bytes (ushort in LE format) contains the number of bytes to
+    /// push onto the stack
+    PUSH_DATA_32 = 0x42,
+
+    /// The next 4 bytes (ushort in LE format) contains the number of bytes to
+    /// push onto the stack
+    // PUSH_DATA_64 = 0x43,
 
     /// Hash the value
-    HASH,
+    HASH = 0x46,
 
     /// Duplicate the item on the stack
     DUP,
@@ -41,12 +66,6 @@ enum OP : ubyte
     /// Checks the signature with the given public key,
     /// pushes the result to the stack
     CHECK_SIG,
-
-    /// The next 1 byte contains the number of bytes to push onto the stack
-    PUSH_DATA_1,
-
-    /// The next 2 bytes contains the number of bytes to push onto the stack
-    PUSH_DATA_2,
 
     /// Encodes a set of web assembly instructions
     WEB_ASM,

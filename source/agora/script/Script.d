@@ -69,8 +69,8 @@ public struct Script
 
         string isInvalidPushReason (OP op)()
         {
-            static assert(op == OP.PUSH_DATA_1 || op == OP.PUSH_DATA_2);
-            alias T = Select!(op == OP.PUSH_DATA_1, ubyte, ushort);
+            static assert(op == OP.PUSH_DATA_16 || op == OP.PUSH_DATA_32);
+            alias T = Select!(op == OP.PUSH_DATA_16, ubyte, ushort);
             if (bytes.length < T.sizeof)
             {
                 static immutable err1 = op.to!string ~ " opcode requires "
@@ -108,13 +108,13 @@ public struct Script
             bytes.popFront();
             switch (opcode)
             {
-                case OP.PUSH_DATA_1:
-                    if (auto reason = isInvalidPushReason!(OP.PUSH_DATA_1))
+                case OP.PUSH_DATA_16:
+                    if (auto reason = isInvalidPushReason!(OP.PUSH_DATA_16))
                         return reason;
                     else break;
 
-                case OP.PUSH_DATA_2:
-                    if (auto reason = isInvalidPushReason!(OP.PUSH_DATA_2))
+                case OP.PUSH_DATA_32:
+                    if (auto reason = isInvalidPushReason!(OP.PUSH_DATA_32))
                         return reason;
                     else break;
 
@@ -133,30 +133,30 @@ unittest
     test!"=="(Script.init.isInvalidSyntaxReason(), "Script is empty");
     test!"=="(Script([255]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
     test!"=="(Script([OP.INVALID]).isInvalidSyntaxReason(), "Script contains an invalid opcode");
-    test!"=="(Script([OP.PUSH_DATA_1]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode requires 1 byte(s) for the payload size");
-    test!"=="(Script([OP.PUSH_DATA_1, 0]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode requires payload size value to be between 1 and 512");
-    test!"=="(Script([OP.PUSH_DATA_1, 1]).isInvalidSyntaxReason(), "PUSH_DATA_1 opcode payload size exceeds total script size");
-    test!"=="(Script([OP.PUSH_DATA_1, 1, 1]).isInvalidSyntaxReason(), null);
-    test!"=="(Script([OP.PUSH_DATA_2]).isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
-    test!"=="(Script([OP.PUSH_DATA_2, 0]).isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
-    test!"=="(Script([OP.PUSH_DATA_2, 0, 0]).isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
+    test!"=="(Script([OP.PUSH_DATA_16]).isInvalidSyntaxReason(), "PUSH_DATA_16 opcode requires 1 byte(s) for the payload size");
+    test!"=="(Script([OP.PUSH_DATA_16, 0]).isInvalidSyntaxReason(), "PUSH_DATA_16 opcode requires payload size value to be between 1 and 512");
+    test!"=="(Script([OP.PUSH_DATA_16, 1]).isInvalidSyntaxReason(), "PUSH_DATA_16 opcode payload size exceeds total script size");
+    test!"=="(Script([OP.PUSH_DATA_16, 1, 1]).isInvalidSyntaxReason(), null);
+    test!"=="(Script([OP.PUSH_DATA_32]).isInvalidSyntaxReason(), "PUSH_DATA_32 opcode requires 2 byte(s) for the payload size");
+    test!"=="(Script([OP.PUSH_DATA_32, 0]).isInvalidSyntaxReason(), "PUSH_DATA_32 opcode requires 2 byte(s) for the payload size");
+    test!"=="(Script([OP.PUSH_DATA_32, 0, 0]).isInvalidSyntaxReason(), "PUSH_DATA_32 opcode requires payload size value to be between 1 and 512");
 
     const ubyte[2] size_1 = nativeToLittleEndian(ushort(1));
-    test!"=="(Script([OP.PUSH_DATA_2, size_1[0], size_1[1]]).isInvalidSyntaxReason(),
-        "PUSH_DATA_2 opcode payload size exceeds total script size");
-    test!"=="(Script([OP.PUSH_DATA_2, size_1[0], size_1[1], 1]).isInvalidSyntaxReason(), null);
+    test!"=="(Script([OP.PUSH_DATA_32, size_1[0], size_1[1]]).isInvalidSyntaxReason(),
+        "PUSH_DATA_32 opcode payload size exceeds total script size");
+    test!"=="(Script([OP.PUSH_DATA_32, size_1[0], size_1[1], 1]).isInvalidSyntaxReason(), null);
 
     const ubyte[2] size_max = nativeToLittleEndian(ushort(MAX_STACK_ITEM_SIZE));
     const ubyte[MAX_STACK_ITEM_SIZE] payload;
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_max[0], size_max[1]] ~ payload).isInvalidSyntaxReason(), null);
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_32, size_max[0], size_max[1]] ~ payload).isInvalidSyntaxReason(), null);
 
     const ubyte[2] size_overflow = nativeToLittleEndian(ushort(MAX_STACK_ITEM_SIZE + 1));
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_overflow[0], size_overflow[1]] ~ payload).isInvalidSyntaxReason(),
-        "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_32, size_overflow[0], size_overflow[1]] ~ payload).isInvalidSyntaxReason(),
+        "PUSH_DATA_32 opcode requires payload size value to be between 1 and 512");
 
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_max[0], size_max[1]] ~ payload ~ OP.HASH).isInvalidSyntaxReason(),
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_32, size_max[0], size_max[1]] ~ payload ~ OP.HASH).isInvalidSyntaxReason(),
         null);
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2, size_max[0], size_max[1]] ~ payload ~ OP.INVALID).isInvalidSyntaxReason(),
+    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_32, size_max[0], size_max[1]] ~ payload ~ OP.INVALID).isInvalidSyntaxReason(),
         "Script contains an invalid opcode");
 }
 
@@ -176,7 +176,7 @@ public Script createLockP2PKH (Hash key_hash) pure nothrow @safe
     // note: Bitcoin uses an optimized version of this where they use a
     // magic marker to detect P2PKH scripts.
     // But we use explicit PUSH opcodes for simplicity
-    Script script = { cast(ubyte[])[OP.DUP, OP.HASH, OP.PUSH_DATA_1, 64]
+    Script script = { cast(ubyte[])[OP.DUP, OP.HASH, OP.PUSH_DATA_16, 64]
         ~ key_hash[] ~ cast(ubyte[])[OP.VERIFY_EQUAL, OP.CHECK_SIG] };
     return script;
 }
@@ -196,8 +196,8 @@ public Script createUnlockP2PKH (Signature sig, Point pub_key)
     pure nothrow @safe
 {
     Script script = {
-        cast(ubyte[])[OP.PUSH_DATA_1, 64] ~ sig[]
-        ~ cast(ubyte[])[OP.PUSH_DATA_1, 32] ~ pub_key[] };
+        cast(ubyte[])[OP.PUSH_DATA_16, 64] ~ sig[]
+        ~ cast(ubyte[])[OP.PUSH_DATA_16, 32] ~ pub_key[] };
     return script;
 }
 

@@ -16,6 +16,8 @@ module agora.script.Engine;
 import agora.script.Codes;
 import agora.script.Script;
 
+import ocean.core.Test;
+
 /// The engine executes scripts, and returns a value or throws
 public class Engine
 {
@@ -36,19 +38,37 @@ public class Engine
 
         // for the unlocking script we have different validation rules.
 
+        // The unlock script must be ran separately from the lock script
+
+        //Stack stack;
+        //if (auto error = this.executeUnlockScript(lock, stack))
+        //    return error;
+
         return null;
     }
+
+    //public string executeUnlockScript
 }
 
 ///
 unittest
 {
+    //import agora.common.crypto.ECC;
+    import agora.common.crypto.ECC;
+    import agora.common.crypto.Schnorr;
     import agora.common.Hash;
     import agora.utils.Test;
-    auto engine = new Engine();
-    const key = WK.Keys.A.address;
-    const key_hash = hashFull(key);
-    Script script = createLockP2PKH(key_hash);
 
+    Pair kp = Pair.random();
+    auto sig = sign(kp, "Hello world");
 
+    const key_hash = hashFull(kp.V);
+    Script lock_script = createLockP2PKH(key_hash);
+    assert(lock_script.isValidSyntax());
+
+    Script unlock_script = createUnlockP2PKH(sig, kp.V);
+    assert(unlock_script.isValidSyntax());
+
+    scope engine = new Engine();
+    test!("==")(engine.execute(lock_script, unlock_script), null);
 }
