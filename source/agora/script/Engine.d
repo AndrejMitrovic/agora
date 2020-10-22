@@ -107,14 +107,71 @@ public class Engine
         // platform which handles integer arithmetic the same on all platforms.
 
         ScopeCondition sc;
-
-        const(ubyte)[] opcodes = unlock[];
-        while (!opcodes.empty())
+        const(ubyte)[] bytes = unlock[];
+        while (!bytes.empty())
         {
+            const OP opcode = bytes.front.toOPCode();
+            bytes.popFront();
 
+            switch (opcode)
+            {
+                case OP.PUSH_DATA_1:
+                    if (auto reason = pushToStack!(OP.PUSH_DATA_1)(bytes))
+                        return reason;
+                    else break;
+
+                case OP.PUSH_DATA_2:
+                    if (auto reason = pushToStack!(OP.PUSH_DATA_2)(bytes))
+                        return reason;
+                    else break;
+
+                case OP.PUSH_BYTES_1: .. case OP.PUSH_BYTES_64:
+                    const payload_size = opcode;  // encoded in the opcode
+                    if (bytes.length < payload_size)
+                        assert(0);  // should have been validated
+
+                    stack.push(bytes[0 .. payload_size]);
+                    bytes.popFrontN(payload_size);
+                    break;
+
+                default:
+                    break;
+            }
         }
 
         return null;
+    }
+
+    /***************************************************************************
+
+        Reads the length and payload of the associated `PUSH_DATA_*` opcode,
+        pushes the payload onto the stack, and advances the `bytes` array
+        to the next opcode.
+
+        Params:
+            stack = the stack to push the payload to
+            bytes = the opcode / data byte array
+
+    ***************************************************************************/
+
+    private static void pushToStack (OP op)(ref Stack stack,
+        ref const(ubyte)[] bytes) nothrow @safe /*@nogc*/
+    {
+        static assert(op == OP.PUSH_DATA_1 || op == OP.PUSH_DATA_2);
+        alias T = Select!(op == OP.PUSH_DATA_1, ubyte, ushort);
+        if (bytes.length < T.sizeof)
+            assert(0);  // script should have been validated
+
+        const T size = littleEndianToNative!T(bytes[0 .. T.sizeof]);
+        if (size == 0 || size > MAX_STACK_ITEM_SIZE)
+            assert(0);  // ditto
+
+        bytes.popFrontN(T.sizeof);
+        if (bytes.length < size)
+            assert(0);  // ditto
+
+        stack.push(bytes[0 .. size]);  // push to stack
+        bytes.popFrontN(size);  // advance to next opcode
     }
 }
 

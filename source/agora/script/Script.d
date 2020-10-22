@@ -101,10 +101,11 @@ public struct Script
                     else break;
 
                 case OP.PUSH_BYTES_1: .. case OP.PUSH_BYTES_64:
-                    if (bytes.length < opcode)
+                    const payload_size = opcode;  // encoded in the opcode
+                    if (bytes.length < payload_size)
                         return "PUSH_BYTES_* opcode exceeds total script size";
 
-                    bytes.popFrontN(opcode);
+                    bytes.popFrontN(payload_size);
                     break;
 
                 default:
@@ -130,6 +131,7 @@ public struct Script
     ***************************************************************************/
 
     private static string isInvalidPushReason (OP op)(ref const(ubyte)[] bytes)
+        const pure nothrow @safe @nogc
     {
         static assert(op == OP.PUSH_DATA_1 || op == OP.PUSH_DATA_2);
         alias T = Select!(op == OP.PUSH_DATA_1, ubyte, ushort);

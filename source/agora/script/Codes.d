@@ -118,6 +118,15 @@ public bool toOPCode (ubyte value, out OP opcode) pure nothrow @safe @nogc
     return false;
 }
 
+/// Ditto, but assumes the opcode is valid (safe to use after validation)
+public OP toOPCode (ubyte value) pure nothrow @safe @nogc
+{
+    OP opcode;
+    if (!toOPCode(value, opcode))
+        assert(0);
+    return opcode;
+}
+
 ///
 unittest
 {
