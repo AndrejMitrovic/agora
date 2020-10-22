@@ -164,7 +164,7 @@ unittest
 
     License:
         Distributed under the MIT software license, see the accompanying
-        file COPYING or http://www.opensource.org/licenses/mit-license.php.
+        file LICENSE or http://www.opensource.org/licenses/mit-license.php.
 
 *******************************************************************************/
 
@@ -191,19 +191,19 @@ private struct ScopeCondition
     /***************************************************************************
 
         Returns:
-            true if the current scope is in an executable state
-            (condition is TRUE and there are no earlier FALSE conditions)
+            true if the current scope is in a TRUE condition,
+            and there are no earlier FALSE condition scopes.
 
     ***************************************************************************/
 
-    public bool mayExecute ()
+    public bool isTrue ()
     {
-        return this.false_idx == -1;
+        return !this.empty() && this.false_idx == -1;
     }
 
     /***************************************************************************
 
-        Push a new scope with the given condition
+        Push a new scope with the given condition.
         If this is the first scope with a FALSE condition,
         it sets the earliest FALSE scope index to the current scope.
 
@@ -247,6 +247,8 @@ private struct ScopeCondition
         only if the earliest FALSE condition is the current scope.
 
         Call this after an `ELSE` opcode, but check `empty()` first.
+        Note that `ScopeCondition` does not handle any dangling / duplicate
+        `ELSE` opcodes, this is the client code's responsibility.
 
     ***************************************************************************/
 
@@ -259,4 +261,103 @@ private struct ScopeCondition
         else if (this.false_idx == this.scope_count - 1)
             this.false_idx = -1;  // we're at earliest false scope, toggle to true
     }
+}
+
+///
+unittest
+{
+    ScopeCondition sc;
+    assert(sc.empty());
+    assert(!sc.isTrue());
+
+    // IF
+    //     DO <- pc
+    sc.push(true);
+    assert(!sc.empty());
+    assert(sc.isTrue());
+
+    // IF
+    //     DO
+    // ELSE
+    //     DO <- pc
+    sc.toggle();
+    assert(!sc.empty());
+    assert(!sc.isTrue());
+
+    // IF
+    //     IF
+    //         DO <- pc
+    //     ENDIF
+    //     DO
+    // ENDIF
+    sc = ScopeCondition.init;
+    sc.push(true);
+    sc.push(true);
+    assert(!sc.empty());
+    assert(sc.isTrue());
+
+    // IF
+    //     IF
+    //         DO
+    //     ENDIF
+    //     DO  <- pc
+    // ENDIF
+    sc.pop();
+    assert(!sc.empty());
+    assert(sc.isTrue());
+
+    // IF
+    //     IF
+    //         DO
+    //     ENDIF
+    //     DO
+    // ENDIF  <- pc
+    sc.pop();
+    assert(sc.empty());
+    assert(!sc.isTrue());
+
+    // OP_TRUE
+    // IF -> true
+    //     DO -> executed
+    //     OP_0
+    //     IF
+    //         DO -> skipped
+    //         OP_TRUE <- false as previous scope was false
+    //         IF
+    //             DO -> skipped
+    //             OP_TRUE <- false, ditto
+    //             IF
+    //                 DO -> skipped
+    //                 OP_TRUE <- false, ditto
+    //                 IF
+    //                      DO -> skipped
+    //                 ENDIF
+    //             ENDIF
+    //         ENDIF
+    //         DO -> executed
+    //     ENDIF
+    //     DO -> executed
+    // ENDIF
+    sc = ScopeCondition.init;
+    sc.push(true);
+    sc.push(false);
+    sc.push(true);
+    sc.push(true);
+    sc.push(false);
+    assert(!sc.empty());
+    assert(!sc.isTrue());
+    sc.pop();
+    assert(!sc.empty());
+    assert(!sc.isTrue());
+    sc.pop();
+    assert(!sc.empty());
+    assert(!sc.isTrue());
+    sc.pop();
+    assert(!sc.empty());
+    assert(!sc.isTrue());
+    sc.pop();
+    assert(sc.isTrue());
+    sc.pop();
+    assert(sc.empty());
+    assert(!sc.isTrue());
 }
