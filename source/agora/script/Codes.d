@@ -34,7 +34,7 @@ enum OP : ubyte
     FALSE = 0x00,
 
     /// Pushes True onto the stack
-    TRUE = 0x45,  // 69
+    TRUE = 0x45,
 
     /// Used to encode small length of data to push to the stack (up to 64 bytes),
     /// may be used with `case PUSH_BYTES_1: .. case PUSH_BYTES_64:` syntax.

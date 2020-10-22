@@ -1,6 +1,6 @@
 /*******************************************************************************
 
-    Contains the script execution engine (non-webASM)
+    Contains the script definition and syntactical opcode validation.
 
     Copyright:
         Copyright (c) 2020 BOS Platform Foundation Korea
@@ -25,7 +25,7 @@ import std.conv;
 import std.range;
 import std.traits;
 
-/// Script
+/// Ditto
 public struct Script
 {
     /// opcodes + any associated data for each push opcode
@@ -34,7 +34,7 @@ public struct Script
     /***************************************************************************
 
         Returns:
-            the byte buffer of the script
+            the byte array of the script
 
     ***************************************************************************/
 
