@@ -21,8 +21,9 @@ import std.traits;
 /// Can encode up to 255 opcodes (one of which is INVALID).
 /// Note that the range between `PUSH_BYTES_1` and `PUSH_BYTES_64` is
 /// purposefully reserved to encode a push to the stack between 1 .. 64 bytes,
-/// without having to encode it in a separate length byte.
-/// For pushes above 64 bytes
+/// without having to encode it in a separate length byte. 64 was chosen as
+/// the upper bound because our signatures are 64 bytes.
+/// For pushes of data longer than 64 bytes use the `PUSH_DATA_*` opcodes.
 enum OP : ubyte
 {
     /// Using this is an error and will invalidate the transaction
@@ -41,15 +42,15 @@ enum OP : ubyte
     PUSH_BYTES_64 = 0x40, // 64 decimal
 
     /// The next 1 byte contains the number of bytes to push onto the stack
-    PUSH_DATA_16 = 0x41,
+    PUSH_DATA_1 = 0x41,
 
     /// The next 2 bytes (ushort in LE format) contains the number of bytes to
     /// push onto the stack
-    PUSH_DATA_32 = 0x42,
+    PUSH_DATA_2 = 0x42,
 
     /// The next 4 bytes (ushort in LE format) contains the number of bytes to
     /// push onto the stack
-    // PUSH_DATA_64 = 0x43,
+    RESERVED_PUSH_DATA_3 = 0x43,
 
     /// Hash the value
     HASH = 0x46,
