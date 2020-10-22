@@ -37,7 +37,7 @@ enum OP : ubyte
     TRUE = 0x45,  // 69
 
     /// Used to encode small length of data to push to the stack (up to 64 bytes),
-    /// may be used with `case PUSH_BYTES_1 .. PUSH_BYTES_64:` syntax.
+    /// may be used with `case PUSH_BYTES_1: .. case PUSH_BYTES_64:` syntax.
     PUSH_BYTES_1 = 0x01,
     PUSH_BYTES_64 = 0x40, // 64 decimal
 
@@ -92,8 +92,13 @@ public OP toOPCode (ubyte value) pure nothrow @safe @nogc
         }
 
         default:
-            return OP.INVALID;
+            break;
     }
+
+    if (value >= 1 && value <= 64)
+        return cast(OP)value;  // PUSH_BYTES_1 .. PUSH_BYTES_64
+
+    return OP.INVALID;
 }
 
 ///
@@ -102,4 +107,6 @@ unittest
     assert(0.toOPCode() == OP.INVALID);
     assert(1.toOPCode() == OP.HASH);
     assert(255.toOPCode() == OP.INVALID);
+    assert(1.toOPCode() != OP.INVALID);
+    assert(64.toOPCode() != OP.INVALID);
 }

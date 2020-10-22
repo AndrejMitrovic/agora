@@ -118,6 +118,10 @@ public struct Script
                         return reason;
                     else break;
 
+                case OP.PUSH_BYTES_1: .. case OP.PUSH_BYTES_64:
+                    bytes.popFrontN(opcode);
+                    break;
+
                 default:
                     break;
             }
@@ -176,8 +180,9 @@ public Script createLockP2PKH (Hash key_hash) pure nothrow @safe
     // note: Bitcoin uses an optimized version of this where they use a
     // magic marker to detect P2PKH scripts.
     // But we use explicit PUSH opcodes for simplicity
-    Script script = { cast(ubyte[])[OP.DUP, OP.HASH, OP.PUSH_DATA_1, 64]
-        ~ key_hash[] ~ cast(ubyte[])[OP.VERIFY_EQUAL, OP.CHECK_SIG] };
+    Script script = { cast(ubyte[])[OP.DUP, OP.HASH]
+        ~ [ubyte(64)] ~ key_hash[]
+        ~ cast(ubyte[])[OP.VERIFY_EQUAL, OP.CHECK_SIG] };
     return script;
 }
 
@@ -195,9 +200,7 @@ public Script createLockP2PKH (Hash key_hash) pure nothrow @safe
 public Script createUnlockP2PKH (Signature sig, Point pub_key)
     pure nothrow @safe
 {
-    Script script = {
-        cast(ubyte[])[OP.PUSH_DATA_1, 64] ~ sig[]
-        ~ cast(ubyte[])[OP.PUSH_DATA_1, 32] ~ pub_key[] };
+    Script script = { [ubyte(64)] ~ sig[] ~ [ubyte(32)] ~ pub_key[] };
     return script;
 }
 
