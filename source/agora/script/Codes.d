@@ -47,6 +47,9 @@ enum OP : ubyte
 
     /// The next 2 bytes contains the number of bytes to push onto the stack
     PUSH_DATA_2,
+
+    /// Encodes a set of web assembly instructions
+    WEB_ASM,
 }
 
 /*******************************************************************************

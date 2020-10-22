@@ -13,6 +13,7 @@
 
 module agora.script.Script;
 
+import agora.common.crypto.ECC;
 import agora.common.Hash;
 import agora.script.Codes;
 import agora.script.Stack;
@@ -191,26 +192,29 @@ public Script createLockP2PKH (Hash key_hash) pure nothrow @safe
 
 *******************************************************************************/
 
-public Script createUnlockP2PKH (Hash key_hash) pure nothrow @safe
+public Script createUnlockP2PKH (Signature sig, Point pub_key)
+    pure nothrow @safe
 {
-    // todo: segregate the witness, and for compatibility reasons keep
-    // the existing signature in the Input struct. Add a witness struct,
-    // and keep it out of hashing.
-
-    // note: Bitcoin uses an optimized version of this where they use a
-    // magic marker to detect P2PKH scripts.
-    // But we use explicit PUSH opcodes for simplicity
-    Script script = { cast(ubyte[])[OP.DUP, OP.HASH, OP.PUSH_DATA_1, 64]
-        ~ key_hash[] ~ cast(ubyte[])[OP.VERIFY_EQUAL, OP.CHECK_SIG] };
+    Script script = {
+        cast(ubyte[])[OP.PUSH_DATA_1, 64] ~ sig[]
+        ~ cast(ubyte[])[OP.PUSH_DATA_1, 32] ~ pub_key[] };
     return script;
 }
 
 ///
 unittest
 {
+    //import agora.common.crypto.ECC;
+    import agora.common.crypto.Schnorr;
     import agora.utils.Test;
-    const key = WK.Keys.A.address;
-    const key_hash = hashFull(key);
-    Script script = createLockP2PKH(key_hash);
-    assert(script.isValidSyntax());
+
+    Pair kp = Pair.random();
+    auto sig = sign(kp, "Hello world");
+
+    const key_hash = hashFull(kp.V);
+    Script lock_script = createLockP2PKH(key_hash);
+    assert(lock_script.isValidSyntax());
+
+    Script unlock_script = createUnlockP2PKH(sig, kp.V);
+    assert(unlock_script.isValidSyntax());
 }
