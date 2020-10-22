@@ -52,8 +52,15 @@ enum OP : ubyte
     /// push onto the stack
     RESERVED_PUSH_DATA_3 = 0x43,
 
+    IF = 0x46,
+    NOT_IF = 0x47,
+    VERIFY_IF = 0x48,
+    VERIFY_NOT_IF = 0x49,
+    ELSE = 0x50,
+    END_IF = 0x51,
+
     /// Hash the value
-    HASH = 0x46,
+    HASH = 0x52,
 
     /// Duplicate the item on the stack
     DUP,
@@ -116,7 +123,7 @@ unittest
 {
     OP op;
     assert(0x00.toOPCode(op) && op == OP.FALSE);
-    assert(0x46.toOPCode(op) && op == OP.HASH);
+    assert(0x52.toOPCode(op) && op == OP.HASH);
     assert(!255.toOPCode(op));
     assert(1.toOPCode(op) && op == OP.PUSH_BYTES_1);
     assert(32.toOPCode(op) && op == cast(OP)32);
