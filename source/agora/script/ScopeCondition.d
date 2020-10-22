@@ -50,14 +50,14 @@ public struct ScopeCondition
     /***************************************************************************
 
         Returns:
-            true if the current scope is in a TRUE condition,
-            and there are no earlier FALSE condition scopes.
+            true if there are no scopes with a FALSE condition.
+            Also returns true if there are no scopes (IOW global scope)
 
     ***************************************************************************/
 
     public bool isTrue () const pure nothrow @safe @nogc
     {
-        return !this.empty() && this.false_idx == -1;
+        return this.false_idx == -1;
     }
 
     /***************************************************************************
@@ -129,7 +129,7 @@ nothrow @safe @nogc unittest
 
     ScopeCondition sc;
     assert(sc.empty());
-    assert(!sc.isTrue());
+    assert(sc.isTrue());
 
     // IF
     //     DO <- pc
@@ -175,7 +175,7 @@ nothrow @safe @nogc unittest
     // ENDIF  <- pc
     sc.pop();
     assert(sc.empty());
-    assert(!sc.isTrue());
+    assert(sc.isTrue());
 
     // OP_TRUE
     // IF -> true
@@ -222,5 +222,5 @@ nothrow @safe @nogc unittest
     assert(sc.isTrue());
     sc.pop();
     assert(sc.empty());
-    assert(!sc.isTrue());
+    assert(sc.isTrue());
 }

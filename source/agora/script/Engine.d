@@ -70,8 +70,6 @@ public class Engine
 
     public string executeUnlockScript (in Script unlock, out Stack stack)
     {
-        const(ubyte)[] opcodes = unlock[];
-
         // for a description on how code flow control works,
         // see: https://building-on-bitcoin.com/docs/slides/Thomas_Kerin_BoB_2018.pdf
 
@@ -108,10 +106,13 @@ public class Engine
         // because this requires emulating a specific virtual machine
         // platform which handles integer arithmetic the same on all platforms.
 
-        //while (!opcodes.empty())
-        //{
+        ScopeCondition sc;
 
-        //}
+        const(ubyte)[] opcodes = unlock[];
+        while (!opcodes.empty())
+        {
+
+        }
 
         return null;
     }
