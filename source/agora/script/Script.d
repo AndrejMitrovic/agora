@@ -79,6 +79,8 @@ public struct Script
         if (bytes.empty)
             return "Script is empty";
 
+        // todo: add script size checks (based on consensus params)
+
         string isInvalidPushReason (OP op)()
         {
             static assert(op == OP.PUSH_DATA_1 || op == OP.PUSH_DATA_2);
