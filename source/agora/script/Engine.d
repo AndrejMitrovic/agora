@@ -80,6 +80,18 @@ public class Engine
         // until an ELSE or ENDIF sets it to true (I think),
         // and then we can execute code again.
 
+        // essentially:
+        // pc -> IF
+        // pc ->    DO  // exec if fExec is 1
+        // pc ->    DO  // exec if fExec is 1
+        // pc -> ELSE   // toggles fExec
+        // pc ->    DO  // exec if fExec is 1
+        // pc ->    DO  // exec if fExec is 1
+        // pc -> ENDIF
+        //
+        // unlike in C-like programming languages, there are no goto's and
+        // we may only increment the program counter by 1
+
         // todo: verify stack data pushes via CheckMinimalPush(),
         // it seems it's related to BIP62 where pushes can be
         // encoded in different ways. Note: BIP141 (segwit)
@@ -129,4 +141,122 @@ unittest
     test!("==")(engine.execute(lock_script, invalid_script),
         "Unlock script error: Script contains an unrecognized opcode");
     //test!("==")(engine.execute(lock_script, unlock_script), null);
+}
+
+/*******************************************************************************
+
+    Keeps track of scopes and their conditions (TRUE or FALSE).
+
+    Unlike C-like programming languages, we do not support GOTO and therefore
+    may only increment the program counter 1 instruction at a time.
+    This struct can be used to implement conditional (IF/ELSE/ENDIF) logic.
+
+    It does this pushing a new scope for each visited `IF` opcode,
+    popping a scope for every visited `ENDIF` opcode, and toggling the scope's
+    condition for every visited `ELSE` opcode.
+
+    This implementation is largely based on Bitcoin's `ConditionStack`,
+    as it's the most optimal O(1) solution we can think of.
+
+    Copyright:
+        Copyright (c) 2009-2010 Satoshi Nakamoto
+        Copyright (c) 2009-2020 The Bitcoin Core developers
+
+    License:
+        Distributed under the MIT software license, see the accompanying
+        file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+*******************************************************************************/
+
+struct ConditionScope
+{
+    /// Current number of scopes
+    private uint scope_count;
+
+    /// The scope index at which the earliest FALSE is found, or -1 of none
+    private int false_idx = -1;
+
+    /***************************************************************************
+
+        Returns:
+            true if there are any scopes left
+
+    ***************************************************************************/
+
+    public bool empty ()
+    {
+        return this.scope_count == 0;
+    }
+
+    /***************************************************************************
+
+        Returns:
+            true if the current scope is in an executable state
+            (condition is TRUE and there are no earlier FALSE conditions)
+
+    ***************************************************************************/
+
+    public bool mayExecute ()
+    {
+        return this.false_idx == -1;
+    }
+
+    /***************************************************************************
+
+        Push a new scope with the given condition
+        If this is the first scope with a FALSE condition,
+        it sets the earliest FALSE scope index to the current scope.
+
+        Params:
+            cond = the evaluated condition of a visited IF opcode
+
+    ***************************************************************************/
+
+    public void push (bool cond)
+    {
+        if (!cond && this.false_idx == -1)  // first false condition
+            this.false_idx = this.scope_count;
+
+        this.scope_count++;
+    }
+
+    /***************************************************************************
+
+        Pops the current scope, and potentially toggles the condition to TRUE
+        if the outer scope we entered was the earliest FALSE scope.
+
+        Call this after an `ENDIF` opcode, but check `empty()` first.
+
+    ***************************************************************************/
+
+    public void pop ()
+    {
+        assert(this.scope_count > 0);
+
+        if (this.false_idx == this.scope_count - 1)  // earliest false, toggle to true
+            this.false_idx = -1;
+        this.scope_count--;
+    }
+
+    /***************************************************************************
+
+        Toggles the current scope's condition.
+
+        If the current scope's condition is TRUE, set it to FALSE.
+        If the current scope's condition is FALSE, it's toggled to TRUE
+        only if the earliest FALSE condition is the current scope.
+
+        Call this after an `ELSE` opcode, but check `empty()` first.
+
+    ***************************************************************************/
+
+    public void toggle ()
+    {
+        assert(this.scope_count > 0);
+
+        if (this.false_idx == -1)  // all scopes are true, mark earliest false
+            this.false_idx = this.scope_count - 1;
+        else if (this.false_idx == this.scope_count - 1)
+            this.false_idx = -1;  // we're at earliest false scope, toggle to true
+    }
 }
