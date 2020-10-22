@@ -16,6 +16,7 @@
     Copyright:
         Copyright (c) 2009-2010 Satoshi Nakamoto
         Copyright (c) 2009-2020 The Bitcoin Core developers
+        Copyright (c) 2020 BOS Platform Foundation Korea
 
     License:
         Distributed under the MIT software license, see the accompanying
@@ -41,7 +42,7 @@ public struct ScopeCondition
 
     ***************************************************************************/
 
-    public bool empty ()
+    public bool empty () const pure nothrow @safe @nogc
     {
         return this.scope_count == 0;
     }
@@ -54,7 +55,7 @@ public struct ScopeCondition
 
     ***************************************************************************/
 
-    public bool isTrue ()
+    public bool isTrue () const pure nothrow @safe @nogc
     {
         return !this.empty() && this.false_idx == -1;
     }
@@ -70,7 +71,7 @@ public struct ScopeCondition
 
     ***************************************************************************/
 
-    public void push (bool cond)
+    public void push (bool cond) nothrow @safe @nogc
     {
         if (!cond && this.false_idx == -1)  // first false condition
             this.false_idx = this.scope_count;
@@ -87,7 +88,7 @@ public struct ScopeCondition
 
     ***************************************************************************/
 
-    public void pop ()
+    public void pop () nothrow @safe @nogc
     {
         assert(this.scope_count > 0);
 
@@ -110,7 +111,7 @@ public struct ScopeCondition
 
     ***************************************************************************/
 
-    public void toggle ()
+    public void toggle () nothrow @safe @nogc
     {
         assert(this.scope_count > 0);
 
@@ -122,7 +123,7 @@ public struct ScopeCondition
 }
 
 ///
-unittest
+nothrow @safe @nogc unittest
 {
     import ocean.core.Test;
 
