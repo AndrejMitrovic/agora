@@ -63,7 +63,7 @@ public struct ScopeCondition
     /***************************************************************************
 
         Push a new scope with the given condition.
-        If this is the first scope with a FALSE condition,
+        If this is the first scope with a FALSE condition then
         it sets the earliest FALSE scope index to the current scope.
 
         Params:
@@ -81,7 +81,7 @@ public struct ScopeCondition
 
     /***************************************************************************
 
-        Pops the current scope, and potentially toggles the condition to TRUE
+        Pops the current scope, and toggles the condition to TRUE
         if the outer scope we entered was the earliest FALSE scope.
 
         Call this after an `ENDIF` opcode, but check `empty()` first.
@@ -93,7 +93,7 @@ public struct ScopeCondition
         assert(this.scope_count > 0);
 
         if (this.false_idx == this.scope_count - 1)
-            this.false_idx = -1;  // earliest false, toggle to true
+            this.false_idx = -1;  // earliest false => toggle to true
         this.scope_count--;
     }
 
@@ -101,11 +101,11 @@ public struct ScopeCondition
 
         Toggles the current scope's condition.
 
-        If the current scope's condition is TRUE, set it to FALSE.
-        If the current scope's condition is FALSE, it's toggled to TRUE
+        If the current scope's condition is TRUE then set it to FALSE.
+        If the current scope's condition is FALSE then it's toggled to TRUE
         only if the earliest FALSE condition is the current scope.
 
-        Call this after an `ELSE` opcode, but check `empty()` first.
+        Call this after an `ELSE` opcode but check `empty()` first.
         Note that `ScopeCondition` does not handle any dangling / duplicate
         `ELSE` opcodes, this is the client code's responsibility.
 
