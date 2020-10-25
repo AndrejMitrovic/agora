@@ -15,6 +15,7 @@ module agora.script.Stack;
 
 import agora.common.Serializer;
 
+import std.container : DList;
 import std.range;
 
 /// Maximum total stack size
@@ -23,12 +24,18 @@ public enum MAX_STACK_TOTAL_SIZE = 16_384;
 /// Maximum size of an item on the stack
 public enum MAX_STACK_ITEM_SIZE = 512;
 
-/// Supports pushing and popping arbitrary items from the stack,
-/// using the default serializer to store to the internal byte array.
-struct Stack
+/*******************************************************************************
+
+    Uses a linked-list rather than a vector to avoid unnecessary copying
+    due to stomping prevention as the same item may be popped and later pushed
+    to the stack.
+
+*******************************************************************************/
+
+public struct Stack
 {
     /// The actual stack
-    private const(ubyte)[][] stack;
+    private DList!(const(ubyte)[]) stack;
 
     /// Used stack size
     private size_t used_size;
@@ -43,7 +50,7 @@ struct Stack
     {
         assert(data.sizeof <= MAX_STACK_ITEM_SIZE);
         assert(this.used_size + data.length <= MAX_STACK_TOTAL_SIZE);
-        this.stack ~= data;
+        this.stack.insertBack(data);
     }
 
     /***************************************************************************
@@ -55,12 +62,9 @@ struct Stack
 
     public const(ubyte)[] pop () @safe nothrow
     {
-        assert(this.stack.length > 0);
-        auto value = this.stack.back().dup;  // note: workaround for below note
-        this.stack.popBack();
-
-        // todo: this might actually be unsafe if we POP and later PUSH
-        () @trusted { this.stack.assumeSafeAppend(); }();
+        assert(!this.stack.empty());
+        auto value = this.stack.back();
+        this.stack.removeBack();
         return value;
     }
 
@@ -73,16 +77,19 @@ struct Stack
 
     public bool empty () const pure nothrow @safe @nogc
     {
-        return this.stack.length == 0;
+        return this.stack.empty();
     }
 }
 
 ///
-unittest
+@safe nothrow unittest
 {
     Stack stack;
     assert(stack.empty());
     stack.push([123]);
+    stack.push([255]);
+    assert(!stack.empty());
+    assert(stack.pop() == [255]);
     assert(!stack.empty());
     assert(stack.pop() == [123]);
     assert(stack.empty());
