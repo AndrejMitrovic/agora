@@ -32,7 +32,7 @@ public struct ScopeCondition
     /// Current number of scopes
     private uint scope_count;
 
-    /// The scope index at which the earliest FALSE is found, or -1 of none
+    /// The scope index at which the earliest FALSE is found, or -1 if none
     private int false_idx = -1;
 
     /***************************************************************************
