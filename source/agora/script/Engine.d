@@ -13,7 +13,10 @@
 
 module agora.script.Engine;
 
+import agora.common.crypto.ECC;
+import Schnorr = agora.common.crypto.Schnorr;
 import agora.common.Hash;
+import agora.consensus.data.Transaction;
 import agora.script.Codes;
 import agora.script.ScopeCondition;
 import agora.script.Script;
@@ -30,10 +33,19 @@ version (unittest)
     import std.stdio;
 }
 
+private enum Type
+{
+    Lock,
+    Unlock,
+    //Redeem  // needs to be a separate type?
+}
+
 /// The engine executes scripts, and returns a value or throws
 public class Engine
 {
-    public string execute (in Script lock, in Script unlock)
+    // tx: the transaction that's trying to spend (used for the commitment check)
+    public string execute (in Script lock, in Script unlock,
+        in Transaction tx)
     {
         if (auto error = lock.isInvalidSyntaxReason())
             return "Lock script error: " ~ error;
@@ -70,32 +82,24 @@ public class Engine
         // https://bitcoin.stackexchange.com/q/80258/93682
 
         Stack stack;
-        if (auto error = this.executeScript(unlock, stack))
+        if (auto error = this.executeScript(Type.Unlock, unlock, stack, tx))
             return error;
-        writefln("Stack after unlock: %s", stack[]);
 
-        if (auto error = this.executeScript(lock, stack))
+        if (auto error = this.executeScript(Type.Lock, lock, stack, tx))
             return error;
-        writefln("Stack after lock: %s", stack[]);
-
 
         return null;
     }
 
-    // safer for the tests as it provides its own stack,
-    // otherwise leaking this outside can make tests
-    // inadvertently depend on intermittent stacks
-    version (unittest)
-    private string executeScript (in Script script)
+    // based on the type, this may return an error message:
+    // unlock script => only if there are no dangling operators it's valid,
+    //                  but stack may have any data on it
+    // lock script => only if there is a TRUE value on the stack it's valid
+    private string executeScript (in Type type, in Script script,
+        ref Stack stack, in Transaction tx)
     {
-        Stack stack;
-        return this.executeScript(script, stack);
-    }
-
-    private string executeScript (in Script script, ref Stack stack)
-    {
-        // for a description on how code flow control works,
-        // see: https://building-on-bitcoin.com/docs/slides/Thomas_Kerin_BoB_2018.pdf
+        static immutable ubyte[1] TRUE = [1];
+        static immutable ubyte[1] FALSE = [0];
 
         // if *any* items are false, then the current execution
         // state is false, and we continue executing next
@@ -159,6 +163,7 @@ public class Engine
                     auto top = stack.pop();
                     const Hash hash = hashFull(top);
                     stack.push(hash[]);
+                    break;
 
                 case OP.VERIFY_EQUAL:
                     if (stack.count() < 2)
@@ -170,12 +175,62 @@ public class Engine
                         return "VERIFY_EQUAL operation failed";
                     break;
 
+                case OP.CHECK_SIG:
+                    // if changed, check assumptions
+                    static assert(Point.sizeof == 32);
+                    static assert(Signature.sizeof == 64);
+
+                    if (stack.count() < 2)
+                        return "CHECK_SIG opcode requires two items on the stack";
+                    auto key_bytes = stack.pop();
+                    if (key_bytes.length != Point.sizeof)
+                        return "CHECK_SIG opcode requires 32-byte public key on the stack";
+
+                    if (!isValidPointBytes(key_bytes))
+                        return "CHECK_SIG 32-byte public key on the stack is invalid";
+
+                    auto sig_bytes = stack.pop();
+                    if (sig_bytes.length != Signature.sizeof)
+                        return "CHECK_SIG opcode requires 64-byte signature on the stack";
+
+                    const point = Point(key_bytes);
+                    const sig = Signature(sig_bytes);
+                    if (Schnorr.verify(point, sig, tx))
+                        stack.push(TRUE);
+                    else
+                        stack.push(FALSE);
+                    break;
+
                 default:
                     break;
             }
         }
 
-        return null;
+        final switch (type)
+        {
+            case Type.Lock:
+                if (!stack.empty() && stack.pop() == TRUE)
+                    return null;
+
+                return "Script failed";
+
+            // todo: check for dangling ops in the bytes array
+            case Type.Unlock:
+                return null;
+        }
+    }
+
+    // safer for the tests as it provides its own stack,
+    // otherwise leaking this outside can make tests
+    // inadvertently depend on intermittent stacks.
+    // this overload is alos not taking any transaction,
+    // it's not supposed to be tested with unlocking scripts
+    version (unittest)
+    private string executeScript (in Type type, in Script script)
+    {
+        Stack stack;
+        Transaction tx;
+        return this.executeScript(type, script, stack, tx);
     }
 
     /***************************************************************************
@@ -221,7 +276,8 @@ unittest
     import agora.utils.Test;
 
     Pair kp = Pair.random();
-    auto sig = sign(kp, "Hello world");
+    Transaction tx;
+    auto sig = sign(kp, tx);
 
     const key_hash = hashFull(kp.V);
     Script lock_script = createLockP2PKH(key_hash);
@@ -232,28 +288,26 @@ unittest
 
     const invalid_script = Script([255]);
     scope engine = new Engine();
-    //test!("==")(engine.execute(invalid_script, unlock_script),
+    //test!("==")(engine.execute(invalid_script, unlock_script, tx),
     //    "Lock script error: Script contains an unrecognized opcode");
-    //test!("==")(engine.execute(lock_script, invalid_script),
+    //test!("==")(engine.execute(lock_script, invalid_script, tx),
     //    "Unlock script error: Script contains an unrecognized opcode");
-    //test!("==")(engine.execute(lock_script, unlock_script), null);
+    test!("==")(engine.execute(lock_script, unlock_script, tx), null);
 }
 
 // OP.DUP
 unittest
 {
-    Stack stack;
     scope engine = new Engine();
-    test!("==")(engine.executeScript(Script([OP.DUP]), stack),
+    test!("==")(engine.executeScript(Type.Unlock, Script([OP.DUP])),
         "DUP opcode requires an item on the stack");
 }
 
 // OP.HASH
 unittest
 {
-    Stack stack;
     scope engine = new Engine();
-    test!("==")(engine.executeScript(Script([OP.HASH]), stack),
+    test!("==")(engine.executeScript(Type.Unlock, Script([OP.HASH])),
         "HASH opcode requires an item on the stack");
 }
 
@@ -261,16 +315,68 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.executeScript(
+    test!("==")(engine.executeScript(Type.Unlock,
         Script([OP.VERIFY_EQUAL])),
         "VERIFY_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.executeScript(
+    test!("==")(engine.executeScript(Type.Unlock,
         Script([OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL])),
         "VERIFY_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.executeScript(
+    test!("==")(engine.executeScript(Type.Unlock,
         Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL])),
         null);
-    test!("==")(engine.executeScript(
+    test!("==")(engine.executeScript(Type.Unlock,
         Script([OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL])),
         "VERIFY_EQUAL operation failed");
+}
+
+// OP.CHECK_SIG
+unittest
+{
+    scope engine = new Engine();
+    test!("==")(engine.executeScript(Type.Lock,
+        Script([OP.CHECK_SIG])),
+        "CHECK_SIG opcode requires two items on the stack");
+    test!("==")(engine.executeScript(Type.Lock,
+        Script([OP.PUSH_BYTES_1, 1, OP.CHECK_SIG])),
+        "CHECK_SIG opcode requires two items on the stack");
+    test!("==")(engine.executeScript(Type.Lock,
+        Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.CHECK_SIG])),
+        "CHECK_SIG opcode requires 32-byte public key on the stack");
+
+    // invalid key (crypto_core_ed25519_is_valid_point() fails)
+    Point invalid_key;
+    test!("==")(engine.executeScript(Type.Lock,
+        Script(cast(ubyte[])[OP.PUSH_BYTES_1, 1]
+            ~ [ubyte(32)] ~ invalid_key[]
+            ~ cast(ubyte[])[OP.CHECK_SIG])),
+        "CHECK_SIG 32-byte public key on the stack is invalid");
+
+    Point valid_key = Point.fromString(
+        "0x44404b654d6ddf71e2446eada6acd1f462348b1b17272ff8f36dda3248e08c81");
+    test!("==")(engine.executeScript(Type.Lock,
+        Script(cast(ubyte[])[OP.PUSH_BYTES_1, 1]
+            ~ [ubyte(32)] ~ valid_key[]
+            ~ cast(ubyte[])[OP.CHECK_SIG])),
+        "CHECK_SIG opcode requires 64-byte signature on the stack");
+
+    Signature invalid_sig;
+    test!("==")(engine.executeScript(Type.Lock,
+        Script(cast(ubyte[])[OP.PUSH_BYTES_64] ~ invalid_sig[]
+            ~ [ubyte(32)] ~ valid_key[]
+            ~ cast(ubyte[])[OP.CHECK_SIG])),
+        "Script failed");
+}
+
+/// See #1279
+private bool isValidPointBytes (in ubyte[] bytes) /*pure*/ nothrow @trusted @nogc
+{
+    import libsodium.crypto_core_ed25519;
+    return crypto_core_ed25519_is_valid_point(bytes.ptr) == 1;
+}
+
+///
+unittest
+{
+    ubyte[32] data;
+    assert(!isValidPointBytes(data));
 }

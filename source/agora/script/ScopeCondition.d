@@ -13,6 +13,9 @@
     This implementation is largely based on Bitcoin's `ConditionStack`,
     as it's the most optimal O(1) solution we can think of.
 
+    For a description on how code flow control works (for a previous version),
+    see: https://building-on-bitcoin.com/docs/slides/Thomas_Kerin_BoB_2018.pdf
+
     Copyright:
         Copyright (c) 2009-2010 Satoshi Nakamoto
         Copyright (c) 2009-2020 The Bitcoin Core developers
