@@ -13,6 +13,7 @@
 
 module agora.script.Engine;
 
+import agora.common.Hash;
 import agora.script.Codes;
 import agora.script.ScopeCondition;
 import agora.script.Script;
@@ -81,6 +82,16 @@ public class Engine
         return null;
     }
 
+    // safer for the tests as it provides its own stack,
+    // otherwise leaking this outside can make tests
+    // inadvertently depend on intermittent stacks
+    version (unittest)
+    private string executeScript (in Script script)
+    {
+        Stack stack;
+        return this.executeScript(script, stack);
+    }
+
     private string executeScript (in Script script, ref Stack stack)
     {
         // for a description on how code flow control works,
@@ -139,6 +150,24 @@ public class Engine
 
                     auto top = stack.peek();
                     stack.push(top);
+                    break;
+
+                case OP.HASH:
+                    if (stack.empty)
+                        return "HASH opcode requires an item on the stack";
+
+                    auto top = stack.pop();
+                    const Hash hash = hashFull(top);
+                    stack.push(hash[]);
+
+                case OP.VERIFY_EQUAL:
+                    if (stack.count() < 2)
+                        return "VERIFY_EQUAL opcode requires two items on the stack";
+
+                    auto a = stack.pop();
+                    auto b = stack.pop();
+                    if (a != b)
+                        return "VERIFY_EQUAL operation failed";
                     break;
 
                 default:
@@ -210,11 +239,38 @@ unittest
     //test!("==")(engine.execute(lock_script, unlock_script), null);
 }
 
-// Invalid script tests
+// OP.DUP
 unittest
 {
     Stack stack;
     scope engine = new Engine();
     test!("==")(engine.executeScript(Script([OP.DUP]), stack),
         "DUP opcode requires an item on the stack");
+}
+
+// OP.HASH
+unittest
+{
+    Stack stack;
+    scope engine = new Engine();
+    test!("==")(engine.executeScript(Script([OP.HASH]), stack),
+        "HASH opcode requires an item on the stack");
+}
+
+// OP.VERIFY_EQUAL
+unittest
+{
+    scope engine = new Engine();
+    test!("==")(engine.executeScript(
+        Script([OP.VERIFY_EQUAL])),
+        "VERIFY_EQUAL opcode requires two items on the stack");
+    test!("==")(engine.executeScript(
+        Script([OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL])),
+        "VERIFY_EQUAL opcode requires two items on the stack");
+    test!("==")(engine.executeScript(
+        Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL])),
+        null);
+    test!("==")(engine.executeScript(
+        Script([OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL])),
+        "VERIFY_EQUAL operation failed");
 }
