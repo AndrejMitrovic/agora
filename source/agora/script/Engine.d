@@ -301,6 +301,10 @@ unittest
     assert(bad_sig_unlock.isValidSyntax());
     test!("==")(engine.execute(lock_script, bad_sig_unlock, tx),
         "Script failed");
+
+    Script bad_key_unlock = createUnlockP2PKH(sig, Pair.random.V);
+    test!("==")(engine.execute(lock_script, bad_key_unlock, tx),
+        "VERIFY_EQUAL operation failed");
 }
 
 // OP.DUP
