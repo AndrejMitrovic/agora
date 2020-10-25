@@ -212,6 +212,7 @@ public class Engine
                 if (!stack.empty() && stack.pop() == TRUE)
                     return null;
 
+                // todo: emit diag which OP pushed the last FALSE to stack?
                 return "Script failed";
 
             // todo: check for dangling ops in the bytes array
@@ -288,11 +289,18 @@ unittest
 
     const invalid_script = Script([255]);
     scope engine = new Engine();
-    //test!("==")(engine.execute(invalid_script, unlock_script, tx),
-    //    "Lock script error: Script contains an unrecognized opcode");
-    //test!("==")(engine.execute(lock_script, invalid_script, tx),
-    //    "Unlock script error: Script contains an unrecognized opcode");
     test!("==")(engine.execute(lock_script, unlock_script, tx), null);
+
+    // invalid scripts / sigs
+    test!("==")(engine.execute(invalid_script, unlock_script, tx),
+        "Lock script error: Script contains an unrecognized opcode");
+    test!("==")(engine.execute(lock_script, invalid_script, tx),
+        "Unlock script error: Script contains an unrecognized opcode");
+    const bad_sig = sign(kp, "foobar");
+    Script bad_sig_unlock = createUnlockP2PKH(bad_sig, kp.V);
+    assert(bad_sig_unlock.isValidSyntax());
+    test!("==")(engine.execute(lock_script, bad_sig_unlock, tx),
+        "Script failed");
 }
 
 // OP.DUP
