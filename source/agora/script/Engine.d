@@ -69,14 +69,19 @@ public class Engine
         // https://bitcoin.stackexchange.com/q/80258/93682
 
         Stack stack;
-        if (auto error = this.executeUnlockScript(unlock, stack))
+        if (auto error = this.executeScript(unlock, stack))
             return error;
-        //writefln("Stack: %s", stack);
+        writefln("Stack after unlock: %s", stack[]);
+
+        if (auto error = this.executeScript(lock, stack))
+            return error;
+        writefln("Stack after lock: %s", stack[]);
+
 
         return null;
     }
 
-    public string executeUnlockScript (in Script unlock, out Stack stack)
+    private string executeScript (in Script script, ref Stack stack)
     {
         // for a description on how code flow control works,
         // see: https://building-on-bitcoin.com/docs/slides/Thomas_Kerin_BoB_2018.pdf
@@ -103,7 +108,7 @@ public class Engine
         // platform which handles integer arithmetic the same on all platforms.
 
         ScopeCondition sc;
-        const(ubyte)[] bytes = unlock[];
+        const(ubyte)[] bytes = script[];
         while (!bytes.empty())
         {
             const OP opcode = bytes.front.toOPCode();
@@ -126,6 +131,14 @@ public class Engine
 
                     stack.push(bytes[0 .. payload_size]);
                     bytes.popFrontN(payload_size);
+                    break;
+
+                case OP.DUP:
+                    if (stack.empty)
+                        return "DUP opcode requires an item on the stack";
+
+                    auto top = stack.peek();
+                    stack.push(top);
                     break;
 
                 default:
@@ -194,5 +207,14 @@ unittest
     //    "Lock script error: Script contains an unrecognized opcode");
     //test!("==")(engine.execute(lock_script, invalid_script),
     //    "Unlock script error: Script contains an unrecognized opcode");
-    test!("==")(engine.execute(lock_script, unlock_script), null);
+    //test!("==")(engine.execute(lock_script, unlock_script), null);
+}
+
+// Invalid script tests
+unittest
+{
+    Stack stack;
+    scope engine = new Engine();
+    test!("==")(engine.executeScript(Script([OP.DUP]), stack),
+        "DUP opcode requires an item on the stack");
 }

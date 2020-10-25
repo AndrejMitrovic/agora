@@ -61,6 +61,19 @@ public struct Stack
     /***************************************************************************
 
         Returns:
+            the top item on the stack, without popping it
+
+    ***************************************************************************/
+
+    public const(ubyte)[] peek () @safe nothrow
+    {
+        assert(!this.stack.empty());
+        return this.stack.front();
+    }
+
+    /***************************************************************************
+
+        Returns:
             the popped value from the stack
 
     ***************************************************************************/
@@ -107,6 +120,8 @@ unittest
     assert(stack.empty());
     stack.push([123]);
     stack.push([255]);
+    assert(stack.peek() == [255]);
+    assert(stack.peek() == [255]);  // did not consume
     assert(stack[].array == [[255], [123]]);
     assert(!stack.empty());
     assert(stack.pop() == [255]);
