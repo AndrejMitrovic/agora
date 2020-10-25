@@ -24,6 +24,11 @@ import std.bitmanip;
 import std.range;
 import std.traits;
 
+version (unittest)
+{
+    import std.stdio;
+}
+
 /// The engine executes scripts, and returns a value or throws
 public class Engine
 {
@@ -66,6 +71,7 @@ public class Engine
         Stack stack;
         if (auto error = this.executeUnlockScript(unlock, stack))
             return error;
+        //writefln("Stack: %s", stack);
 
         return null;
     }
@@ -184,9 +190,9 @@ unittest
 
     const invalid_script = Script([255]);
     scope engine = new Engine();
-    test!("==")(engine.execute(invalid_script, unlock_script),
-        "Lock script error: Script contains an unrecognized opcode");
-    test!("==")(engine.execute(lock_script, invalid_script),
-        "Unlock script error: Script contains an unrecognized opcode");
-    //test!("==")(engine.execute(lock_script, unlock_script), null);
+    //test!("==")(engine.execute(invalid_script, unlock_script),
+    //    "Lock script error: Script contains an unrecognized opcode");
+    //test!("==")(engine.execute(lock_script, invalid_script),
+    //    "Unlock script error: Script contains an unrecognized opcode");
+    test!("==")(engine.execute(lock_script, unlock_script), null);
 }
