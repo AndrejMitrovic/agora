@@ -42,8 +42,11 @@ public struct Stack
     /// The actual stack
     private SList!(const(ubyte)[]) stack;
 
-    /// Used stack size
-    private size_t used_size;
+    /// The number of items on the stack
+    private ulong num_items;
+
+    /// Total used bytes for this stack
+    private size_t used_bytes;
 
     /***************************************************************************
 
@@ -54,8 +57,9 @@ public struct Stack
     public void push (const(ubyte)[] data) @safe nothrow
     {
         assert(data.sizeof <= MAX_STACK_ITEM_SIZE);
-        assert(this.used_size + data.length <= MAX_STACK_TOTAL_SIZE);
+        assert(this.used_bytes + data.length <= MAX_STACK_TOTAL_SIZE);
         this.stack.insertFront(data);
+        this.num_items++;
     }
 
     /***************************************************************************
@@ -81,9 +85,26 @@ public struct Stack
     public const(ubyte)[] pop () @safe nothrow
     {
         assert(!this.stack.empty());
+        assert(this.num_items > 0);
         auto value = this.stack.front();
         this.stack.removeFront();
+        this.num_items--;
         return value;
+    }
+
+    /***************************************************************************
+
+        Get the number of items on the stack. Explicitly typed as ulong to
+        avoid introducing platform-dependent behavior.
+
+        Returns:
+            the number of items on the stack
+
+    ***************************************************************************/
+
+    public ulong count () const pure nothrow @safe @nogc
+    {
+        return this.num_items;
     }
 
     /***************************************************************************
@@ -118,14 +139,20 @@ unittest
     import std.array;
     Stack stack;
     assert(stack.empty());
+    assert(stack.count() == 0);
     stack.push([123]);
+    assert(stack.count() == 1);
     stack.push([255]);
+    assert(stack.count() == 2);
     assert(stack.peek() == [255]);
-    assert(stack.peek() == [255]);  // did not consume
+    assert(stack.count() == 2);     // did not consume
+    assert(stack.peek() == [255]);  // ditto
     assert(stack[].array == [[255], [123]]);
     assert(!stack.empty());
     assert(stack.pop() == [255]);
+    assert(stack.count() == 1);
     assert(!stack.empty());
     assert(stack.pop() == [123]);
+    assert(stack.count() == 0);
     assert(stack.empty());
 }
