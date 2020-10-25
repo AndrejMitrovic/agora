@@ -206,6 +206,8 @@ public class Engine
             }
         }
 
+        // todo: maybe this should just be moved upstream? then we don't need
+        // the type enum at all.
         final switch (type)
         {
             case Type.Lock:
