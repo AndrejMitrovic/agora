@@ -182,10 +182,10 @@ public class Engine
 
                     if (stack.count() < 2)
                         return "CHECK_SIG opcode requires two items on the stack";
+
                     auto key_bytes = stack.pop();
                     if (key_bytes.length != Point.sizeof)
                         return "CHECK_SIG opcode requires 32-byte public key on the stack";
-
                     if (!isValidPointBytes(key_bytes))
                         return "CHECK_SIG 32-byte public key on the stack is invalid";
 
