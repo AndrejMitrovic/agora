@@ -54,10 +54,8 @@ enum OP : ubyte
 
     IF = 0x46,
     NOT_IF = 0x47,
-    VERIFY_IF = 0x48,
-    VERIFY_NOT_IF = 0x49,
-    ELSE = 0x50,
-    END_IF = 0x51,
+    ELSE = 0x48,
+    END_IF = 0x49,
 
     /// Hash the value
     HASH = 0x52,
@@ -77,6 +75,29 @@ enum OP : ubyte
 
     /// Encodes a set of web assembly instructions
     WEB_ASM,
+}
+
+/*******************************************************************************
+
+    Check if the opcode is a conditional
+
+    Params:
+        opcode = opcode to check
+
+    Returns:
+        true if the opcode is one of the conditional opcodes
+
+*******************************************************************************/
+
+public bool isConditional (OP opcode) pure nothrow @safe @nogc
+{
+    switch (opcode)
+    {
+        case OP.IF, OP.NOT_IF, OP.ELSE, OP.END_IF:
+            return true;
+        default:
+            return false;
+    }
 }
 
 /*******************************************************************************

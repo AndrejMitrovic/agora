@@ -142,6 +142,48 @@ public class Engine
         return null;
     }
 
+    private static string handleConditional (in OP opcode,
+        ref Stack stack, ref ScopeCondition sc)
+    {
+        switch (opcode)
+        {
+        case OP.IF:
+        case OP.NOT_IF:
+            if (!sc.isTrue())
+            {
+                sc.push(false);  // enter new scope, remain false
+                break;
+            }
+
+            if (stack.count() < 1)
+                return "IF/NOT_IF opcode requires an item on the stack";
+
+            const top = stack.pop();
+            if (top != TRUE && top != FALSE)
+                return "IF/NOT_IF may only be used with OP.TRUE / OP.FALSE values";
+
+            sc.push((opcode == OP.IF) ^ (top == FALSE));
+            break;
+
+        case OP.ELSE:
+            if (sc.empty())
+                return "Cannot have an ELSE without an associated IF";
+            sc.tryToggle();
+            break;
+
+        case OP.END_IF:
+            if (sc.empty())
+                return "Cannot have an END_IF without an associated IF";
+            sc.pop();
+            break;
+
+        default:
+            assert(0);
+        }
+
+        return null;
+    }
+
     private string executeScript (in Script script,
         ref Stack stack, in Transaction tx)
     {
@@ -172,6 +214,18 @@ public class Engine
         {
             const OP opcode = bytes.front.toOPCode();
             bytes.popFront();
+
+            if (opcode.isConditional())
+            {
+                if (auto error = handleConditional(opcode, stack, sc))
+                    return error;
+                continue;
+            }
+
+            // whether the current scope is executable
+            // (all preceeding outer conditionals were true)
+            if (!sc.isTrue())
+                continue;
 
             switch (opcode)
             {
@@ -281,6 +335,9 @@ public class Engine
             }
         }
 
+        if (!sc.empty())
+            return "IF requires a closing END_IF";
+
         return null;
     }
 
@@ -335,6 +392,56 @@ public class Engine
         return null;
     }
 }
+
+/// See #1279
+private bool isValidPointBytes (in ubyte[] bytes) /*pure*/ nothrow @trusted @nogc
+{
+    import libsodium.crypto_core_ed25519;
+    return crypto_core_ed25519_is_valid_point(bytes.ptr) == 1;
+}
+
+///
+unittest
+{
+    ubyte[32] data;
+    assert(!isValidPointBytes(data));
+}
+
+// IF, NOT_IF, ELSE, END_IF conditional logic
+unittest
+{
+    scope engine = new Engine();
+    test!("==")(engine.execute(
+        Script([OP.TRUE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE]),
+        Script.init),
+        "IF requires a closing END_IF");
+
+    // IF true => execute if branch
+    test!("==")(engine.execute(
+        Script([OP.TRUE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
+        Script.init),
+        null);
+
+    // IF false => execute else branch
+    test!("==")(engine.execute(
+        Script([OP.FALSE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
+        Script.init),
+        "Script failed");
+
+    // NOT_IF true => execute if branch
+    test!("==")(engine.execute(
+        Script([OP.FALSE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
+        Script.init),
+        null);
+
+    // NOT_IF false => execute else branch
+    test!("==")(engine.execute(
+        Script([OP.TRUE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
+        Script.init),
+        "Script failed");
+}
+
+version (none):
 
 // OP.TRUE / OP.FALSE
 unittest
@@ -593,18 +700,4 @@ unittest
         ~ ubyte(OP.HASH) ~ [ubyte(OP.TRUE)]),
         Script.init),
         "Stack overflow while executing HASH");
-}
-
-/// See #1279
-private bool isValidPointBytes (in ubyte[] bytes) /*pure*/ nothrow @trusted @nogc
-{
-    import libsodium.crypto_core_ed25519;
-    return crypto_core_ed25519_is_valid_point(bytes.ptr) == 1;
-}
-
-///
-unittest
-{
-    ubyte[32] data;
-    assert(!isValidPointBytes(data));
 }

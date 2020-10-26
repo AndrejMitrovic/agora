@@ -102,7 +102,7 @@ public struct ScopeCondition
 
     /***************************************************************************
 
-        Toggles the current scope's condition.
+        Try toggling the current scope's condition.
 
         If the current scope's condition is TRUE then set it to FALSE.
         If the current scope's condition is FALSE then it's toggled to TRUE
@@ -114,7 +114,7 @@ public struct ScopeCondition
 
     ***************************************************************************/
 
-    public void toggle () nothrow @safe @nogc
+    public void tryToggle () nothrow @safe @nogc
     {
         assert(this.scope_count > 0);
 
@@ -144,7 +144,7 @@ nothrow @safe @nogc unittest
     //     DO
     // ELSE
     //     DO <- pc
-    sc.toggle();
+    sc.tryToggle();
     assert(!sc.empty());
     assert(!sc.isTrue());
 
