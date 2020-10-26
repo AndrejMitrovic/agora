@@ -326,7 +326,7 @@ public class Engine
         {
             import std.conv : to;
             static immutable err = op.to!string ~ " opcode payload "
-                ~ " exceeds item size or stack size limits";
+                ~ "exceeds item size or stack size limits";
             return err;
         }
 
@@ -521,11 +521,78 @@ unittest
 // Item size & stack size limits checks
 unittest
 {
+    import std.algorithm;
     scope engine = new Engine();
     test!("==")(engine.execute(
         Script([42].toPushData() ~ [ubyte(OP.TRUE)]),
         Script.init),
         null);
+
+    test!("==")(engine.execute(
+        Script(ubyte(42).repeat(MAX_STACK_ITEM_SIZE + 1).array.toPushData()
+        ~ [ubyte(OP.TRUE)]),
+        Script.init),
+        "Lock script error: PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
+
+    const MaxItemPush = ubyte(42).repeat(MAX_STACK_ITEM_SIZE).array.toPushData();
+    const MaxPushes = MAX_STACK_TOTAL_SIZE / MAX_STACK_ITEM_SIZE;
+    // test will have to be made more flexible in the future,
+    // currently assuming both limits are a power of 2.
+    assert(MAX_STACK_TOTAL_SIZE % MAX_STACK_ITEM_SIZE == 0);
+
+    // strictly above limit
+    test!("==")(engine.execute(
+        Script(MaxItemPush.repeat(MaxPushes + 1).joiner.array ~ [ubyte(OP.TRUE)]),
+        Script.init),
+        "PUSH_DATA_2 opcode payload exceeds item size or stack size limits");
+
+    // within limit, but missing OP.TRUE on stack
+    test!("==")(engine.execute(
+        Script(MaxItemPush.repeat(MaxPushes).joiner.array),
+        Script.init),
+        "Script failed");
+
+    test!("==")(engine.execute(
+        Script(MaxItemPush.repeat(MaxPushes).joiner.array ~ [ubyte(OP.TRUE)]),
+        Script.init),
+        "Stack overflow while pushing OP.TRUE");
+
+    test!("==")(engine.execute(
+        Script(MaxItemPush.repeat(MaxPushes).joiner.array ~ [ubyte(OP.FALSE)]),
+        Script.init),
+        "Stack overflow while pushing OP.FALSE");
+
+    test!("==")(engine.execute(
+        Script(MaxItemPush.repeat(MaxPushes).joiner.array
+        ~ [ubyte(1)].toPushData()),
+        Script.init),
+        "PUSH_DATA_1 opcode payload exceeds item size or stack size limits");
+
+    test!("==")(engine.execute(
+        Script(MaxItemPush.repeat(MaxPushes).joiner.array
+        ~ [ubyte(1), ubyte(1)]),
+        Script.init),
+        "Stack overflow while executing PUSH_BYTES_*");
+
+    test!("==")(engine.execute(
+        Script(MaxItemPush.repeat(MaxPushes).joiner.array
+        ~ [ubyte(OP.DUP)]),
+        Script.init),
+        "Stack overflow while executing DUP");
+
+    // will fit, pops MAX_STACK_ITEM_SIZE and pushes 64 bytes
+    test!("==")(engine.execute(
+        Script(MaxItemPush.repeat(MaxPushes).joiner.array
+        ~ [ubyte(OP.HASH), ubyte(OP.TRUE)]),
+        Script.init),
+        null);
+
+    test!("==")(engine.execute(
+        Script(MaxItemPush.repeat(MaxPushes - 1).joiner.array
+        ~ [ubyte(1), ubyte(1)].repeat(MAX_STACK_ITEM_SIZE).joiner.array
+        ~ ubyte(OP.HASH) ~ [ubyte(OP.TRUE)]),
+        Script.init),
+        "Stack overflow while executing HASH");
 }
 
 /// See #1279
