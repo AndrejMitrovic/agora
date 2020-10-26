@@ -411,10 +411,8 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(
-        Script([OP.TRUE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE]),
-        Script.init),
-        "IF requires a closing END_IF");
+
+    /* simple conditionals */
 
     // IF true => execute if branch
     test!("==")(engine.execute(
@@ -439,6 +437,96 @@ unittest
         Script([OP.TRUE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
         Script.init),
         "Script failed");
+
+    /* nested conditionals */
+
+    // IF true => IF true => 3
+    test!("==")(engine.execute(
+        Script([ubyte(1), ubyte(3), OP.CHECK_EQUAL]),
+        Script([OP.TRUE, OP.IF,
+                           OP.TRUE, OP.IF,
+                                      ubyte(1), ubyte(3),
+                                    OP.ELSE,
+                                      ubyte(1), ubyte(4),
+                                    OP.END_IF,
+                         OP.ELSE,
+                           OP.TRUE, OP.IF,
+                                      ubyte(1), ubyte(5),
+                                     OP.ELSE,
+                                      ubyte(1), ubyte(6),
+                                     OP.END_IF,
+                         OP.END_IF])),
+        null);
+
+    // IF true => NOT_IF false => 4
+    test!("==")(engine.execute(
+        Script([ubyte(1), ubyte(4), OP.CHECK_EQUAL]),
+        Script([OP.TRUE, OP.IF,
+                           OP.TRUE, OP.NOT_IF,
+                                      ubyte(1), ubyte(3),
+                                    OP.ELSE,
+                                      ubyte(1), ubyte(4),
+                                    OP.END_IF,
+                         OP.ELSE,
+                           OP.TRUE, OP.IF,
+                                      ubyte(1), ubyte(5),
+                                     OP.ELSE,
+                                      ubyte(1), ubyte(6),
+                                     OP.END_IF,
+                         OP.END_IF])),
+        null);
+
+    // IF false => IF true => 5
+    test!("==")(engine.execute(
+        Script([ubyte(1), ubyte(5), OP.CHECK_EQUAL]),
+        Script([OP.FALSE, OP.IF,
+                            OP.TRUE, OP.IF,
+                                       ubyte(1), ubyte(3),
+                                     OP.ELSE,
+                                       ubyte(1), ubyte(4),
+                                     OP.END_IF,
+                          OP.ELSE,
+                            OP.TRUE, OP.IF,
+                                       ubyte(1), ubyte(5),
+                                      OP.ELSE,
+                                       ubyte(1), ubyte(6),
+                                      OP.END_IF,
+                          OP.END_IF])),
+        null);
+
+    // IF false => NOT_IF FALSE => 6
+    test!("==")(engine.execute(
+        Script([ubyte(1), ubyte(6), OP.CHECK_EQUAL]),
+        Script([OP.FALSE, OP.IF,
+                            OP.TRUE, OP.IF,
+                                       ubyte(1), ubyte(3),
+                                     OP.ELSE,
+                                       ubyte(1), ubyte(4),
+                                     OP.END_IF,
+                          OP.ELSE,
+                            OP.TRUE, OP.NOT_IF,
+                                       ubyte(1), ubyte(5),
+                                      OP.ELSE,
+                                       ubyte(1), ubyte(6),
+                                      OP.END_IF,
+                          OP.END_IF])),
+        null);
+
+    /* syntax checks */
+    test!("==")(engine.execute(
+        Script([OP.IF]),
+        Script.init),
+        "IF/NOT_IF opcode requires an item on the stack");
+
+    test!("==")(engine.execute(
+        Script([ubyte(1), ubyte(2), OP.IF]),
+        Script.init),
+        "IF/NOT_IF may only be used with OP.TRUE / OP.FALSE values");
+
+    test!("==")(engine.execute(
+        Script([OP.TRUE, OP.IF]),
+        Script.init),
+        "IF requires a closing END_IF");
 }
 
 version (none):
