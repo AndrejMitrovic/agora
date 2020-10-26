@@ -711,9 +711,9 @@ unittest
                          OP.ELSE,
                            OP.TRUE, OP.IF,
                                       ubyte(1), ubyte(5),
-                                     OP.ELSE,
+                                    OP.ELSE,
                                       ubyte(1), ubyte(6),
-                                     OP.END_IF,
+                                    OP.END_IF,
                          OP.END_IF])),
         null);
 
@@ -729,9 +729,9 @@ unittest
                          OP.ELSE,
                            OP.TRUE, OP.IF,
                                       ubyte(1), ubyte(5),
-                                     OP.ELSE,
+                                    OP.ELSE,
                                       ubyte(1), ubyte(6),
-                                     OP.END_IF,
+                                    OP.END_IF,
                          OP.END_IF])),
         null);
 
@@ -747,9 +747,9 @@ unittest
                           OP.ELSE,
                             OP.TRUE, OP.IF,
                                        ubyte(1), ubyte(5),
-                                      OP.ELSE,
+                                     OP.ELSE,
                                        ubyte(1), ubyte(6),
-                                      OP.END_IF,
+                                     OP.END_IF,
                           OP.END_IF])),
         null);
 
@@ -765,9 +765,9 @@ unittest
                           OP.ELSE,
                             OP.TRUE, OP.NOT_IF,
                                        ubyte(1), ubyte(5),
-                                      OP.ELSE,
+                                     OP.ELSE,
                                        ubyte(1), ubyte(6),
-                                      OP.END_IF,
+                                     OP.END_IF,
                           OP.END_IF])),
         null);
 
