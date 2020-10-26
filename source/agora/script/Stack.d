@@ -40,6 +40,7 @@ public enum MAX_STACK_ITEM_SIZE = 512;
 public struct Stack
 {
     /// The actual stack
+    // todo: replace with array again so we can duplicate it more easily
     private SList!(const(ubyte)[]) stack;
 
     /// The number of items on the stack

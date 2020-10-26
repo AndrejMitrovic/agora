@@ -30,6 +30,10 @@ import std.traits;
 
 version (unittest)
 {
+    import agora.common.crypto.ECC;
+    import agora.common.crypto.Schnorr;
+    import agora.common.Hash;
+    import agora.utils.Test;
     import std.stdio;
 }
 
@@ -277,45 +281,6 @@ public class Engine
     }
 }
 
-///
-unittest
-{
-    import agora.common.crypto.ECC;
-    import agora.common.crypto.Schnorr;
-    import agora.common.Hash;
-    import agora.utils.Test;
-
-    Pair kp = Pair.random();
-    Transaction tx;
-    auto sig = sign(kp, tx);
-
-    const key_hash = hashFull(kp.V);
-    Script lock_script = createLockP2PKH(key_hash);
-    assert(lock_script.isValidSyntax());
-
-    Script unlock_script = createUnlockP2PKH(sig, kp.V);
-    assert(unlock_script.isValidSyntax());
-
-    const invalid_script = Script([255]);
-    scope engine = new Engine();
-    test!("==")(engine.execute(lock_script, unlock_script, tx), null);
-
-    // invalid scripts / sigs
-    test!("==")(engine.execute(invalid_script, unlock_script, tx),
-        "Lock script error: Script contains an unrecognized opcode");
-    test!("==")(engine.execute(lock_script, invalid_script, tx),
-        "Unlock script error: Script contains an unrecognized opcode");
-    const bad_sig = sign(kp, "foobar");
-    Script bad_sig_unlock = createUnlockP2PKH(bad_sig, kp.V);
-    assert(bad_sig_unlock.isValidSyntax());
-    test!("==")(engine.execute(lock_script, bad_sig_unlock, tx),
-        "Script failed");
-
-    Script bad_key_unlock = createUnlockP2PKH(sig, Pair.random.V);
-    test!("==")(engine.execute(lock_script, bad_key_unlock, tx),
-        "VERIFY_EQUAL operation failed");
-}
-
 // OP.TRUE / OP.FALSE
 unittest
 {
@@ -415,6 +380,73 @@ unittest
             ~ [ubyte(32)] ~ valid_key[]
             ~ cast(ubyte[])[OP.CHECK_SIG]), Script.init),
         "Script failed");
+}
+
+// Basic invalid script verification
+unittest
+{
+    Pair kp = Pair.random();
+    Transaction tx;
+    auto sig = sign(kp, tx);
+
+    const key_hash = hashFull(kp.V);
+    Script lock_script = createLockP2PKH(key_hash);
+    assert(lock_script.isValidSyntax());
+
+    Script unlock_script = createUnlockP2PKH(sig, kp.V);
+    assert(unlock_script.isValidSyntax());
+
+    const invalid_script = Script([255]);
+    scope engine = new Engine();
+    test!("==")(engine.execute(lock_script, unlock_script, tx), null);
+    // invalid scripts / sigs
+    test!("==")(engine.execute(invalid_script, unlock_script, tx),
+        "Lock script error: Script contains an unrecognized opcode");
+    test!("==")(engine.execute(lock_script, invalid_script, tx),
+        "Unlock script error: Script contains an unrecognized opcode");
+}
+
+// P2PKH. There is no special code flow, executed as normal unlock + lock
+unittest
+{
+    Pair kp = Pair.random();
+    Transaction tx;
+    auto sig = sign(kp, tx);
+
+    const key_hash = hashFull(kp.V);
+    Script lock_script = createLockP2PKH(key_hash);
+    assert(lock_script.isValidSyntax());
+
+    Script unlock_script = createUnlockP2PKH(sig, kp.V);
+    assert(unlock_script.isValidSyntax());
+
+    scope engine = new Engine();
+    test!("==")(engine.execute(lock_script, unlock_script, tx), null);
+
+    Script bad_key_unlock = createUnlockP2PKH(sig, Pair.random.V);
+    test!("==")(engine.execute(lock_script, bad_key_unlock, tx),
+        "VERIFY_EQUAL operation failed");
+}
+
+// P2SH. This opcode is recognized by the engine and has special code flow.
+unittest
+{
+    Pair kp = Pair.random();
+    Transaction tx;
+    auto sig = sign(kp, tx);
+
+    Script redeem = Script([ubyte(32)] ~ kp.V[] ~ cast(ubyte[])[OP.CHECK_SIG]);
+    const redeem_hash = hashFull(redeem);
+
+    const key_hash = hashFull(kp.V);
+    Script lock_script = createLockP2SH(redeem_hash);
+    assert(lock_script.isValidSyntax());
+
+    Script unlock_script = createUnlockP2SH(sig, redeem);
+    assert(unlock_script.isValidSyntax());
+
+    scope engine = new Engine();
+    test!("==")(engine.execute(lock_script, unlock_script, tx), null);
 }
 
 /// See #1279

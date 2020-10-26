@@ -330,7 +330,6 @@ unittest
     Script redeem = Script([ubyte(32)] ~ kp.V[] ~ cast(ubyte[])[OP.CHECK_SIG]);
     const redeem_hash = hashFull(redeem);
 
-    const key_hash = hashFull(kp.V);
     Script lock_script = createLockP2SH(redeem_hash);
     assert(lock_script.isValidSyntax());
 
