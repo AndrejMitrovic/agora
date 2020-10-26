@@ -303,10 +303,10 @@ public Script createLockP2SH (Hash redeem_hash) pure nothrow @safe
 
     Params:
         sig = the signature
-        pub_key = the public key
+        redeem = the redeem script
 
     Returns:
-        a P2PKH unlock script which can be used with the associated lock script
+        a P2SH unlock script which can be used with the associated lock script
 
 *******************************************************************************/
 
