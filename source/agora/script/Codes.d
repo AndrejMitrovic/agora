@@ -66,7 +66,7 @@ enum OP : ubyte
     DUP,
 
     /// Checks the stack item is equal to the input value
-    //CHECK_EQUAL,
+    CHECK_EQUAL,
 
     /// Verifies the stack item is equal to the input value
     VERIFY_EQUAL,

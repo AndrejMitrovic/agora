@@ -77,7 +77,7 @@ public struct Script
     {
         const(ubyte)[] bytes = this.data[];
         if (bytes.empty)
-            return "Script is empty";
+            return null;  // empty scripts are syntactically valid
 
         // todo: add script size checks (based on consensus params)
 
@@ -168,7 +168,7 @@ public struct Script
 ///
 unittest
 {
-    test!"=="(Script.init.isInvalidSyntaxReason(), "Script is empty");
+    test!"=="(Script.init.isInvalidSyntaxReason(), null);
     test!"=="(Script([255]).isInvalidSyntaxReason(), "Script contains an unrecognized opcode");
     test!"=="(Script([OP.INVALID]).isInvalidSyntaxReason(), null);  // OP.INVALID is only semantically invalid
 
@@ -272,4 +272,43 @@ unittest
 
     Script unlock_script = createUnlockP2PKH(sig, kp.V);
     assert(unlock_script.isValidSyntax());
+}
+
+version (none):  // todo
+
+/*******************************************************************************
+
+    Params:
+        key_hash = the key hash to encode in the P2PKH lock script
+
+    Returns:
+        a P2PKH lock script which can be unlocked with the matching
+        public key & signature
+
+*******************************************************************************/
+
+public Script createLockP2SH (Hash redeem_hash) pure nothrow @safe
+{
+    Script script = { cast(ubyte[])[OP.HASH]
+        ~ [ubyte(64)] ~ redeem_hash[]
+        ~ cast(ubyte[])[OP.OP_EQUAL] };
+    return script;
+}
+
+/*******************************************************************************
+
+    Params:
+        sig = the signature
+        pub_key = the public key
+
+    Returns:
+        a P2PKH unlock script which can be used with the associated lock script
+
+*******************************************************************************/
+
+public Script createUnlockP2SH (Signature sig, Point pub_key)
+    pure nothrow @safe
+{
+    Script script = { [ubyte(64)] ~ sig[] ~ [ubyte(32)] ~ pub_key[] };
+    return script;
 }

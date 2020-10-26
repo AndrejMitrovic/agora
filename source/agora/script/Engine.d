@@ -33,16 +33,24 @@ version (unittest)
     import std.stdio;
 }
 
-private enum Type
-{
-    Lock,
-    Unlock,
-    //Redeem  // needs to be a separate type?
-}
-
 /// The engine executes scripts, and returns a value or throws
 public class Engine
 {
+    private static immutable ubyte[1] TRUE = [OP.TRUE];
+    private static immutable ubyte[1] FALSE = [OP.FALSE];
+
+    // safer for the tests as it provides its own stack,
+    // otherwise leaking this outside can make tests
+    // inadvertently depend on intermittent stacks.
+    // this overload is alos not taking any transaction,
+    // it's not supposed to be tested with unlocking scripts
+    version (unittest)
+    private string execute (in Script lock, in Script unlock)
+    {
+        Transaction tx;
+        return this.execute(lock, unlock, tx);
+    }
+
     // tx: the transaction that's trying to spend (used for the commitment check)
     public string execute (in Script lock, in Script unlock,
         in Transaction tx)
@@ -90,25 +98,26 @@ public class Engine
         // todo: use bech32 encoding for the scripts
 
         Stack stack;
-        if (auto error = this.executeScript(Type.Unlock, unlock, stack, tx))
+        if (auto error = this.executeScript(unlock, stack, tx))
             return error;
 
-        if (auto error = this.executeScript(Type.Lock, lock, stack, tx))
+        // todo: check for dangling ops in the bytes array for unlock
+        // unlock script => only if there are no dangling operators it's valid,
+        //                  but stack may have any data on it
+        // lock script => only if there is a TRUE value on the stack it's valid
+
+        if (auto error = this.executeScript(lock, stack, tx))
             return error;
 
-        return null;
+        if (stack.count() == 1 && stack.pop() == TRUE)
+            return null;
+
+        return "Script failed";
     }
 
-    // based on the type, this may return an error message:
-    // unlock script => only if there are no dangling operators it's valid,
-    //                  but stack may have any data on it
-    // lock script => only if there is a TRUE value on the stack it's valid
-    private string executeScript (in Type type, in Script script,
+    private string executeScript (in Script script,
         ref Stack stack, in Transaction tx)
     {
-        static immutable ubyte[1] TRUE = [1];
-        static immutable ubyte[1] FALSE = [0];
-
         // if *any* items are false, then the current execution
         // state is false, and we continue executing next
         // instructions. however the fExec level is set to false,
@@ -139,6 +148,14 @@ public class Engine
 
             switch (opcode)
             {
+                case OP.TRUE:
+                    stack.push(TRUE);
+                    break;
+
+                case OP.FALSE:
+                    stack.push(FALSE);
+                    break;
+
                 case OP.PUSH_DATA_1:
                     pushToStack!(OP.PUSH_DATA_1)(stack, bytes);
                     break;
@@ -171,6 +188,15 @@ public class Engine
                     auto top = stack.pop();
                     const Hash hash = hashFull(top);
                     stack.push(hash[]);
+                    break;
+
+                case OP.CHECK_EQUAL:
+                    if (stack.count() < 2)
+                        return "CHECK_EQUAL opcode requires two items on the stack";
+
+                    auto a = stack.pop();
+                    auto b = stack.pop();
+                    stack.push(a == b ? TRUE : FALSE);
                     break;
 
                 case OP.VERIFY_EQUAL:
@@ -214,34 +240,7 @@ public class Engine
             }
         }
 
-        // todo: maybe this should just be moved upstream? then we don't need
-        // the type enum at all.
-        final switch (type)
-        {
-            case Type.Lock:
-                if (!stack.empty() && stack.pop() == TRUE)
-                    return null;
-
-                // todo: emit diag which OP pushed the last FALSE to stack?
-                return "Script failed";
-
-            // todo: check for dangling ops in the bytes array
-            case Type.Unlock:
-                return null;
-        }
-    }
-
-    // safer for the tests as it provides its own stack,
-    // otherwise leaking this outside can make tests
-    // inadvertently depend on intermittent stacks.
-    // this overload is alos not taking any transaction,
-    // it's not supposed to be tested with unlocking scripts
-    version (unittest)
-    private string executeScript (in Type type, in Script script)
-    {
-        Stack stack;
-        Transaction tx;
-        return this.executeScript(type, script, stack, tx);
+        return null;
     }
 
     /***************************************************************************
@@ -321,7 +320,7 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.executeScript(Type.Unlock, Script([OP.DUP])),
+    test!("==")(engine.execute(Script([OP.DUP]), Script.init),
         "DUP opcode requires an item on the stack");
 }
 
@@ -329,25 +328,47 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.executeScript(Type.Unlock, Script([OP.HASH])),
+    test!("==")(engine.execute(Script([OP.HASH]), Script.init),
         "HASH opcode requires an item on the stack");
+}
+
+// OP.CHECK_EQUAL
+unittest
+{
+    scope engine = new Engine();
+    test!("==")(engine.execute(
+        Script([OP.CHECK_EQUAL]), Script.init),
+        "CHECK_EQUAL opcode requires two items on the stack");
+    test!("==")(engine.execute(
+        Script([OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]), Script.init),
+        "CHECK_EQUAL opcode requires two items on the stack");
+    test!("==")(engine.execute(
+        Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]),
+        Script.init),
+        null);
+    test!("==")(engine.execute(
+        Script([OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]),
+        Script.init),
+        "Script failed");
 }
 
 // OP.VERIFY_EQUAL
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.executeScript(Type.Unlock,
-        Script([OP.VERIFY_EQUAL])),
+    test!("==")(engine.execute(
+        Script([OP.VERIFY_EQUAL]), Script.init),
         "VERIFY_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.executeScript(Type.Unlock,
-        Script([OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL])),
+    test!("==")(engine.execute(
+        Script([OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL]), Script.init),
         "VERIFY_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.executeScript(Type.Unlock,
-        Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL])),
+    test!("==")(engine.execute(  // OP.TRUE needed as VERIFY does not push to stack
+        Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL, OP.TRUE]),
+        Script.init),
         null);
-    test!("==")(engine.executeScript(Type.Unlock,
-        Script([OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL])),
+    test!("==")(engine.execute(
+        Script([OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL, OP.TRUE]),
+        Script.init),
         "VERIFY_EQUAL operation failed");
 }
 
@@ -355,37 +376,38 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.executeScript(Type.Lock,
-        Script([OP.CHECK_SIG])),
+    test!("==")(engine.execute(
+        Script([OP.CHECK_SIG]), Script.init),
         "CHECK_SIG opcode requires two items on the stack");
-    test!("==")(engine.executeScript(Type.Lock,
-        Script([OP.PUSH_BYTES_1, 1, OP.CHECK_SIG])),
+    test!("==")(engine.execute(
+        Script([OP.PUSH_BYTES_1, 1, OP.CHECK_SIG]), Script.init),
         "CHECK_SIG opcode requires two items on the stack");
-    test!("==")(engine.executeScript(Type.Lock,
-        Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.CHECK_SIG])),
+    test!("==")(engine.execute(
+        Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.CHECK_SIG]),
+        Script.init),
         "CHECK_SIG opcode requires 32-byte public key on the stack");
 
     // invalid key (crypto_core_ed25519_is_valid_point() fails)
     Point invalid_key;
-    test!("==")(engine.executeScript(Type.Lock,
+    test!("==")(engine.execute(
         Script(cast(ubyte[])[OP.PUSH_BYTES_1, 1]
             ~ [ubyte(32)] ~ invalid_key[]
-            ~ cast(ubyte[])[OP.CHECK_SIG])),
+            ~ cast(ubyte[])[OP.CHECK_SIG]), Script.init),
         "CHECK_SIG 32-byte public key on the stack is invalid");
 
     Point valid_key = Point.fromString(
         "0x44404b654d6ddf71e2446eada6acd1f462348b1b17272ff8f36dda3248e08c81");
-    test!("==")(engine.executeScript(Type.Lock,
+    test!("==")(engine.execute(
         Script(cast(ubyte[])[OP.PUSH_BYTES_1, 1]
             ~ [ubyte(32)] ~ valid_key[]
-            ~ cast(ubyte[])[OP.CHECK_SIG])),
+            ~ cast(ubyte[])[OP.CHECK_SIG]), Script.init),
         "CHECK_SIG opcode requires 64-byte signature on the stack");
 
     Signature invalid_sig;
-    test!("==")(engine.executeScript(Type.Lock,
+    test!("==")(engine.execute(
         Script(cast(ubyte[])[OP.PUSH_BYTES_64] ~ invalid_sig[]
             ~ [ubyte(32)] ~ valid_key[]
-            ~ cast(ubyte[])[OP.CHECK_SIG])),
+            ~ cast(ubyte[])[OP.CHECK_SIG]), Script.init),
         "Script failed");
 }
 
