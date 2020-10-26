@@ -106,7 +106,7 @@ public class Engine
             return error;
 
         // kept in case of P2SH
-        Stack lock_stack = stack.copy();
+        Stack unlock_stack = stack.copy();
 
         // todo: check for dangling ops in the bytes array for unlock
         // unlock script => only if there are no dangling operators it's valid,
@@ -116,13 +116,17 @@ public class Engine
         if (auto error = this.executeScript(lock, stack, tx))
             return error;
 
+        // do not move! must check before P2SH as redeem script hash is checked
+        if (stack.empty() || stack.pop() != TRUE)
+            return "Script failed";
+
         // special handling for P2SH scripts
         if (lock.isLockP2SH())
         {
             // todo: check
             // - push only opcodes
             // - empty stack
-            stack = lock_stack.copy();
+            stack = unlock_stack.copy();
 
             // todo: may want to make this an early return, or move the
             // stack empty check above
@@ -131,15 +135,13 @@ public class Engine
 
             if (auto error = this.executeScript(redeem, stack, tx))
                 return error;
+
+            if (stack.empty() || stack.pop() != TRUE)
+                return "Script failed";
         }
 
-        if (stack.count() == 1 && stack.pop() == TRUE)
-            return null;
-
-        return "Script failed";
+        return null;
     }
-
-    bool print;
 
     private string executeScript (in Script script,
         ref Stack stack, in Transaction tx)
@@ -412,19 +414,19 @@ unittest
     auto sig = sign(kp, tx);
 
     const key_hash = hashFull(kp.V);
-    Script lock_script = createLockP2PKH(key_hash);
-    assert(lock_script.isValidSyntax());
+    Script lock = createLockP2PKH(key_hash);
+    assert(lock.isValidSyntax());
 
-    Script unlock_script = createUnlockP2PKH(sig, kp.V);
-    assert(unlock_script.isValidSyntax());
+    Script unlock = createUnlockP2PKH(sig, kp.V);
+    assert(unlock.isValidSyntax());
 
     const invalid_script = Script([255]);
     scope engine = new Engine();
-    test!("==")(engine.execute(lock_script, unlock_script, tx), null);
+    test!("==")(engine.execute(lock, unlock, tx), null);
     // invalid scripts / sigs
-    test!("==")(engine.execute(invalid_script, unlock_script, tx),
+    test!("==")(engine.execute(invalid_script, unlock, tx),
         "Lock script error: Script contains an unrecognized opcode");
-    test!("==")(engine.execute(lock_script, invalid_script, tx),
+    test!("==")(engine.execute(lock, invalid_script, tx),
         "Unlock script error: Script contains an unrecognized opcode");
 }
 
@@ -436,17 +438,17 @@ unittest
     auto sig = sign(kp, tx);
 
     const key_hash = hashFull(kp.V);
-    Script lock_script = createLockP2PKH(key_hash);
-    assert(lock_script.isValidSyntax());
+    Script lock = createLockP2PKH(key_hash);
+    assert(lock.isValidSyntax());
 
-    Script unlock_script = createUnlockP2PKH(sig, kp.V);
-    assert(unlock_script.isValidSyntax());
+    Script unlock = createUnlockP2PKH(sig, kp.V);
+    assert(unlock.isValidSyntax());
 
     scope engine = new Engine();
-    test!("==")(engine.execute(lock_script, unlock_script, tx), null);
+    test!("==")(engine.execute(lock, unlock, tx), null);
 
     Script bad_key_unlock = createUnlockP2PKH(sig, Pair.random.V);
-    test!("==")(engine.execute(lock_script, bad_key_unlock, tx),
+    test!("==")(engine.execute(lock, bad_key_unlock, tx),
         "VERIFY_EQUAL operation failed");
 }
 
@@ -461,14 +463,28 @@ unittest
     const redeem_hash = hashFull(redeem);
 
     const key_hash = hashFull(kp.V);
-    Script lock_script = createLockP2SH(redeem_hash);
-    assert(lock_script.isValidSyntax());
+    Script lock = createLockP2SH(redeem_hash);
+    assert(lock.isValidSyntax());
 
-    Script unlock_script = createUnlockP2SH(sig, redeem);
-    assert(unlock_script.isValidSyntax());
+    Script unlock = createUnlockP2SH(sig, redeem);
+    assert(unlock.isValidSyntax());
 
     scope engine = new Engine();
-    test!("==")(engine.execute(lock_script, unlock_script, tx), null);
+    test!("==")(engine.execute(lock, unlock, tx), null);
+
+    Script wrong_redeem = Script([ubyte(32)] ~ Pair.random.V[]
+        ~ cast(ubyte[])[OP.CHECK_SIG]);
+
+    // bad redeem script
+    Script bad_redeem_unlock = createUnlockP2SH(sig, wrong_redeem);
+    assert(bad_redeem_unlock.isValidSyntax());
+    test!("==")(engine.execute(lock, bad_redeem_unlock, tx), "Script failed");
+
+    // good redeem script but bad signature
+    auto wrong_sig = sign(kp, "bad");
+    Script bad_sig_unlock = createUnlockP2SH(wrong_sig, redeem);
+    assert(bad_sig_unlock.isValidSyntax());
+    test!("==")(engine.execute(lock, bad_sig_unlock, tx), "Script failed");
 }
 
 /// See #1279
