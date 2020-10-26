@@ -205,7 +205,7 @@ public class Engine
                     if (stack.empty)
                         return "DUP opcode requires an item on the stack";
 
-                    auto top = stack.peek();
+                    const top = stack.peek();
                     stack.push(top);
                     break;
 
@@ -213,7 +213,7 @@ public class Engine
                     if (stack.empty)
                         return "HASH opcode requires an item on the stack";
 
-                    auto top = stack.pop();
+                    const top = stack.pop();
                     const Hash hash = hashFull(top);
                     stack.push(hash[]);
                     break;
@@ -222,8 +222,8 @@ public class Engine
                     if (stack.count() < 2)
                         return "CHECK_EQUAL opcode requires two items on the stack";
 
-                    auto a = stack.pop();
-                    auto b = stack.pop();
+                    const a = stack.pop();
+                    const b = stack.pop();
                     stack.push(a == b ? TRUE : FALSE);
                     break;
 
@@ -231,8 +231,8 @@ public class Engine
                     if (stack.count() < 2)
                         return "VERIFY_EQUAL opcode requires two items on the stack";
 
-                    auto a = stack.pop();
-                    auto b = stack.pop();
+                    const a = stack.pop();
+                    const b = stack.pop();
                     if (a != b)
                         return "VERIFY_EQUAL operation failed";
                     break;
@@ -245,13 +245,13 @@ public class Engine
                     if (stack.count() < 2)
                         return "CHECK_SIG opcode requires two items on the stack";
 
-                    auto key_bytes = stack.pop();
+                    const key_bytes = stack.pop();
                     if (key_bytes.length != Point.sizeof)
                         return "CHECK_SIG opcode requires 32-byte public key on the stack";
                     if (!isValidPointBytes(key_bytes))
                         return "CHECK_SIG 32-byte public key on the stack is invalid";
 
-                    auto sig_bytes = stack.pop();
+                    const sig_bytes = stack.pop();
                     if (sig_bytes.length != Signature.sizeof)
                         return "CHECK_SIG opcode requires 64-byte signature on the stack";
 
