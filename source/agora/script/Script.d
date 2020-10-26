@@ -310,8 +310,7 @@ public Script createLockP2SH (Hash redeem_hash) pure nothrow @safe
 
 *******************************************************************************/
 
-public Script createUnlockP2SH (Signature sig, Script redeem)
-    pure nothrow @safe
+public Script createUnlockP2SH (Signature sig, Script redeem) pure nothrow @safe
 {
     const bytes = redeem[];
     assert(bytes.length <= MAX_STACK_ITEM_SIZE);
@@ -354,11 +353,6 @@ unittest
 public ubyte[] toPushData (in ubyte[] data) pure nothrow @safe
 {
     assert(data.length <= MAX_STACK_ITEM_SIZE);
-
-    import std.stdio;
-    writefln("Data length: %s. Bigger than max: %s",
-        data.length, data.length > ubyte.max);
-
     if (data.length > ubyte.max)
     {
         return cast(ubyte[])[OP.PUSH_DATA_2]
@@ -376,13 +370,9 @@ unittest
 {
     import std.array;
     import std.range;
-
-    test!("==")([42].toPushData(),
-        cast(ubyte[])[OP.PUSH_DATA_1] ~ [ubyte(1)] ~ [ubyte(42)]);
+    test!("==")([42].toPushData(), [65, 1, 42]);
     test!("==")(ubyte(42).repeat(255).array.toPushData(),
-        cast(ubyte[])[OP.PUSH_DATA_1] ~ [ubyte(255)]
-        ~ ubyte(42).repeat(255).array);
+        [65, 255] ~ 42.repeat(255).array);
     test!("==")(ubyte(42).repeat(500).array.toPushData(),
-        cast(ubyte[])[OP.PUSH_DATA_1] ~ nativeToLittleEndian(500)
-        ~ ubyte(42).repeat(500).array);
+        [66, 244, 1] ~ 42.repeat(500).array);  // little-endian form
 }
