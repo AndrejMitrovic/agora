@@ -20,6 +20,7 @@ import std.range;
 
 version (unittest)
 {
+    import ocean.core.Test;
     import std.stdio;
 }
 
@@ -61,6 +62,7 @@ public struct Stack
         assert(data.sizeof <= MAX_STACK_ITEM_SIZE);
         assert(this.used_bytes + data.length <= MAX_STACK_TOTAL_SIZE);
         this.stack.insertFront(data);
+        this.used_bytes += data.length;
         this.num_items++;
     }
 
@@ -90,8 +92,21 @@ public struct Stack
         assert(this.num_items > 0);
         auto value = this.stack.front();
         this.stack.removeFront();
+        this.used_bytes -= value.length;
         this.num_items--;
         return value;
+    }
+
+    /***************************************************************************
+
+        Returns:
+            the number of bytes used by this stack
+
+    ***************************************************************************/
+
+    public ulong usedBytes () const pure nothrow @safe @nogc
+    {
+        return this.used_bytes;
     }
 
     /***************************************************************************
@@ -162,24 +177,30 @@ unittest
     Stack stack;
     assert(stack.empty());
     assert(stack.count() == 0);
-    stack.push([123]);
+    assert(stack.usedBytes() == 0);
+    stack.push([1, 2, 3]);
     assert(stack.count() == 1);
+    test!"=="(stack.usedBytes(), 3);
     stack.push([255]);
     assert(stack.count() == 2);
+    test!"=="(stack.usedBytes(), 4);
     assert(stack.peek() == [255]);
     assert(stack.count() == 2);     // did not consume
     assert(stack.peek() == [255]);  // ditto
-    assert(stack[].array == [[255], [123]]);
+    assert(stack[].array == [[255], [1, 2, 3]]);
     assert(!stack.empty());
     // copies disabled: either use 'ref' or explicitly do a 'copy()'
     static assert(!is(typeof( { Stack nogo = stack; } )));
     Stack copy = stack.copy();
     assert(stack.pop() == [255]);
     assert(stack.count() == 1);
+    test!"=="(stack.usedBytes(), 3);
     assert(!stack.empty());
-    assert(stack.pop() == [123]);
+    assert(stack.pop() == [1, 2, 3]);
     assert(stack.count() == 0);
+    test!"=="(stack.usedBytes(), 0);
     assert(stack.empty());
-    assert(copy.count() == 2);  // did not consume copy
-    assert(!copy.empty());      // ditto
+    assert(copy.count() == 2);     // did not consume copy
+    assert(copy.usedBytes() == 4); // ditto
+    assert(!copy.empty());         // ditto
 }
