@@ -176,95 +176,95 @@ public class Engine
 
             switch (opcode)
             {
-                case OP.TRUE:
+            case OP.TRUE:
+                stack.push(TRUE);
+                break;
+
+            case OP.FALSE:
+                stack.push(FALSE);
+                break;
+
+            case OP.PUSH_DATA_1:
+                pushToStack!(OP.PUSH_DATA_1)(stack, bytes);
+                break;
+
+            case OP.PUSH_DATA_2:
+                pushToStack!(OP.PUSH_DATA_2)(stack, bytes);
+                break;
+
+            case OP.PUSH_BYTES_1: .. case OP.PUSH_BYTES_64:
+                const payload_size = opcode;  // encoded in the opcode
+                if (bytes.length < payload_size)
+                    assert(0);  // should have been validated
+
+                stack.push(bytes[0 .. payload_size]);
+                bytes.popFrontN(payload_size);
+                break;
+
+            case OP.DUP:
+                if (stack.empty)
+                    return "DUP opcode requires an item on the stack";
+
+                const top = stack.peek();
+                stack.push(top);
+                break;
+
+            case OP.HASH:
+                if (stack.empty)
+                    return "HASH opcode requires an item on the stack";
+
+                const top = stack.pop();
+                const Hash hash = hashFull(top);
+                stack.push(hash[]);
+                break;
+
+            case OP.CHECK_EQUAL:
+                if (stack.count() < 2)
+                    return "CHECK_EQUAL opcode requires two items on the stack";
+
+                const a = stack.pop();
+                const b = stack.pop();
+                stack.push(a == b ? TRUE : FALSE);
+                break;
+
+            case OP.VERIFY_EQUAL:
+                if (stack.count() < 2)
+                    return "VERIFY_EQUAL opcode requires two items on the stack";
+
+                const a = stack.pop();
+                const b = stack.pop();
+                if (a != b)
+                    return "VERIFY_EQUAL operation failed";
+                break;
+
+            case OP.CHECK_SIG:
+                // if changed, check assumptions
+                static assert(Point.sizeof == 32);
+                static assert(Signature.sizeof == 64);
+
+                if (stack.count() < 2)
+                    return "CHECK_SIG opcode requires two items on the stack";
+
+                const key_bytes = stack.pop();
+                if (key_bytes.length != Point.sizeof)
+                    return "CHECK_SIG opcode requires 32-byte public key on the stack";
+                if (!isValidPointBytes(key_bytes))
+                    return "CHECK_SIG 32-byte public key on the stack is invalid";
+
+                const sig_bytes = stack.pop();
+                if (sig_bytes.length != Signature.sizeof)
+                    return "CHECK_SIG opcode requires 64-byte signature on the stack";
+
+                const point = Point(key_bytes);
+                const sig = Signature(sig_bytes);
+                if (Schnorr.verify(point, sig, tx))
                     stack.push(TRUE);
-                    break;
-
-                case OP.FALSE:
+                else
                     stack.push(FALSE);
-                    break;
+                break;
 
-                case OP.PUSH_DATA_1:
-                    pushToStack!(OP.PUSH_DATA_1)(stack, bytes);
-                    break;
-
-                case OP.PUSH_DATA_2:
-                    pushToStack!(OP.PUSH_DATA_2)(stack, bytes);
-                    break;
-
-                case OP.PUSH_BYTES_1: .. case OP.PUSH_BYTES_64:
-                    const payload_size = opcode;  // encoded in the opcode
-                    if (bytes.length < payload_size)
-                        assert(0);  // should have been validated
-
-                    stack.push(bytes[0 .. payload_size]);
-                    bytes.popFrontN(payload_size);
-                    break;
-
-                case OP.DUP:
-                    if (stack.empty)
-                        return "DUP opcode requires an item on the stack";
-
-                    const top = stack.peek();
-                    stack.push(top);
-                    break;
-
-                case OP.HASH:
-                    if (stack.empty)
-                        return "HASH opcode requires an item on the stack";
-
-                    const top = stack.pop();
-                    const Hash hash = hashFull(top);
-                    stack.push(hash[]);
-                    break;
-
-                case OP.CHECK_EQUAL:
-                    if (stack.count() < 2)
-                        return "CHECK_EQUAL opcode requires two items on the stack";
-
-                    const a = stack.pop();
-                    const b = stack.pop();
-                    stack.push(a == b ? TRUE : FALSE);
-                    break;
-
-                case OP.VERIFY_EQUAL:
-                    if (stack.count() < 2)
-                        return "VERIFY_EQUAL opcode requires two items on the stack";
-
-                    const a = stack.pop();
-                    const b = stack.pop();
-                    if (a != b)
-                        return "VERIFY_EQUAL operation failed";
-                    break;
-
-                case OP.CHECK_SIG:
-                    // if changed, check assumptions
-                    static assert(Point.sizeof == 32);
-                    static assert(Signature.sizeof == 64);
-
-                    if (stack.count() < 2)
-                        return "CHECK_SIG opcode requires two items on the stack";
-
-                    const key_bytes = stack.pop();
-                    if (key_bytes.length != Point.sizeof)
-                        return "CHECK_SIG opcode requires 32-byte public key on the stack";
-                    if (!isValidPointBytes(key_bytes))
-                        return "CHECK_SIG 32-byte public key on the stack is invalid";
-
-                    const sig_bytes = stack.pop();
-                    if (sig_bytes.length != Signature.sizeof)
-                        return "CHECK_SIG opcode requires 64-byte signature on the stack";
-
-                    const point = Point(key_bytes);
-                    const sig = Signature(sig_bytes);
-                    if (Schnorr.verify(point, sig, tx))
-                        stack.push(TRUE);
-                    else
-                        stack.push(FALSE);
-                    break;
-
-                default:
-                    break;
+            default:
+                break;
             }
         }
 
