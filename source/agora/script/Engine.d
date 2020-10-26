@@ -22,8 +22,6 @@ import agora.script.ScopeCondition;
 import agora.script.Script;
 import agora.script.Stack;
 
-import ocean.core.Test;
-
 import std.bitmanip;
 import std.range;
 import std.traits;
@@ -34,6 +32,7 @@ version (unittest)
     import agora.common.crypto.Schnorr;
     import agora.common.Hash;
     import agora.utils.Test;
+    import ocean.core.Test;
     import std.stdio;
 }
 
@@ -177,19 +176,25 @@ public class Engine
             switch (opcode)
             {
             case OP.TRUE:
+                if (!stack.canPush(TRUE))
+                    return "Stack overflow while pushing OP.TRUE";
                 stack.push(TRUE);
                 break;
 
             case OP.FALSE:
+                if (!stack.canPush(FALSE))
+                    return "Stack overflow while pushing OP.FALSE";
                 stack.push(FALSE);
                 break;
 
             case OP.PUSH_DATA_1:
-                pushToStack!(OP.PUSH_DATA_1)(stack, bytes);
+                if (auto reason = pushToStack!(OP.PUSH_DATA_1)(stack, bytes))
+                    return reason;
                 break;
 
             case OP.PUSH_DATA_2:
-                pushToStack!(OP.PUSH_DATA_2)(stack, bytes);
+                if (auto reason = pushToStack!(OP.PUSH_DATA_2)(stack, bytes))
+                    return reason;
                 break;
 
             case OP.PUSH_BYTES_1: .. case OP.PUSH_BYTES_64:
@@ -197,8 +202,12 @@ public class Engine
                 if (bytes.length < payload_size)
                     assert(0);  // should have been validated
 
-                stack.push(bytes[0 .. payload_size]);
-                bytes.popFrontN(payload_size);
+                const payload = bytes[0 .. payload_size];
+                if (!stack.canPush(payload))
+                    return "Stack overflow while executing PUSH_BYTES_*";
+
+                stack.push(payload);
+                bytes.popFrontN(payload.length);
                 break;
 
             case OP.DUP:
@@ -206,6 +215,8 @@ public class Engine
                     return "DUP opcode requires an item on the stack";
 
                 const top = stack.peek();
+                if (!stack.canPush(top))
+                    return "Stack overflow while executing DUP";
                 stack.push(top);
                 break;
 
@@ -215,6 +226,8 @@ public class Engine
 
                 const top = stack.pop();
                 const Hash hash = hashFull(top);
+                if (!stack.canPush(hash[]))  // e.g. hash(1 byte) => 64 bytes
+                    return "Stack overflow while executing HASH";
                 stack.push(hash[]);
                 break;
 
@@ -224,7 +237,7 @@ public class Engine
 
                 const a = stack.pop();
                 const b = stack.pop();
-                stack.push(a == b ? TRUE : FALSE);
+                stack.push(a == b ? TRUE : FALSE);  // canPush() check unnecessary
                 break;
 
             case OP.VERIFY_EQUAL:
@@ -258,7 +271,7 @@ public class Engine
                 const point = Point(key_bytes);
                 const sig = Signature(sig_bytes);
                 if (Schnorr.verify(point, sig, tx))
-                    stack.push(TRUE);
+                    stack.push(TRUE);  // canPush() check unnecessary
                 else
                     stack.push(FALSE);
                 break;
@@ -274,34 +287,52 @@ public class Engine
     /***************************************************************************
 
         Reads the length and payload of the associated `PUSH_DATA_*` opcode,
-        pushes the payload onto the stack, and advances the `bytes` array
-        to the next opcode.
+        tries to push the payload onto the stack, and if successfull it advances
+        the `opcodes` array to the next opcode.
+
+        Pushing may fail if:
+        - The item size exceeds the limits
+        - Pushing the item to the stack would exceed the stack limits
 
         Params:
             OP = the associated `PUSH_DATA_*` opcode
             stack = the stack to push the payload to
-            bytes = the opcode / data byte array
+            opcodes = the opcode / data byte array
+
+        Returns:
+            null if the stack push was successfull,
+            otherwise the string explaining why it failed
 
     ***************************************************************************/
 
-    private static void pushToStack (OP op)(ref Stack stack,
-        ref const(ubyte)[] bytes) nothrow @safe /*@nogc*/
+    private static string pushToStack (OP op)(ref Stack stack,
+        ref const(ubyte)[] opcodes) nothrow @safe /*@nogc*/
     {
         static assert(op == OP.PUSH_DATA_1 || op == OP.PUSH_DATA_2);
         alias T = Select!(op == OP.PUSH_DATA_1, ubyte, ushort);
-        if (bytes.length < T.sizeof)
+        if (opcodes.length < T.sizeof)
             assert(0);  // script should have been validated
 
-        const T size = littleEndianToNative!T(bytes[0 .. T.sizeof]);
+        const T size = littleEndianToNative!T(opcodes[0 .. T.sizeof]);
         if (size == 0 || size > MAX_STACK_ITEM_SIZE)
             assert(0);  // ditto
 
-        bytes.popFrontN(T.sizeof);
-        if (bytes.length < size)
+        opcodes.popFrontN(T.sizeof);
+        if (opcodes.length < size)
             assert(0);  // ditto
 
-        stack.push(bytes[0 .. size]);  // push to stack
-        bytes.popFrontN(size);  // advance to next opcode
+        const payload = opcodes[0 .. size];
+        if (!stack.canPush(payload))
+        {
+            import std.conv : to;
+            static immutable err = op.to!string ~ " opcode payload "
+                ~ " exceeds item size or stack size limits";
+            return err;
+        }
+
+        stack.push(payload);  // push to stack
+        opcodes.popFrontN(size);  // advance to next opcode
+        return null;
     }
 }
 
@@ -385,49 +416,25 @@ unittest
     // invalid key (crypto_core_ed25519_is_valid_point() fails)
     Point invalid_key;
     test!("==")(engine.execute(
-        Script(cast(ubyte[])[OP.PUSH_BYTES_1, 1]
+        Script([ubyte(OP.PUSH_BYTES_1), ubyte(1)]
             ~ [ubyte(32)] ~ invalid_key[]
-            ~ cast(ubyte[])[OP.CHECK_SIG]), Script.init),
+            ~ [ubyte(OP.CHECK_SIG)]), Script.init),
         "CHECK_SIG 32-byte public key on the stack is invalid");
 
     Point valid_key = Point.fromString(
         "0x44404b654d6ddf71e2446eada6acd1f462348b1b17272ff8f36dda3248e08c81");
     test!("==")(engine.execute(
-        Script(cast(ubyte[])[OP.PUSH_BYTES_1, 1]
+        Script([ubyte(OP.PUSH_BYTES_1), ubyte(1)]
             ~ [ubyte(32)] ~ valid_key[]
-            ~ cast(ubyte[])[OP.CHECK_SIG]), Script.init),
+            ~ [ubyte(OP.CHECK_SIG)]), Script.init),
         "CHECK_SIG opcode requires 64-byte signature on the stack");
 
     Signature invalid_sig;
     test!("==")(engine.execute(
-        Script(cast(ubyte[])[OP.PUSH_BYTES_64] ~ invalid_sig[]
+        Script([ubyte(OP.PUSH_BYTES_64)] ~ invalid_sig[]
             ~ [ubyte(32)] ~ valid_key[]
-            ~ cast(ubyte[])[OP.CHECK_SIG]), Script.init),
+            ~ [ubyte(OP.CHECK_SIG)]), Script.init),
         "Script failed");
-}
-
-// Basic invalid script verification
-unittest
-{
-    Pair kp = Pair.random();
-    Transaction tx;
-    auto sig = sign(kp, tx);
-
-    const key_hash = hashFull(kp.V);
-    Script lock = createLockP2PKH(key_hash);
-    assert(lock.isValidSyntax());
-
-    Script unlock = createUnlockP2PKH(sig, kp.V);
-    assert(unlock.isValidSyntax());
-
-    const invalid_script = Script([255]);
-    scope engine = new Engine();
-    test!("==")(engine.execute(lock, unlock, tx), null);
-    // invalid scripts / sigs
-    test!("==")(engine.execute(invalid_script, unlock, tx),
-        "Lock script error: Script contains an unrecognized opcode");
-    test!("==")(engine.execute(lock, invalid_script, tx),
-        "Unlock script error: Script contains an unrecognized opcode");
 }
 
 // P2PKH. There is no special code flow, executed as normal unlock + lock
@@ -459,7 +466,7 @@ unittest
     Transaction tx;
     auto sig = sign(kp, tx);
 
-    Script redeem = Script([ubyte(32)] ~ kp.V[] ~ cast(ubyte[])[OP.CHECK_SIG]);
+    Script redeem = Script([ubyte(32)] ~ kp.V[] ~ [ubyte(OP.CHECK_SIG)]);
     const redeem_hash = hashFull(redeem);
 
     const key_hash = hashFull(kp.V);
@@ -473,7 +480,7 @@ unittest
     test!("==")(engine.execute(lock, unlock, tx), null);
 
     Script wrong_redeem = Script([ubyte(32)] ~ Pair.random.V[]
-        ~ cast(ubyte[])[OP.CHECK_SIG]);
+        ~ [ubyte(OP.CHECK_SIG)]);
 
     // bad redeem script
     Script bad_redeem_unlock = createUnlockP2SH(sig, wrong_redeem);
@@ -485,6 +492,40 @@ unittest
     Script bad_sig_unlock = createUnlockP2SH(wrong_sig, redeem);
     assert(bad_sig_unlock.isValidSyntax());
     test!("==")(engine.execute(lock, bad_sig_unlock, tx), "Script failed");
+}
+
+// Basic invalid script verification
+unittest
+{
+    Pair kp = Pair.random();
+    Transaction tx;
+    auto sig = sign(kp, tx);
+
+    const key_hash = hashFull(kp.V);
+    Script lock = createLockP2PKH(key_hash);
+    assert(lock.isValidSyntax());
+
+    Script unlock = createUnlockP2PKH(sig, kp.V);
+    assert(unlock.isValidSyntax());
+
+    const invalid_script = Script([255]);
+    scope engine = new Engine();
+    test!("==")(engine.execute(lock, unlock, tx), null);
+    // invalid scripts / sigs
+    test!("==")(engine.execute(invalid_script, unlock, tx),
+        "Lock script error: Script contains an unrecognized opcode");
+    test!("==")(engine.execute(lock, invalid_script, tx),
+        "Unlock script error: Script contains an unrecognized opcode");
+}
+
+// Item size & stack size limits checks
+unittest
+{
+    scope engine = new Engine();
+    test!("==")(engine.execute(
+        Script([42].toPushData() ~ [ubyte(OP.TRUE)]),
+        Script.init),
+        null);
 }
 
 /// See #1279

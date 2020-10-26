@@ -224,17 +224,17 @@ unittest
         "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
     test!"=="(Script([OP.PUSH_DATA_2, 0, 0]).isInvalidSyntaxReason(),
         "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_1).isInvalidSyntaxReason(),
+    test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_1).isInvalidSyntaxReason(),
         "PUSH_DATA_2 opcode payload size exceeds total script size");
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_1 ~ [ubyte(1)])
+    test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_1 ~ [ubyte(1)])
         .isInvalidSyntaxReason(), null);
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_max ~ max_payload)
+    test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_max ~ max_payload)
         .isInvalidSyntaxReason(), null);
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_overflow ~ max_payload)
+    test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_overflow ~ max_payload)
         .isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_max ~ max_payload ~ OP.HASH)
+    test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_max ~ max_payload ~ OP.HASH)
         .isInvalidSyntaxReason(), null);
-    test!"=="(Script(cast(ubyte[])[OP.PUSH_DATA_2] ~ size_max ~ max_payload ~ ubyte(255))
+    test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_max ~ max_payload ~ ubyte(255))
         .isInvalidSyntaxReason(), "Script contains an unrecognized opcode");
 }
 
@@ -251,9 +251,9 @@ unittest
 
 public Script createLockP2PKH (Hash key_hash) pure nothrow @safe
 {
-    Script script = { cast(ubyte[])[OP.DUP, OP.HASH]
+    Script script = { [ubyte(OP.DUP), ubyte(OP.HASH)]
         ~ [ubyte(64)] ~ key_hash[]
-        ~ cast(ubyte[])[OP.VERIFY_EQUAL, OP.CHECK_SIG] };
+        ~ [ubyte(OP.VERIFY_EQUAL), ubyte(OP.CHECK_SIG)] };
     return script;
 }
 
@@ -307,9 +307,9 @@ unittest
 
 public Script createLockP2SH (Hash redeem_hash) pure nothrow @safe
 {
-    Script script = { cast(ubyte[])[OP.HASH]
+    Script script = { [ubyte(OP.HASH)]
         ~ [ubyte(64)] ~ redeem_hash[]
-        ~ cast(ubyte[])[OP.CHECK_EQUAL] };
+        ~ [ubyte(OP.CHECK_EQUAL)] };
     return script;
 }
 
@@ -347,7 +347,7 @@ unittest
     Pair kp = Pair.random();
     auto sig = sign(kp, "Hello world");
 
-    Script redeem = Script([ubyte(32)] ~ kp.V[] ~ cast(ubyte[])[OP.CHECK_SIG]);
+    Script redeem = Script([ubyte(32)] ~ kp.V[] ~ [ubyte(OP.CHECK_SIG)]);
     const redeem_hash = hashFull(redeem);
 
     Script lock_script = createLockP2SH(redeem_hash);
@@ -360,6 +360,9 @@ unittest
 /*******************************************************************************
 
     Creates `PUSH_DATA_*` opcodes based on the length of the data.
+    It does not verify data limits for the stack, as this check
+    belongs in the Stack / Engine. Additionally it's useful to be able to
+    create exceeding data buffers with this function for testing.
 
     Params:
         data = the data to push
@@ -371,15 +374,14 @@ unittest
 
 public ubyte[] toPushData (in ubyte[] data) pure nothrow @safe
 {
-    assert(data.length <= MAX_STACK_ITEM_SIZE);
     if (data.length > ubyte.max)
     {
-        return cast(ubyte[])[OP.PUSH_DATA_2]
+        return [ubyte(OP.PUSH_DATA_2)]
             ~ nativeToLittleEndian(cast(ushort)data.length) ~ data;
     }
     else
     {
-        return cast(ubyte[])[OP.PUSH_DATA_1, cast(ubyte)data.length] ~ data;
+        return [ubyte(OP.PUSH_DATA_1), cast(ubyte)data.length] ~ data;
     }
 }
 
