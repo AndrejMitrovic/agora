@@ -34,13 +34,13 @@ public enum MAX_STACK_ITEM_SIZE = 512;
     Uses a linked-list rather than a vector to avoid unnecessary copying
     due to stomping prevention as the same item may be popped and later pushed
     to the stack.
+    In addition, it makes it very cheap to copy the stack.
 
 *******************************************************************************/
 
 public struct Stack
 {
     /// The actual stack
-    // todo: replace with array again so we can duplicate it more easily
     private SList!(const(ubyte)[]) stack;
 
     /// The number of items on the stack
@@ -120,6 +120,26 @@ public struct Stack
         return this.stack.empty();
     }
 
+    /// SList uses reference semantics by default. For the user to either use
+    /// `ref` or to explicitly copy the stack via `copy()`.
+    public @disable this(this);
+
+    /***************************************************************************
+
+        Returns:
+            a copy of the stack. The two stacks may then be modified
+            independently of each other. Items may not be modified as
+            they're immutable, making the stack safe.
+
+    ***************************************************************************/
+
+    public Stack copy () /*const @nogc*/ pure nothrow @safe
+    {
+        auto dup = Stack(this.tupleof);
+        dup.stack = dup.stack.dup();  // must dup to avoid ref semantics
+        return dup;
+    }
+
     /***************************************************************************
 
         Returns:
@@ -150,10 +170,15 @@ unittest
     assert(stack.peek() == [255]);  // ditto
     assert(stack[].array == [[255], [123]]);
     assert(!stack.empty());
+    // copies disabled: either use 'ref' or explicitly do a 'copy()'
+    static assert(!is(typeof( { Stack nogo = stack; } )));
+    Stack copy = stack.copy();
     assert(stack.pop() == [255]);
     assert(stack.count() == 1);
     assert(!stack.empty());
     assert(stack.pop() == [123]);
     assert(stack.count() == 0);
     assert(stack.empty());
+    assert(copy.count() == 2);  // did not consume copy
+    assert(!copy.empty());      // ditto
 }
