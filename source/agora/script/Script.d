@@ -14,7 +14,6 @@
 module agora.script.Script;
 
 import agora.common.crypto.ECC;
-import agora.common.Hash;
 import agora.script.Codes;
 import agora.script.Stack;
 
@@ -24,6 +23,11 @@ import std.bitmanip;
 import std.conv;
 import std.range;
 import std.traits;
+
+version (unittest)
+{
+    import agora.common.Hash;
+}
 
 /// Ditto
 public struct Script
@@ -274,16 +278,16 @@ unittest
     assert(unlock_script.isValidSyntax());
 }
 
-version (none):  // todo
-
 /*******************************************************************************
 
+    Creates a locking P2SH script.
+
     Params:
-        key_hash = the key hash to encode in the P2PKH lock script
+        redeem_hash = the hash of the redeem script
 
     Returns:
-        a P2PKH lock script which can be unlocked with the matching
-        public key & signature
+        a P2SH lock script which can be unlocked with a
+        P2SH unlock script with a matching redeem script
 
 *******************************************************************************/
 
@@ -291,7 +295,7 @@ public Script createLockP2SH (Hash redeem_hash) pure nothrow @safe
 {
     Script script = { cast(ubyte[])[OP.HASH]
         ~ [ubyte(64)] ~ redeem_hash[]
-        ~ cast(ubyte[])[OP.OP_EQUAL] };
+        ~ cast(ubyte[])[OP.CHECK_EQUAL] };
     return script;
 }
 
@@ -306,9 +310,79 @@ public Script createLockP2SH (Hash redeem_hash) pure nothrow @safe
 
 *******************************************************************************/
 
-public Script createUnlockP2SH (Signature sig, Point pub_key)
+public Script createUnlockP2SH (Signature sig, Script redeem)
     pure nothrow @safe
 {
-    Script script = { [ubyte(64)] ~ sig[] ~ [ubyte(32)] ~ pub_key[] };
+    const bytes = redeem[];
+    assert(bytes.length <= MAX_STACK_ITEM_SIZE);
+    Script script = { [ubyte(64)] ~ sig[] ~ toPushData(bytes) };
     return script;
+}
+
+///
+unittest
+{
+    import agora.common.crypto.Schnorr;
+    import agora.utils.Test;
+
+    Pair kp = Pair.random();
+    auto sig = sign(kp, "Hello world");
+
+    Script redeem = Script([ubyte(32)] ~ kp.V[] ~ cast(ubyte[])[OP.CHECK_SIG]);
+    const redeem_hash = hashFull(redeem);
+
+    const key_hash = hashFull(kp.V);
+    Script lock_script = createLockP2SH(redeem_hash);
+    assert(lock_script.isValidSyntax());
+
+    Script unlock_script = createUnlockP2SH(sig, redeem);
+    assert(unlock_script.isValidSyntax());
+}
+
+/*******************************************************************************
+
+    Creates `PUSH_DATA_*` opcodes based on the length of the data.
+
+    Params:
+        data = the data to push
+
+    Returns:
+        a byte array embeddable in a script
+
+*******************************************************************************/
+
+public ubyte[] toPushData (in ubyte[] data) pure nothrow @safe
+{
+    assert(data.length <= MAX_STACK_ITEM_SIZE);
+
+    import std.stdio;
+    writefln("Data length: %s. Bigger than max: %s",
+        data.length, data.length > ubyte.max);
+
+    if (data.length > ubyte.max)
+    {
+        return cast(ubyte[])[OP.PUSH_DATA_2]
+            ~ nativeToLittleEndian(cast(ushort)data.length) ~ data;
+    }
+    else
+    {
+        return cast(ubyte[])[OP.PUSH_DATA_1, cast(ubyte)data.length] ~ data;
+    }
+}
+
+///
+/*pure @safe nothrow*/ // test!() woes
+unittest
+{
+    import std.array;
+    import std.range;
+
+    test!("==")([42].toPushData(),
+        cast(ubyte[])[OP.PUSH_DATA_1] ~ [ubyte(1)] ~ [ubyte(42)]);
+    test!("==")(ubyte(42).repeat(255).array.toPushData(),
+        cast(ubyte[])[OP.PUSH_DATA_1] ~ [ubyte(255)]
+        ~ ubyte(42).repeat(255).array);
+    test!("==")(ubyte(42).repeat(500).array.toPushData(),
+        cast(ubyte[])[OP.PUSH_DATA_1] ~ nativeToLittleEndian(500)
+        ~ ubyte(42).repeat(500).array);
 }
