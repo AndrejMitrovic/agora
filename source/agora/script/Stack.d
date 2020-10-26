@@ -53,14 +53,38 @@ public struct Stack
 
     /***************************************************************************
 
-        Pushes the value to the stack
+        Checks if the provided data can be pushed to the stack.
+
+        Params:
+            data = the data to check
+
+        Returns:
+            true if data is within `MAX_STACK_ITEM_SIZE` limit and adding it
+            to the stack does not exceed the `MAX_STACK_TOTAL_SIZE` stack size.
+
+    ***************************************************************************/
+
+    public bool canPush (const(ubyte)[] data) const pure nothrow @safe @nogc
+    {
+        return data.length <= MAX_STACK_ITEM_SIZE &&
+            this.used_bytes + data.length <= MAX_STACK_TOTAL_SIZE;
+    }
+
+    /***************************************************************************
+
+        Pushes the value to the stack.
+
+        Call `canPush()` first to ensure the data can fit on the stack
+        based on the configured limits.
+
+        Params:
+            data = the data to push to the stack
 
     ***************************************************************************/
 
     public void push (const(ubyte)[] data) @safe nothrow
     {
-        assert(data.sizeof <= MAX_STACK_ITEM_SIZE);
-        assert(this.used_bytes + data.length <= MAX_STACK_TOTAL_SIZE);
+        assert(this.canPush(data));
         this.stack.insertFront(data);
         this.used_bytes += data.length;
         this.num_items++;
@@ -203,4 +227,7 @@ unittest
     assert(copy.count() == 2);     // did not consume copy
     assert(copy.usedBytes() == 4); // ditto
     assert(!copy.empty());         // ditto
+    assert(stack.canPush(ubyte(42).repeat(100).array));
+    assert(!stack.canPush(ubyte(42).repeat(MAX_STACK_ITEM_SIZE + 1).array));
+    // todo: MAX_STACK_TOTAL_SIZE check is non-trivial (expensive)
 }
