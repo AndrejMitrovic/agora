@@ -81,6 +81,14 @@ public class Engine
         // to avoid a form of vulnerability:
         // https://bitcoin.stackexchange.com/q/80258/93682
 
+        // todo: for witness support (BIP 141) see commit:
+        // 449f9b8debcceb61a92043bc7031528a53627c47
+
+        // segwit:
+        // Segregated Witness outputs are constructed so that older systems that are not segwit-aware can still validate them. To an old wallet or node, a Segregated Witness output looks like an output that anyone can spend. Such outputs can be spent with an empty signature, therefore the fact that there is no signature inside the transaction (it is segregated) does not invalidate the transaction. Newer wallets and mining nodes, however, see the Segregated Witness output and expect to find a valid witness for it in the transaction’s witness data.
+
+        // todo: use bech32 encoding for the scripts
+
         Stack stack;
         if (auto error = this.executeScript(Type.Unlock, unlock, stack, tx))
             return error;
