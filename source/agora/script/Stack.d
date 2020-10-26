@@ -34,7 +34,8 @@ public enum MAX_STACK_ITEM_SIZE = 512;
     Uses a linked-list rather than a vector to avoid unnecessary copying
     due to stomping prevention as the same item may be popped and later pushed
     to the stack.
-    In addition, it makes it very cheap to copy the stack.
+    In addition, it makes it very cheap to copy the stack as all internal
+    items are immutable anyway.
 
 *******************************************************************************/
 

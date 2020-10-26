@@ -105,6 +105,9 @@ public class Engine
         if (auto error = this.executeScript(unlock, stack, tx))
             return error;
 
+        // kept in case of P2SH
+        Stack lock_stack = stack.copy();
+
         // todo: check for dangling ops in the bytes array for unlock
         // unlock script => only if there are no dangling operators it's valid,
         //                  but stack may have any data on it
@@ -113,11 +116,30 @@ public class Engine
         if (auto error = this.executeScript(lock, stack, tx))
             return error;
 
+        // special handling for P2SH scripts
+        if (lock.isLockP2SH())
+        {
+            // todo: check
+            // - push only opcodes
+            // - empty stack
+            stack = lock_stack.copy();
+
+            // todo: may want to make this an early return, or move the
+            // stack empty check above
+            assert(!stack.empty);
+            Script redeem = Script(stack.pop());
+
+            if (auto error = this.executeScript(redeem, stack, tx))
+                return error;
+        }
+
         if (stack.count() == 1 && stack.pop() == TRUE)
             return null;
 
         return "Script failed";
     }
+
+    bool print;
 
     private string executeScript (in Script script,
         ref Stack stack, in Transaction tx)
