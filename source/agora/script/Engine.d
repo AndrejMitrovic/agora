@@ -132,9 +132,10 @@ public class Engine
             if (unlock_bytes.length != Signature.sizeof)
                 return "Lock script: LockType.Key requires a 64-byte signature in the Unlock script";
             const sig = Signature(unlock_bytes);
-            if (Schnorr.verify(key, sig, tx))
+            if (!Schnorr.verify(key, sig, tx))
                 return "Unlock script: LockType.Key signature failed validation";
-            return null;
+
+            break;
 
         case LockType.KeyHash:
             if (lock_bytes.length != Hash.sizeof)
@@ -144,14 +145,14 @@ public class Engine
             if (unlock_bytes.length != Signature.sizeof + Point.sizeof)
                 return "Unlock script: LockType.KeyHash requires a 64-byte "
                      ~ "signature and 32-byte key in the Unlock script";
-            const sig = Signature(unlock_bytes);
+            const sig = Signature(unlock_bytes[0 .. Signature.sizeof]);
             unlock_bytes.popFrontN(Signature.sizeof);
 
             if (!isValidPointBytes(unlock_bytes))
                 return "Unlock script: LockType.KeyHash 32-byte public key in lock script is invalid";
             const Point key = Point(unlock_bytes);
 
-            if (Schnorr.verify(key, sig, tx))
+            if (!Schnorr.verify(key, sig, tx))
                 return "Unlock script: LockType.KeyHash signature failed validation";
 
             break;
@@ -208,11 +209,32 @@ public class Engine
         if (auto error = executeScript(unlock, stack, tx))
             return error;
 
+        Stack unlock_stack = stack.copy();
         if (auto error = executeScript(lock, stack, tx))
             return error;
 
         if (hasStackFailed(stack))
             return "Script failed";
+
+        // special handling for P2SH scripts
+        //if (lock.isLockP2SH())
+        //{
+        //    // todo: check
+        //    // - push only opcodes
+        //    // - empty stack
+        //    stack = unlock_stack.copy();
+
+        //    // todo: may want to make this an early return, or move the
+        //    // stack empty check above
+        //    assert(!stack.empty);
+        //    Script redeem = Script(stack.pop());
+
+        //    if (auto error = this.executeScript(redeem, stack, tx))
+        //        return error;
+
+        //    if (hasStackFailed(stack))
+        //        return "Script failed";
+        //}
 
         return null;
     }
@@ -568,11 +590,11 @@ unittest
         "Script failed");
 }
 
-// Native P2PK, consumes 33 bytes
+// Native P2PK (Pay to Public Key), consumes 33 bytes
 unittest
 {
-    Pair kp = Pair.random();
-    Transaction tx;
+    const Pair kp = Pair.random();
+    const Transaction tx;
     auto sig = sign(kp, tx);
 
     const lock = Script(kp.V[]);
@@ -581,12 +603,17 @@ unittest
     scope engine = new Engine();
     test!("==")(engine.execute(LockType.Key, lock, unlock, tx), null);
 
-    Script bad_key_unlock = createUnlockP2PKH(sig, Pair.random.V);
-    test!("==")(engine.execute(LockType.Script, lock, bad_key_unlock, tx),
-        "VERIFY_EQUAL operation failed");
+    const bad_sig_unlock = Script(sign(kp, "foobar")[]);
+    test!("==")(engine.execute(LockType.Key, lock, bad_sig_unlock, tx),
+        "Unlock script: LockType.Key signature failed validation");
+
+    const rkp = Pair.random();
+    const bad_key_unlock = Script(sign(rkp, tx)[]);
+    test!("==")(engine.execute(LockType.Key, lock, bad_key_unlock, tx),
+        "Unlock script: LockType.Key signature failed validation");
 }
 
-// Native P2PKH, consumes 65 bytes
+// Native P2PKH (Pay to Public Key Hash), consumes 65 bytes
 unittest
 {
     Pair kp = Pair.random();
@@ -599,12 +626,22 @@ unittest
     scope engine = new Engine();
     test!("==")(engine.execute(LockType.KeyHash, lock, unlock, tx), null);
 
-    Script bad_key_unlock = Script(sig[] ~ Pair.random().V[]);
-    test!("==")(engine.execute(LockType.Script, lock, bad_key_unlock, tx),
-        "VERIFY_EQUAL operation failed");
+    const bad_sig_unlock = Script(sign(kp, "foo")[] ~ kp.V[]);
+    test!("==")(engine.execute(LockType.KeyHash, lock, bad_sig_unlock, tx),
+        "Unlock script: LockType.KeyHash signature failed validation");
+
+    const bad_key_unlock = Script(sig[] ~ Pair.random().V[]);
+    test!("==")(engine.execute(LockType.KeyHash, lock, bad_key_unlock, tx),
+        "Unlock script: LockType.KeyHash signature failed validation");
 }
 
-// P2PKH, implemented as a script similar to Bitcoin.
+// Native P2S (Pay 2 Script)
+unittest
+{
+    Script unlock = Script([ubyte(32)] ~ kp.V[] ~ [ubyte(OP.CHECK_SIG)]);
+}
+
+// Bitcoin-style P2PKH
 unittest
 {
     Pair kp = Pair.random();
@@ -624,41 +661,6 @@ unittest
     Script bad_key_unlock = createUnlockP2PKH(sig, Pair.random.V);
     test!("==")(engine.execute(LockType.Script, lock, bad_key_unlock, tx),
         "VERIFY_EQUAL operation failed");
-}
-
-// P2SH, implemented as a script similar to Bitcoin.
-unittest
-{
-    Pair kp = Pair.random();
-    Transaction tx;
-    auto sig = sign(kp, tx);
-
-    Script redeem = Script([ubyte(32)] ~ kp.V[] ~ [ubyte(OP.CHECK_SIG)]);
-    const redeem_hash = hashFull(redeem);
-
-    const key_hash = hashFull(kp.V);
-    Script lock = createLockP2SH(redeem_hash);
-    assert(lock.isValidSyntax());
-
-    Script unlock = createUnlockP2SH(sig, redeem);
-    assert(unlock.isValidSyntax());
-
-    scope engine = new Engine();
-    test!("==")(engine.execute(LockType.Script, lock, unlock, tx), null);
-
-    Script wrong_redeem = Script([ubyte(32)] ~ Pair.random.V[]
-        ~ [ubyte(OP.CHECK_SIG)]);
-
-    // bad redeem script
-    Script bad_redeem_unlock = createUnlockP2SH(sig, wrong_redeem);
-    assert(bad_redeem_unlock.isValidSyntax());
-    test!("==")(engine.execute(LockType.Script, lock, bad_redeem_unlock, tx), "Script failed");
-
-    // good redeem script but bad signature
-    auto wrong_sig = sign(kp, "bad");
-    Script bad_sig_unlock = createUnlockP2SH(wrong_sig, redeem);
-    assert(bad_sig_unlock.isValidSyntax());
-    test!("==")(engine.execute(LockType.Script, lock, bad_sig_unlock, tx), "Script failed");
 }
 
 // Basic invalid script verification
