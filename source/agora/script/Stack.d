@@ -97,7 +97,7 @@ public struct Stack
 
     ***************************************************************************/
 
-    public const(ubyte)[] peek () @safe nothrow
+    public const(ubyte)[] peek () /*const*/ pure nothrow @safe @nogc
     {
         assert(!this.stack.empty());
         return this.stack.front();

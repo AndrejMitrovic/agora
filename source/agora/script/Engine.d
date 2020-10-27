@@ -116,7 +116,7 @@ public class Engine
             return error;
 
         // do not move! must check before P2SH as redeem script hash is checked
-        if (stack.empty() || stack.pop() != TRUE)
+        if (hasStackFailed(stack))
             return "Script failed";
 
         // special handling for P2SH scripts
@@ -135,7 +135,7 @@ public class Engine
             if (auto error = this.executeScript(redeem, stack, tx))
                 return error;
 
-            if (stack.empty() || stack.pop() != TRUE)
+            if (hasStackFailed(stack))
                 return "Script failed";
         }
 
@@ -341,6 +341,12 @@ public class Engine
         return null;
     }
 
+    private static bool hasStackFailed (/*in*/ ref Stack stack)  // peek() is not const
+        pure nothrow @safe @nogc
+    {
+        return stack.empty() || stack.peek() != TRUE;
+    }
+
     /***************************************************************************
 
         Reads the length and payload of the associated `PUSH_DATA_*` opcode,
@@ -530,7 +536,7 @@ unittest
         "VERIFY_EQUAL operation failed");
 }
 
-// P2SH. This opcode is recognized by the engine and has special code flow.
+// P2SH. Special code flow.
 unittest
 {
     Pair kp = Pair.random();
