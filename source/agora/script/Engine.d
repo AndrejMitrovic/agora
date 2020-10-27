@@ -2,6 +2,19 @@
 
     Contains the script execution engine (non-webASM)
 
+    // todo: check script weight:
+    // - max opcode length
+    // - num of opcodes
+    // - weight of each opcode (e.g. sig checks more expensive than ADD)
+    // might want to calculate the weight in an out parameter in
+    // isInvalidSyntaxReason()
+
+    // todo: check *executed* instructions and that they don't
+    // go over the configured (consensus) limit
+
+    // todo: for witness support (BIP 141) see commit:
+    // 449f9b8debcceb61a92043bc7031528a53627c47
+
     Copyright:
         Copyright (c) 2020 BOS Platform Foundation Korea
         All rights reserved.
@@ -45,7 +58,7 @@ public class Engine
 
     /// historic backwards compatibility for the tests.
     /// The tests were originally written following Bitcoin script layout,
-    /// but was later replaced with a lock type tag (see toLockScript()).
+    /// but was later replaced with a lock type tag (see toLock script()).
     version (unittest)
     private string execute (LockType lock_type, in Script lock,
         in Script unlock)
@@ -63,110 +76,150 @@ public class Engine
     }
 
     // tx: the transaction that's trying to spend (used for the commitment check)
-    public string execute (in ubyte[] lock_bytes, in ubyte[] unlock_bytes,
-        in Transaction tx)
+    public string execute (const(ubyte)[] lock_bytes,
+        const(ubyte)[] unlock_bytes, in Transaction tx)
     {
-        // todo: make a simple case for simple lock scripts,
-        // replace all the P2PKH script nonsense in toLockScript(),
-        // it should not return a script if it's not a script.
+        // assumed sizes
+        static assert(Point.sizeof == 32);
+        static assert(Hash.sizeof == 64);
 
-        Script lock;
+        if (lock_bytes.length == 0)
+            return "Lock script cannot be empty";
+
+        // pay to script hash, or direct lock script
         LockType lock_type;
-        if (auto error = toLockScript(lock_bytes, lock, lock_type))
-            return error;
+        if (!toLockType(lock_bytes[0], lock_type))
+            return "Unrecognized lock type";
+        lock_bytes.popFront();
 
-        if (lock_type == LockType.Script)
+        final switch (lock_type)
         {
-            if (auto error = lock.isInvalidSyntaxReason())
-                return "Lock script error: " ~ error;
-        }
+            case LockType.Key:
+            case LockType.KeyHash:
+                if (auto error = handleBasicPayment(lock_type, lock_bytes,
+                    unlock_bytes, tx))
+                    return error;
 
-        Script unlock = Script(unlock_bytes);
-        if (lock_type == LockType.Script || lock_type == LockType.ScriptHash)
-        {
-            if (auto error = unlock.isInvalidSyntaxReason())
-                return "Unlock script error: " ~ error;
-        }
+                break;
 
-        // todo: check script weight:
-        // - max opcode length
-        // - num of opcodes
-        // - weight of each opcode (e.g. sig checks more expensive than ADD)
-        // might want to calculate the weight in an out parameter in
-        // isInvalidSyntaxReason()
+            case LockType.Script:
+            case LockType.ScriptHash:
+                if (auto error = handleScriptPayment(lock_type, lock_bytes,
+                    unlock_bytes, tx))
+                    return error;
 
-        // todo: check *executed* instructions and that they don't
-        // go over the configured (consensus) limit
-
-        // todo: for witness support (BIP 141) see commit:
-        // 449f9b8debcceb61a92043bc7031528a53627c47
-
-        Stack stack;
-        if (auto error = this.executeScript(unlock, stack, tx))
-            return error;
-
-        // kept in case of P2SH
-        Stack unlock_stack = stack.copy();
-
-        // todo: check for dangling ops in the bytes array for unlock
-        // unlock script => only if there are no dangling operators it's valid,
-        //                  but stack may have any data on it
-        // lock script => only if there is a TRUE value on the stack it's valid
-
-        if (auto error = this.executeScript(lock, stack, tx))
-            return error;
-
-        // do not move! must check before P2SH as redeem script hash is checked
-        if (hasStackFailed(stack))
-            return "Script failed";
-
-        // special handling for P2SH scripts
-        if (lock_type == LockType.ScriptHash)
-        {
-            // todo: check
-            // - push only opcodes
-            // - empty stack
-            stack = unlock_stack.copy();
-
-            // todo: may want to make this an early return, or move the
-            // stack empty check above
-            assert(!stack.empty);
-            Script redeem = Script(stack.pop());
-
-            if (auto error = this.executeScript(redeem, stack, tx))
-                return error;
-
-            if (hasStackFailed(stack))
-                return "Script failed";
+                break;
         }
 
         return null;
     }
 
-    private string executeScript (in Script script,
+    /// Stack-less basic payments,
+    /// the Unlock script is either (Sig), or (Sig, PubKey)
+    private static string handleBasicPayment (in LockType lock_type,
+        const(ubyte)[] lock_bytes, const(ubyte)[] unlock_bytes,
+        in Transaction tx)
+    {
+        switch (lock_type)
+        {
+        case LockType.Key:
+            if (lock_bytes.length != Point.sizeof)
+                return "Lock script: LockType.Key requires 32-byte key argument";
+            if (!isValidPointBytes(lock_bytes))
+                return "Lock script: LockType.Key 32-byte public key in lock script is invalid";
+            const Point key = Point(lock_bytes);
+
+            if (unlock_bytes.length != Signature.sizeof)
+                return "Lock script: LockType.Key requires a 64-byte signature in the Unlock script";
+            const sig = Signature(unlock_bytes);
+            if (Schnorr.verify(key, sig, tx))
+                return "Unlock script: LockType.Key signature failed validation";
+            return null;
+
+        case LockType.KeyHash:
+            if (lock_bytes.length != Hash.sizeof)
+                return "Lock script: LockType.KeyHash requires 64-byte key hash argument";
+            const Hash key_hash = Hash(lock_bytes);
+
+            if (unlock_bytes.length != Signature.sizeof + Point.sizeof)
+                return "Unlock script: LockType.KeyHash requires a 64-byte "
+                     ~ "signature and 32-byte key in the Unlock script";
+            const sig = Signature(unlock_bytes);
+            unlock_bytes.popFrontN(Signature.sizeof);
+
+            if (!isValidPointBytes(unlock_bytes))
+                return "Unlock script: LockType.KeyHash 32-byte public key in lock script is invalid";
+            const Point key = Point(unlock_bytes);
+
+            if (Schnorr.verify(key, sig, tx))
+                return "Unlock script: LockType.KeyHash signature failed validation";
+
+            break;
+
+        default:
+            assert(0);
+        }
+
+        return null;
+    }
+
+    private static string handleScriptPayment (in LockType lock_type,
+        in ubyte[] lock_bytes, in ubyte[] unlock_bytes, in Transaction tx)
+    {
+        switch (lock_type)
+        {
+        case LockType.Script:
+            Script lock = Script(lock_bytes);
+            if (auto error = lock.isInvalidSyntaxReason())
+                return "Lock script: error: " ~ error;
+            Script unlock = Script(unlock_bytes);
+            if (auto error = executeScripts(lock, unlock, tx))
+                return error;
+            break;
+
+        case LockType.ScriptHash:
+            if (lock_bytes.length != Hash.sizeof)
+                return "Lock script: LockType.ScriptHash requires 64-byte key hash argument";
+            const Hash script_hash = Hash(lock_bytes);
+
+            if (hashFull(unlock_bytes) != script_hash)
+                return "Lock script: Hash of Unlock script does not match lock script hash argument";
+
+            Script unlock = Script(unlock_bytes);
+            Stack stack;
+            if (auto error = executeScript(unlock, stack, tx))
+                return error;
+
+            if (hasStackFailed(stack))
+                return "Script failed";
+            break;
+
+        default:
+            assert(0);
+        }
+
+        return null;
+    }
+
+    private static string executeScripts (in Script lock, in Script unlock,
+        in Transaction tx)
+    {
+        Stack stack;
+        if (auto error = executeScript(unlock, stack, tx))
+            return error;
+
+        if (auto error = executeScript(lock, stack, tx))
+            return error;
+
+        if (hasStackFailed(stack))
+            return "Script failed";
+
+        return null;
+    }
+
+    private static string executeScript (in Script script,
         ref Stack stack, in Transaction tx)
     {
-        // if *any* items are false, then the current execution
-        // state is false, and we continue executing next
-        // instructions. however the fExec level is set to false,
-        // until an ELSE or ENDIF sets it to true (I think),
-        // and then we can execute code again.
-
-        // todo: verify stack data pushes via CheckMinimalPush(),
-        // it seems it's related to BIP62 where pushes can be
-        // encoded in different ways. Note: BIP141 (segwit)
-        // largely replaces BIP62, so we may not require
-        // the validation in CheckMinimalPush(). It is likely
-        // still there for compatibility reasons.
-
-        // todo: check max stack size
-        // todo: do not implement alt stack, it's unnecessary
-
-        // todo: do not add any more support other than the bare
-        // minimum for script validation. e.g. don't add OP_ADD support
-        // because this requires emulating a specific virtual machine
-        // platform which handles integer arithmetic the same on all platforms.
-
         ScopeCondition sc;
         const(ubyte)[] bytes = script[];
         while (!bytes.empty())
@@ -337,69 +390,6 @@ public class Engine
 
         default:
             assert(0);
-        }
-
-        return null;
-    }
-
-    // Create the associated lock script
-    private static string toLockScript (const(ubyte)[] bytes,
-        out Script lock, out LockType lock_type)
-    {
-        // assumed sizes
-        static assert(Point.sizeof == 32);
-        static assert(Hash.sizeof == 64);
-
-        if (bytes.length == 0)
-            return "Lock cannot be empty";
-
-        // simple pay to public key hash
-        if (bytes.length == Hash.sizeof)
-        {
-            const Hash hash = Hash(bytes);
-            lock = createLockP2PKH(hash);
-            return null;
-        }
-
-        // pay to script hash, or direct lock script
-        if (!toLockType(bytes[0], lock_type))
-            return "Unrecognized lock type";
-        bytes.popFront();
-
-        final switch (lock_type)
-        {
-            case LockType.Key:
-                if (bytes.length != Point.sizeof)
-                    return "LockType.Key requires 32-byte key argument";
-
-                // todo: emulated via P2PKH, but we can optimize it and
-                // potentially use schnorr batch verification
-                const Point key = Point(bytes);
-                const Hash key_hash = hashFull(key);
-                lock = createLockP2PKH(key_hash);
-                break;
-
-            case LockType.KeyHash:
-                if (bytes.length != Hash.sizeof)
-                    return "LockType.KeyHash requires 64-byte key hash argument";
-
-                const Hash key_hash = Hash(bytes);
-                lock = createLockP2PKH(key_hash);
-                break;
-
-            case LockType.Script:
-                if (bytes.length == 0)
-                    return "LockType.Script requires at least one opcode";
-                lock = Script(bytes);
-                break;
-
-            case LockType.ScriptHash:
-                if (bytes.length != Hash.sizeof)
-                    return "LockType.ScriptHash requires 64-byte hash argument";
-
-                const Hash script_hash = Hash(bytes);
-                lock = createLockP2SH(script_hash);
-                break;
         }
 
         return null;
