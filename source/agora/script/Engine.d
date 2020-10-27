@@ -33,34 +33,47 @@ version (unittest)
     import agora.common.Hash;
     import agora.utils.Test;
     import ocean.core.Test;
-    import std.stdio;
+    import std.stdio : writefln, writeln;  // avoid importing LockType
 }
 
 /// The engine executes scripts, and returns a value or throws
 public class Engine
 {
+    /// Conditional opcodes require the top item on the stack to be one of these
     private static immutable ubyte[1] TRUE = [OP.TRUE];
     private static immutable ubyte[1] FALSE = [OP.FALSE];
 
-    // safer for the tests as it provides its own stack,
-    // otherwise leaking this outside can make tests
-    // inadvertently depend on intermittent stacks.
-    // this overload is alos not taking any transaction,
-    // it's not supposed to be tested with unlocking scripts
+    /// historic backwards compatibility for the tests.
+    /// The tests were originally written following Bitcoin script layout,
+    /// but was later replaced with a lock type tag (see toLockScript()).
     version (unittest)
-    private string execute (in Script lock, in Script unlock)
+    private string execute (LockType lock_type, in Script lock,
+        in Script unlock)
     {
         Transaction tx;
-        return this.execute(lock, unlock, tx);
+        return this.execute(lock_type, lock, unlock, tx);
+    }
+
+    /// ditto
+    private string execute (LockType lock_type, in Script lock,
+        in Script unlock, in Transaction tx)
+    {
+        return this.execute([ubyte(lock_type)] ~ lock[],
+            unlock[], tx);
     }
 
     // tx: the transaction that's trying to spend (used for the commitment check)
-    public string execute (in Script lock, in Script unlock,
+    public string execute (in ubyte[] lock_bytes, in ubyte[] unlock_bytes,
         in Transaction tx)
     {
+        Script lock;
+        if (auto error = toLockScript(lock_bytes, lock))
+            return error;
+
         if (auto error = lock.isInvalidSyntaxReason())
             return "Lock script error: " ~ error;
 
+        Script unlock = Script(unlock_bytes);
         if (auto error = unlock.isInvalidSyntaxReason())
             return "Unlock script error: " ~ error;
 
@@ -74,31 +87,8 @@ public class Engine
         // todo: check *executed* instructions and that they don't
         // go over the configured (consensus) limit
 
-        // non-standard scripts (meaning non-recognized ones with unexpected opcodes)
-        // are not relayed to the network, even though they are technically valid.
-        // see: https://bitcoin.stackexchange.com/questions/73728/why-can-non-standard-transactions-be-mined-but-not-relayed/
-        // however this only makes sense in the scope of PoW. If a miner did spend
-        // the time to mine a block, then the time they spent on running the contract
-        // can be verified not to DDoS the system.
-
-        // for the locking script the rule is:
-        // valid only if there is one element on the stack: 1
-        // invalid if: stack is empty, top element is not 1,
-        // there is more than 1 element on the stack,
-        // the script exits prematurely
-        // for the unlocking script we have different validation rules.
-
-        // the unlock script must be ran separately from the lock script
-        // to avoid a form of vulnerability:
-        // https://bitcoin.stackexchange.com/q/80258/93682
-
         // todo: for witness support (BIP 141) see commit:
         // 449f9b8debcceb61a92043bc7031528a53627c47
-
-        // segwit:
-        // Segregated Witness outputs are constructed so that older systems that are not segwit-aware can still validate them. To an old wallet or node, a Segregated Witness output looks like an output that anyone can spend. Such outputs can be spent with an empty signature, therefore the fact that there is no signature inside the transaction (it is segregated) does not invalidate the transaction. Newer wallets and mining nodes, however, see the Segregated Witness output and expect to find a valid witness for it in the transaction’s witness data.
-
-        // todo: use bech32 encoding for the scripts
 
         Stack stack;
         if (auto error = this.executeScript(unlock, stack, tx))
@@ -137,48 +127,6 @@ public class Engine
 
             if (hasStackFailed(stack))
                 return "Script failed";
-        }
-
-        return null;
-    }
-
-    private static string handleConditional (in OP opcode,
-        ref Stack stack, ref ScopeCondition sc)
-    {
-        switch (opcode)
-        {
-        case OP.IF:
-        case OP.NOT_IF:
-            if (!sc.isTrue())
-            {
-                sc.push(false);  // enter new scope, remain false
-                break;
-            }
-
-            if (stack.count() < 1)
-                return "IF/NOT_IF opcode requires an item on the stack";
-
-            const top = stack.pop();
-            if (top != TRUE && top != FALSE)
-                return "IF/NOT_IF may only be used with OP.TRUE / OP.FALSE values";
-
-            sc.push((opcode == OP.IF) ^ (top == FALSE));
-            break;
-
-        case OP.ELSE:
-            if (sc.empty())
-                return "Cannot have an ELSE without an associated IF";
-            sc.tryToggle();
-            break;
-
-        case OP.END_IF:
-            if (sc.empty())
-                return "Cannot have an END_IF without an associated IF";
-            sc.pop();
-            break;
-
-        default:
-            assert(0);
         }
 
         return null;
@@ -341,6 +289,89 @@ public class Engine
         return null;
     }
 
+    private static string handleConditional (in OP opcode,
+        ref Stack stack, ref ScopeCondition sc)
+    {
+        switch (opcode)
+        {
+        case OP.IF:
+        case OP.NOT_IF:
+            if (!sc.isTrue())
+            {
+                sc.push(false);  // enter new scope, remain false
+                break;
+            }
+
+            if (stack.count() < 1)
+                return "IF/NOT_IF opcode requires an item on the stack";
+
+            const top = stack.pop();
+            if (top != TRUE && top != FALSE)
+                return "IF/NOT_IF may only be used with OP.TRUE / OP.FALSE values";
+
+            sc.push((opcode == OP.IF) ^ (top == FALSE));
+            break;
+
+        case OP.ELSE:
+            if (sc.empty())
+                return "Cannot have an ELSE without an associated IF";
+            sc.tryToggle();
+            break;
+
+        case OP.END_IF:
+            if (sc.empty())
+                return "Cannot have an END_IF without an associated IF";
+            sc.pop();
+            break;
+
+        default:
+            assert(0);
+        }
+
+        return null;
+    }
+
+    // Create the associated lock script
+    private static string toLockScript (const(ubyte)[] bytes, out Script lock)
+    {
+        static assert(Hash.sizeof == 64);  // assumed size
+        if (bytes.length == 0)
+            return "Lock cannot be empty";
+
+        // simple pay to public key hash
+        if (bytes.length == Hash.sizeof)
+        {
+            const Hash hash = Hash(bytes);
+            lock = createLockP2PKH(hash);
+            return null;
+        }
+
+        // pay to script hash, or direct lock script
+        LockType lock_type;
+        if (!toLockType(bytes[0], lock_type))
+            return "Unrecognized lock type";
+        bytes.popFront();
+
+        final switch (lock_type)
+        {
+            case LockType.Hash:
+                if (bytes.length != Hash.sizeof)
+                    return "LockType.Hash requires 64-byte hash argument";
+
+                const Hash hash = Hash(bytes);
+                lock = createLockP2SH(hash);
+                break;
+
+            case LockType.Script:
+                if (bytes.length == 0)
+                    return "LockType.Script requires at least one opcode";
+                lock = Script(bytes);
+                break;
+        }
+
+        return null;
+    }
+
     private static bool hasStackFailed (/*in*/ ref Stack stack)  // peek() is not const
         pure nothrow @safe @nogc
     {
@@ -423,7 +454,7 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(Script([OP.DUP]), Script.init),
+    test!("==")(engine.execute(LockType.Script, Script([OP.DUP]), Script.init),
         "DUP opcode requires an item on the stack");
 }
 
@@ -431,7 +462,7 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(Script([OP.HASH]), Script.init),
+    test!("==")(engine.execute(LockType.Script, Script([OP.HASH]), Script.init),
         "HASH opcode requires an item on the stack");
 }
 
@@ -439,17 +470,17 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.CHECK_EQUAL]), Script.init),
         "CHECK_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]), Script.init),
         "CHECK_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]),
         Script.init),
         null);
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]),
         Script.init),
         "Script failed");
@@ -459,17 +490,17 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.VERIFY_EQUAL]), Script.init),
         "VERIFY_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL]), Script.init),
         "VERIFY_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.execute(  // OP.TRUE needed as VERIFY does not push to stack
+    test!("==")(engine.execute(LockType.Script,   // OP.TRUE needed as VERIFY does not push to stack
         Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL, OP.TRUE]),
         Script.init),
         null);
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL, OP.TRUE]),
         Script.init),
         "VERIFY_EQUAL operation failed");
@@ -479,20 +510,20 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.CHECK_SIG]), Script.init),
         "CHECK_SIG opcode requires two items on the stack");
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.PUSH_BYTES_1, 1, OP.CHECK_SIG]), Script.init),
         "CHECK_SIG opcode requires two items on the stack");
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.CHECK_SIG]),
         Script.init),
         "CHECK_SIG opcode requires 32-byte public key on the stack");
 
     // invalid key (crypto_core_ed25519_is_valid_point() fails)
     Point invalid_key;
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([ubyte(OP.PUSH_BYTES_1), ubyte(1)]
             ~ [ubyte(32)] ~ invalid_key[]
             ~ [ubyte(OP.CHECK_SIG)]), Script.init),
@@ -500,14 +531,14 @@ unittest
 
     Point valid_key = Point.fromString(
         "0x44404b654d6ddf71e2446eada6acd1f462348b1b17272ff8f36dda3248e08c81");
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([ubyte(OP.PUSH_BYTES_1), ubyte(1)]
             ~ [ubyte(32)] ~ valid_key[]
             ~ [ubyte(OP.CHECK_SIG)]), Script.init),
         "CHECK_SIG opcode requires 64-byte signature on the stack");
 
     Signature invalid_sig;
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([ubyte(OP.PUSH_BYTES_64)] ~ invalid_sig[]
             ~ [ubyte(32)] ~ valid_key[]
             ~ [ubyte(OP.CHECK_SIG)]), Script.init),
@@ -529,10 +560,10 @@ unittest
     assert(unlock.isValidSyntax());
 
     scope engine = new Engine();
-    test!("==")(engine.execute(lock, unlock, tx), null);
+    test!("==")(engine.execute(LockType.Script, lock, unlock, tx), null);
 
     Script bad_key_unlock = createUnlockP2PKH(sig, Pair.random.V);
-    test!("==")(engine.execute(lock, bad_key_unlock, tx),
+    test!("==")(engine.execute(LockType.Script, lock, bad_key_unlock, tx),
         "VERIFY_EQUAL operation failed");
 }
 
@@ -554,7 +585,7 @@ unittest
     assert(unlock.isValidSyntax());
 
     scope engine = new Engine();
-    test!("==")(engine.execute(lock, unlock, tx), null);
+    test!("==")(engine.execute(LockType.Script, lock, unlock, tx), null);
 
     Script wrong_redeem = Script([ubyte(32)] ~ Pair.random.V[]
         ~ [ubyte(OP.CHECK_SIG)]);
@@ -562,13 +593,13 @@ unittest
     // bad redeem script
     Script bad_redeem_unlock = createUnlockP2SH(sig, wrong_redeem);
     assert(bad_redeem_unlock.isValidSyntax());
-    test!("==")(engine.execute(lock, bad_redeem_unlock, tx), "Script failed");
+    test!("==")(engine.execute(LockType.Script, lock, bad_redeem_unlock, tx), "Script failed");
 
     // good redeem script but bad signature
     auto wrong_sig = sign(kp, "bad");
     Script bad_sig_unlock = createUnlockP2SH(wrong_sig, redeem);
     assert(bad_sig_unlock.isValidSyntax());
-    test!("==")(engine.execute(lock, bad_sig_unlock, tx), "Script failed");
+    test!("==")(engine.execute(LockType.Script, lock, bad_sig_unlock, tx), "Script failed");
 }
 
 // Basic invalid script verification
@@ -587,11 +618,11 @@ unittest
 
     const invalid_script = Script([255]);
     scope engine = new Engine();
-    test!("==")(engine.execute(lock, unlock, tx), null);
+    test!("==")(engine.execute(LockType.Script, lock, unlock, tx), null);
     // invalid scripts / sigs
-    test!("==")(engine.execute(invalid_script, unlock, tx),
+    test!("==")(engine.execute(LockType.Script, invalid_script, unlock, tx),
         "Lock script error: Script contains an unrecognized opcode");
-    test!("==")(engine.execute(lock, invalid_script, tx),
+    test!("==")(engine.execute(LockType.Script, lock, invalid_script, tx),
         "Unlock script error: Script contains an unrecognized opcode");
 }
 
@@ -600,12 +631,12 @@ unittest
 {
     import std.algorithm;
     scope engine = new Engine();
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([42].toPushData() ~ [ubyte(OP.TRUE)]),
         Script.init),
         null);
 
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script(ubyte(42).repeat(MAX_STACK_ITEM_SIZE + 1).array.toPushData()
         ~ [ubyte(OP.TRUE)]),
         Script.init),
@@ -618,53 +649,53 @@ unittest
     assert(MAX_STACK_TOTAL_SIZE % MAX_STACK_ITEM_SIZE == 0);
 
     // strictly above limit
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes + 1).joiner.array ~ [ubyte(OP.TRUE)]),
         Script.init),
         "PUSH_DATA_2 opcode payload exceeds item size or stack size limits");
 
     // within limit, but missing OP.TRUE on stack
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array),
         Script.init),
         "Script failed");
 
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array ~ [ubyte(OP.TRUE)]),
         Script.init),
         "Stack overflow while pushing OP.TRUE");
 
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array ~ [ubyte(OP.FALSE)]),
         Script.init),
         "Stack overflow while pushing OP.FALSE");
 
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array
         ~ [ubyte(1)].toPushData()),
         Script.init),
         "PUSH_DATA_1 opcode payload exceeds item size or stack size limits");
 
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array
         ~ [ubyte(1), ubyte(1)]),
         Script.init),
         "Stack overflow while executing PUSH_BYTES_*");
 
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array
         ~ [ubyte(OP.DUP)]),
         Script.init),
         "Stack overflow while executing DUP");
 
     // will fit, pops MAX_STACK_ITEM_SIZE and pushes 64 bytes
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array
         ~ [ubyte(OP.HASH), ubyte(OP.TRUE)]),
         Script.init),
         null);
 
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes - 1).joiner.array
         ~ [ubyte(1), ubyte(1)].repeat(MAX_STACK_ITEM_SIZE).joiner.array
         ~ ubyte(OP.HASH) ~ [ubyte(OP.TRUE)]),
@@ -680,25 +711,25 @@ unittest
     /* simple conditionals */
 
     // IF true => execute if branch
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.TRUE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
         Script.init),
         null);
 
     // IF false => execute else branch
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.FALSE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
         Script.init),
         "Script failed");
 
     // NOT_IF true => execute if branch
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.FALSE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
         Script.init),
         null);
 
     // NOT_IF false => execute else branch
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.TRUE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
         Script.init),
         "Script failed");
@@ -706,7 +737,7 @@ unittest
     /* nested conditionals */
 
     // IF true => IF true => 3
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([ubyte(1), ubyte(3), OP.CHECK_EQUAL]),
         Script([OP.TRUE, OP.IF,
                            OP.TRUE, OP.IF,
@@ -724,7 +755,7 @@ unittest
         null);
 
     // IF true => NOT_IF false => 4
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([ubyte(1), ubyte(4), OP.CHECK_EQUAL]),
         Script([OP.TRUE, OP.IF,
                            OP.TRUE, OP.NOT_IF,
@@ -742,7 +773,7 @@ unittest
         null);
 
     // IF false => IF true => 5
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([ubyte(1), ubyte(5), OP.CHECK_EQUAL]),
         Script([OP.FALSE, OP.IF,
                             OP.TRUE, OP.IF,
@@ -760,7 +791,7 @@ unittest
         null);
 
     // IF false => NOT_IF FALSE => 6
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([ubyte(1), ubyte(6), OP.CHECK_EQUAL]),
         Script([OP.FALSE, OP.IF,
                             OP.TRUE, OP.IF,
@@ -778,17 +809,17 @@ unittest
         null);
 
     /* syntax checks */
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.IF]),
         Script.init),
         "IF/NOT_IF opcode requires an item on the stack");
 
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([ubyte(1), ubyte(2), OP.IF]),
         Script.init),
         "IF/NOT_IF may only be used with OP.TRUE / OP.FALSE values");
 
-    test!("==")(engine.execute(
+    test!("==")(engine.execute(LockType.Script,
         Script([OP.TRUE, OP.IF]),
         Script.init),
         "IF requires a closing END_IF");

@@ -15,6 +15,68 @@ module agora.script.Codes;
 
 import std.traits;
 
+/// The output lock types. If the lock is a 64-byte array it's derived
+/// to be a hash of a public key. Otherwise the first byte is the lock type.
+public enum LockType : ubyte
+{
+    /// lock is a 64-byte hash of a script, unlock is the script itself
+    Hash = 0x0,
+
+    /// lock is a script, unlock may be anything required by the lock script
+    Script = 0x1,
+}
+
+/*******************************************************************************
+
+    Converts the byte to an opcode,
+    or returns false if it's an unrecognized opcode.
+
+    Params:
+        value = the byte containing the opcode
+        opcode = will contain the opcode if it was recognized
+
+    Returns:
+        true if the value is a recognized opcode
+
+*******************************************************************************/
+
+public bool toLockType (ubyte value, out LockType opcode)
+    pure nothrow @safe @nogc
+{
+    switch (value)
+    {
+        foreach (member; EnumMembers!LockType)
+        {
+            case member:
+            {
+                opcode = member;
+                return true;
+            }
+        }
+
+        default:
+            return false;
+    }
+}
+
+/// Ditto, but assumes the opcode is valid (safe to use after validation)
+public LockType toLockType (ubyte value) pure nothrow @safe @nogc
+{
+    LockType opcode;
+    if (!toLockType(value, opcode))
+        assert(0);
+    return opcode;
+}
+
+///
+pure nothrow @safe @nogc unittest
+{
+    LockType lt;
+    assert(0x00.toLockType(lt) && lt == LockType.Hash);
+    assert(0x01.toLockType(lt) && lt == LockType.Script);
+    assert(!255.toLockType(lt));
+}
+
 /// The supported opcodes
 /// Opcodes named `CHECK_*` push their result to the stack,
 /// whereas `VERIFY_*` opcodes invalidate the transaction if the result is false.
@@ -79,29 +141,6 @@ enum OP : ubyte
 
 /*******************************************************************************
 
-    Check if the opcode is a conditional
-
-    Params:
-        opcode = opcode to check
-
-    Returns:
-        true if the opcode is one of the conditional opcodes
-
-*******************************************************************************/
-
-public bool isConditional (OP opcode) pure nothrow @safe @nogc
-{
-    switch (opcode)
-    {
-        case OP.IF, OP.NOT_IF, OP.ELSE, OP.END_IF:
-            return true;
-        default:
-            return false;
-    }
-}
-
-/*******************************************************************************
-
     Converts the byte to an opcode,
     or returns false if it's an unrecognized opcode.
 
@@ -159,4 +198,27 @@ pure nothrow @safe @nogc unittest
     assert(1.toOPCode(op) && op == OP.PUSH_BYTES_1);
     assert(32.toOPCode(op) && op == cast(OP)32);
     assert(64.toOPCode(op) && op == OP.PUSH_BYTES_64);
+}
+
+/*******************************************************************************
+
+    Check if the opcode is a conditional
+
+    Params:
+        opcode = opcode to check
+
+    Returns:
+        true if the opcode is one of the conditional opcodes
+
+*******************************************************************************/
+
+public bool isConditional (OP opcode) pure nothrow @safe @nogc
+{
+    switch (opcode)
+    {
+        case OP.IF, OP.NOT_IF, OP.ELSE, OP.END_IF:
+            return true;
+        default:
+            return false;
+    }
 }
