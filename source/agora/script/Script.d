@@ -68,20 +68,6 @@ public struct Script
 
     /***************************************************************************
 
-        Returns:
-            true if this is a P2SH lock script
-
-    ***************************************************************************/
-
-    public bool isLockP2SH () const pure nothrow @safe @nogc
-    {
-        return this.data.length == 67 &&
-            this.data[0] == OP.HASH &&
-            this.data[$ - 1] == OP.CHECK_EQUAL;
-    }
-
-    /***************************************************************************
-
         Ditto, but returns the string reason when the script is
         considered syntactically invalid.
 
@@ -311,12 +297,6 @@ public Script createLockP2SH (Hash redeem_hash) pure nothrow @safe
         ~ [ubyte(64)] ~ redeem_hash[]
         ~ [ubyte(OP.CHECK_EQUAL)] };
     return script;
-}
-
-///
-unittest
-{
-    assert(createLockP2SH(Hash.init).isLockP2SH());
 }
 
 /*******************************************************************************

@@ -66,16 +66,27 @@ public class Engine
     public string execute (in ubyte[] lock_bytes, in ubyte[] unlock_bytes,
         in Transaction tx)
     {
+        // todo: make a simple case for simple lock scripts,
+        // replace all the P2PKH script nonsense in toLockScript(),
+        // it should not return a script if it's not a script.
+
         Script lock;
-        if (auto error = toLockScript(lock_bytes, lock))
+        LockType lock_type;
+        if (auto error = toLockScript(lock_bytes, lock, lock_type))
             return error;
 
-        if (auto error = lock.isInvalidSyntaxReason())
-            return "Lock script error: " ~ error;
+        if (lock_type == LockType.Script)
+        {
+            if (auto error = lock.isInvalidSyntaxReason())
+                return "Lock script error: " ~ error;
+        }
 
         Script unlock = Script(unlock_bytes);
-        if (auto error = unlock.isInvalidSyntaxReason())
-            return "Unlock script error: " ~ error;
+        if (lock_type == LockType.Script || lock_type == LockType.ScriptHash)
+        {
+            if (auto error = unlock.isInvalidSyntaxReason())
+                return "Unlock script error: " ~ error;
+        }
 
         // todo: check script weight:
         // - max opcode length
@@ -110,7 +121,7 @@ public class Engine
             return "Script failed";
 
         // special handling for P2SH scripts
-        if (lock.isLockP2SH())
+        if (lock_type == LockType.ScriptHash)
         {
             // todo: check
             // - push only opcodes
@@ -332,9 +343,13 @@ public class Engine
     }
 
     // Create the associated lock script
-    private static string toLockScript (const(ubyte)[] bytes, out Script lock)
+    private static string toLockScript (const(ubyte)[] bytes,
+        out Script lock, out LockType lock_type)
     {
-        static assert(Hash.sizeof == 64);  // assumed size
+        // assumed sizes
+        static assert(Point.sizeof == 32);
+        static assert(Hash.sizeof == 64);
+
         if (bytes.length == 0)
             return "Lock cannot be empty";
 
@@ -347,25 +362,43 @@ public class Engine
         }
 
         // pay to script hash, or direct lock script
-        LockType lock_type;
         if (!toLockType(bytes[0], lock_type))
             return "Unrecognized lock type";
         bytes.popFront();
 
         final switch (lock_type)
         {
-            case LockType.Hash:
-                if (bytes.length != Hash.sizeof)
-                    return "LockType.Hash requires 64-byte hash argument";
+            case LockType.Key:
+                if (bytes.length != Point.sizeof)
+                    return "LockType.Key requires 32-byte key argument";
 
-                const Hash hash = Hash(bytes);
-                lock = createLockP2SH(hash);
+                // todo: emulated via P2PKH, but we can optimize it and
+                // potentially use schnorr batch verification
+                const Point key = Point(bytes);
+                const Hash key_hash = hashFull(key);
+                lock = createLockP2PKH(key_hash);
+                break;
+
+            case LockType.KeyHash:
+                if (bytes.length != Hash.sizeof)
+                    return "LockType.KeyHash requires 64-byte key hash argument";
+
+                const Hash key_hash = Hash(bytes);
+                lock = createLockP2PKH(key_hash);
                 break;
 
             case LockType.Script:
                 if (bytes.length == 0)
                     return "LockType.Script requires at least one opcode";
                 lock = Script(bytes);
+                break;
+
+            case LockType.ScriptHash:
+                if (bytes.length != Hash.sizeof)
+                    return "LockType.ScriptHash requires 64-byte hash argument";
+
+                const Hash script_hash = Hash(bytes);
+                lock = createLockP2SH(script_hash);
                 break;
         }
 
@@ -545,7 +578,43 @@ unittest
         "Script failed");
 }
 
-// P2PKH. There is no special code flow, executed as normal unlock + lock
+// Native P2PK, consumes 33 bytes
+unittest
+{
+    Pair kp = Pair.random();
+    Transaction tx;
+    auto sig = sign(kp, tx);
+
+    const lock = Script(kp.V[]);
+    const unlock = Script(sig[]);
+
+    scope engine = new Engine();
+    test!("==")(engine.execute(LockType.Key, lock, unlock, tx), null);
+
+    Script bad_key_unlock = createUnlockP2PKH(sig, Pair.random.V);
+    test!("==")(engine.execute(LockType.Script, lock, bad_key_unlock, tx),
+        "VERIFY_EQUAL operation failed");
+}
+
+// Native P2PKH, consumes 65 bytes
+unittest
+{
+    Pair kp = Pair.random();
+    Transaction tx;
+    auto sig = sign(kp, tx);
+
+    const lock = Script(hashFull(kp.V)[]);
+    const unlock = Script(sig[] ~ kp.V[]);
+
+    scope engine = new Engine();
+    test!("==")(engine.execute(LockType.KeyHash, lock, unlock, tx), null);
+
+    Script bad_key_unlock = Script(sig[] ~ Pair.random().V[]);
+    test!("==")(engine.execute(LockType.Script, lock, bad_key_unlock, tx),
+        "VERIFY_EQUAL operation failed");
+}
+
+// P2PKH, implemented as a script similar to Bitcoin.
 unittest
 {
     Pair kp = Pair.random();
@@ -567,7 +636,7 @@ unittest
         "VERIFY_EQUAL operation failed");
 }
 
-// P2SH. Special code flow.
+// P2SH, implemented as a script similar to Bitcoin.
 unittest
 {
     Pair kp = Pair.random();

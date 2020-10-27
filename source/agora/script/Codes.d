@@ -19,11 +19,17 @@ import std.traits;
 /// to be a hash of a public key. Otherwise the first byte is the lock type.
 public enum LockType : ubyte
 {
-    /// lock is a 64-byte hash of a script, unlock is the script itself
-    Hash = 0x0,
+    /// lock is a 64-byte public key, unlock is the signature
+    Key = 0x0,
+
+    /// lock is a 64-byte public key hash, unlock is a (sig, key) pair
+    KeyHash = 0x01,
 
     /// lock is a script, unlock may be anything required by the lock script
-    Script = 0x1,
+    Script = 0x2,
+
+    /// lock is a 64-byte hash of a script, unlock is the script itself
+    ScriptHash = 0x3,
 }
 
 /*******************************************************************************
@@ -72,8 +78,8 @@ public LockType toLockType (ubyte value) pure nothrow @safe @nogc
 pure nothrow @safe @nogc unittest
 {
     LockType lt;
-    assert(0x00.toLockType(lt) && lt == LockType.Hash);
-    assert(0x01.toLockType(lt) && lt == LockType.Script);
+    assert(0x00.toLockType(lt) && lt == LockType.Key);
+    assert(0x01.toLockType(lt) && lt == LockType.KeyHash);
     assert(!255.toLockType(lt));
 }
 
