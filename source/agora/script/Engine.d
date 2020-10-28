@@ -1,22 +1,13 @@
 /*******************************************************************************
 
-    Contains the script execution engine (non-webASM)
+    Contains the script execution engine.
 
     Note that Bitcoin-style P2SH scripts are not detected,
     instead one should use LockType.Redeem in the Lock script tag.
 
-    // todo: check script weight:
-    // - max opcode length
-    // - num of opcodes
-    // - weight of each opcode (e.g. sig checks more expensive than ADD)
-    // might want to calculate the weight in an out parameter in
-    // isInvalidSyntaxReason()
-
-    // todo: check *executed* instructions and that they don't
-    // go over the configured (consensus) limit
-
-    // todo: for witness support (BIP 141) see commit:
-    // 449f9b8debcceb61a92043bc7031528a53627c47
+    Things not currently implemented:
+        - opcode weight
+        - opcode total cost limit
 
     Copyright:
         Copyright (c) 2020 BOS Platform Foundation Korea
@@ -61,24 +52,6 @@ public class Engine
     /// Ditto
     private static immutable ubyte[1] FALSE = [OP.FALSE];
 
-    /// historic backwards compatibility for the tests.
-    /// The tests were originally written following Bitcoin script layout,
-    /// but was later replaced with a lock type tag (see toLock script()).
-    //version (unittest)
-    //private string execute (in Script lock_script, in Script unlock)
-    //{
-    //    Transaction tx;
-    //    Lock lock = { LockType.Script, lock_script[] };
-    //    return this.execute(lock, unlock[], tx);
-    //}
-
-    ///// ditto
-    //version (unittest)
-    //private string execute (Lock lock, in Script unlock, in Transaction tx)
-    //{
-    //    return this.execute(lock, Unlock(unlock[]), tx);
-    //}
-
     /***************************************************************************
 
         Main dispatch execution routine.
@@ -98,6 +71,7 @@ public class Engine
     ***************************************************************************/
 
     public string execute (Lock lock, Unlock unlock, in Transaction tx)
+        nothrow @safe
     {
         if (lock.bytes.length == 0)
             return "Lock cannot be empty";
@@ -144,8 +118,8 @@ public class Engine
 
     ***************************************************************************/
 
-    private static string handleBasicPayment (in Lock lock, in Unlock unlock,
-        in Transaction tx)
+    private string handleBasicPayment (in Lock lock, in Unlock unlock,
+        in Transaction tx) nothrow @safe
     {
         // assumed sizes
         static assert(Point.sizeof == 32);
@@ -217,8 +191,8 @@ public class Engine
 
     ***************************************************************************/
 
-    private static string executeBasicScripts (in Lock lock,
-        in Unlock unlock, in Transaction tx)
+    private string executeBasicScripts (in Lock lock,
+        in Unlock unlock, in Transaction tx) nothrow @safe
     {
         assert(lock.type == LockType.Script);
 
@@ -265,8 +239,8 @@ public class Engine
 
     ***************************************************************************/
 
-    private static string executeScriptHash (Lock lock, Unlock unlock,
-        in Transaction tx)
+    private string executeScriptHash (Lock lock, Unlock unlock,
+        in Transaction tx) nothrow @safe
     {
         assert(lock.type == LockType.Redeem);
 
@@ -317,8 +291,8 @@ public class Engine
 
     ***************************************************************************/
 
-    private static string executeScript (in Script script, ref Stack stack,
-        in Transaction tx)
+    private string executeScript (in Script script, ref Stack stack,
+        in Transaction tx) nothrow @safe
     {
         ScopeCondition sc;
         const(ubyte)[] bytes = script[];
@@ -468,8 +442,8 @@ public class Engine
 
     ***************************************************************************/
 
-    private static string handleConditional (in OP opcode,
-        ref Stack stack, ref ScopeCondition sc)
+    private string handleConditional (in OP opcode,
+        ref Stack stack, ref ScopeCondition sc) nothrow @safe
     {
         switch (opcode)
         {
@@ -524,8 +498,8 @@ public class Engine
 
     ***************************************************************************/
 
-    private static bool hasStackFailed (/*in*/ ref Stack stack) // peek() is not const
-        pure nothrow @safe @nogc
+    private bool hasStackFailed (/*in*/ ref Stack stack) // peek() is not const
+        pure nothrow @safe
     {
         return stack.empty() || stack.peek() != TRUE;
     }
@@ -551,7 +525,7 @@ public class Engine
 
     ***************************************************************************/
 
-    private static string pushToStack (OP op)(ref Stack stack,
+    private string pushToStack (OP op)(ref Stack stack,
         ref const(ubyte)[] opcodes) nothrow @safe /*@nogc*/
     {
         static assert(op == OP.PUSH_DATA_1 || op == OP.PUSH_DATA_2);
@@ -582,8 +556,11 @@ public class Engine
     }
 }
 
+// workaround to allow pure
+extern (C) int crypto_core_ed25519_is_valid_point (const(ubyte)* p) pure nothrow;
+
 /// See #1279
-private bool isValidPointBytes (in ubyte[] bytes) /*pure*/ nothrow @trusted @nogc
+private bool isValidPointBytes (in ubyte[] bytes) pure nothrow @trusted
 {
     import libsodium.crypto_core_ed25519;
     return crypto_core_ed25519_is_valid_point(bytes.ptr) == 1;
