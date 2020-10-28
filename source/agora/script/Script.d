@@ -29,14 +29,20 @@ version (unittest)
     import agora.common.Hash;
 }
 
-enum ScriptType
+/// The type of script
+public enum ScriptType
 {
+    /// may contain any opcodes
     Lock,
+
+    /// redeem is treated as a lock script (all opcodes allowed)
+    Redeem = Lock,
+
+    /// may only contain stack push opcodes
     Unlock,
-    Redeem
 }
 
-/// Ditto
+/// The script
 public struct Script
 {
     /// opcodes + any associated data for each push opcode
@@ -111,10 +117,9 @@ public struct Script
             default:
                 final switch (type)
                 {
-                case Lock:
-                case Redeem:
+                case ScriptType.Lock:
                     break;
-                case Unlock:
+                case ScriptType.Unlock:
                     return "Unlock script may only contain stack pushes";
                 }
                 break;
@@ -173,26 +178,41 @@ public struct Script
     }
 }
 
-///
+//
 unittest
 {
-    test!"=="(Script.init.isInvalidSyntaxReason(), null);
-    test!"=="(Script([255]).isInvalidSyntaxReason(), "Script contains an unrecognized opcode");
-    test!"=="(Script([OP.INVALID]).isInvalidSyntaxReason(), null);  // OP.INVALID is only semantically invalid
+    // empty scripts are syntactically valid
+    test!"=="(Script.init.isInvalidSyntaxReason(ScriptType.Lock), null);
+    test!"=="(Script.init.isInvalidSyntaxReason(ScriptType.Unlock), null);
+
+    // only pushes are allowed for unlock
+    test!"=="(Script([OP.PUSH_BYTES_1, 1])
+        .isInvalidSyntaxReason(ScriptType.Unlock), null);
+    test!"=="(Script([OP.PUSH_BYTES_1, 1, OP.HASH])
+        .isInvalidSyntaxReason(ScriptType.Unlock),
+        "Unlock script may only contain stack pushes");
+
+    test!"=="(Script([255]).isInvalidSyntaxReason(ScriptType.Lock),
+        "Script contains an unrecognized opcode");
+    // OP.INVALID is only semantically invalid
+    test!"=="(Script([OP.INVALID]).isInvalidSyntaxReason(ScriptType.Lock), null);
 
     // PUSH_BYTES_*
-    test!"=="(Script([1]).isInvalidSyntaxReason(),
+    test!"=="(Script([1]).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_BYTES_* opcode exceeds total script size");
-    test!"=="(Script([1, 255]).isInvalidSyntaxReason(), null);  // 1-byte data payload
-    test!"=="(Script([2]).isInvalidSyntaxReason(),
+    // 1-byte data payload
+    test!"=="(Script([1, 255]).isInvalidSyntaxReason(ScriptType.Lock), null);
+    test!"=="(Script([2]).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_BYTES_* opcode exceeds total script size");
-    test!"=="(Script([2, 255]).isInvalidSyntaxReason(),
+    test!"=="(Script([2, 255]).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_BYTES_* opcode exceeds total script size");
-    test!"=="(Script([2, 255, 255]).isInvalidSyntaxReason(), null);  // 2-byte data payload
+    // 2-byte data payload
+    test!"=="(Script([2, 255, 255]).isInvalidSyntaxReason(ScriptType.Lock), null);
     ubyte[64] payload_64;
-    test!"=="(Script([ubyte(64)] ~ payload_64[0 .. 63]).isInvalidSyntaxReason(),
+    test!"=="(Script([ubyte(64)] ~ payload_64[0 .. 63]).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_BYTES_* opcode exceeds total script size");
-    test!"=="(Script([ubyte(64)] ~ payload_64).isInvalidSyntaxReason(), null);  // 64-byte data payload
+    // 64-byte data payload
+    test!"=="(Script([ubyte(64)] ~ payload_64).isInvalidSyntaxReason(ScriptType.Lock), null);
 
     // PUSH_DATA_*
     const ubyte[2] size_1 = nativeToLittleEndian(ushort(1));
@@ -201,31 +221,32 @@ unittest
     const ubyte[2] size_overflow = nativeToLittleEndian(
         ushort(MAX_STACK_ITEM_SIZE + 1));
 
-    test!"=="(Script([OP.PUSH_DATA_1]).isInvalidSyntaxReason(),
+    test!"=="(Script([OP.PUSH_DATA_1]).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_DATA_1 opcode requires 1 byte(s) for the payload size");
-    test!"=="(Script([OP.PUSH_DATA_1, 0]).isInvalidSyntaxReason(),
+    test!"=="(Script([OP.PUSH_DATA_1, 0]).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_DATA_1 opcode requires payload size value to be between 1 and 512");
-    test!"=="(Script([OP.PUSH_DATA_1, 1]).isInvalidSyntaxReason(),
+    test!"=="(Script([OP.PUSH_DATA_1, 1]).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_DATA_1 opcode payload size exceeds total script size");
-    test!"=="(Script([OP.PUSH_DATA_1, 1, 1]).isInvalidSyntaxReason(), null);
-    test!"=="(Script([OP.PUSH_DATA_2]).isInvalidSyntaxReason(),
+    test!"=="(Script([OP.PUSH_DATA_1, 1, 1]).isInvalidSyntaxReason(ScriptType.Lock), null);
+    test!"=="(Script([OP.PUSH_DATA_2]).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
-    test!"=="(Script([OP.PUSH_DATA_2, 0]).isInvalidSyntaxReason(),
+    test!"=="(Script([OP.PUSH_DATA_2, 0]).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_DATA_2 opcode requires 2 byte(s) for the payload size");
-    test!"=="(Script([OP.PUSH_DATA_2, 0, 0]).isInvalidSyntaxReason(),
+    test!"=="(Script([OP.PUSH_DATA_2, 0, 0]).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
-    test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_1).isInvalidSyntaxReason(),
+    test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_1).isInvalidSyntaxReason(ScriptType.Lock),
         "PUSH_DATA_2 opcode payload size exceeds total script size");
     test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_1 ~ [ubyte(1)])
-        .isInvalidSyntaxReason(), null);
+        .isInvalidSyntaxReason(ScriptType.Lock), null);
     test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_max ~ max_payload)
-        .isInvalidSyntaxReason(), null);
+        .isInvalidSyntaxReason(ScriptType.Lock), null);
     test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_overflow ~ max_payload)
-        .isInvalidSyntaxReason(), "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
+        .isInvalidSyntaxReason(ScriptType.Lock),
+        "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
     test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_max ~ max_payload ~ OP.HASH)
-        .isInvalidSyntaxReason(), null);
+        .isInvalidSyntaxReason(ScriptType.Lock), null);
     test!"=="(Script([ubyte(OP.PUSH_DATA_2)] ~ size_max ~ max_payload ~ ubyte(255))
-        .isInvalidSyntaxReason(), "Script contains an unrecognized opcode");
+        .isInvalidSyntaxReason(ScriptType.Lock), "Script contains an unrecognized opcode");
 }
 
 /*******************************************************************************
@@ -276,69 +297,10 @@ unittest
 
     const key_hash = hashFull(kp.V);
     Script lock_script = createLockP2PKH(key_hash);
-    assert(lock_script.isValidSyntax());
+    assert(lock_script.isInvalidSyntaxReason(ScriptType.Lock) is null);
 
     Script unlock_script = createUnlockP2PKH(sig, kp.V);
-    assert(unlock_script.isValidSyntax());
-}
-
-/*******************************************************************************
-
-    Creates a locking P2SH script.
-
-    Params:
-        redeem_hash = the hash of the redeem script
-
-    Returns:
-        a P2SH lock script which can be unlocked with a
-        P2SH unlock script with a matching redeem script
-
-*******************************************************************************/
-
-public Script createLockP2SH (Hash redeem_hash) pure nothrow @safe
-{
-    Script script = { [ubyte(OP.HASH)]
-        ~ [ubyte(64)] ~ redeem_hash[]
-        ~ [ubyte(OP.CHECK_EQUAL)] };
-    return script;
-}
-
-/*******************************************************************************
-
-    Params:
-        sig = the signature
-        redeem = the redeem script
-
-    Returns:
-        a P2SH unlock script which can be used with the associated lock script
-
-*******************************************************************************/
-
-public Script createUnlockP2SH (Signature sig, Script redeem) pure nothrow @safe
-{
-    const bytes = redeem[];
-    assert(bytes.length <= MAX_STACK_ITEM_SIZE);
-    Script script = { [ubyte(64)] ~ sig[] ~ toPushData(bytes) };
-    return script;
-}
-
-///
-unittest
-{
-    import agora.common.crypto.Schnorr;
-    import agora.utils.Test;
-
-    Pair kp = Pair.random();
-    auto sig = sign(kp, "Hello world");
-
-    Script redeem = Script([ubyte(32)] ~ kp.V[] ~ [ubyte(OP.CHECK_SIG)]);
-    const redeem_hash = hashFull(redeem);
-
-    Script lock_script = createLockP2SH(redeem_hash);
-    assert(lock_script.isValidSyntax());
-
-    Script unlock_script = createUnlockP2SH(sig, redeem);
-    assert(unlock_script.isValidSyntax());
+    assert(unlock_script.isInvalidSyntaxReason(ScriptType.Unlock) is null);
 }
 
 /*******************************************************************************

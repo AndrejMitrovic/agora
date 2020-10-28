@@ -31,6 +31,7 @@ import Schnorr = agora.common.crypto.Schnorr;
 import agora.common.Hash;
 import agora.consensus.data.Transaction;
 import agora.script.Codes;
+import agora.script.Lock;
 import agora.script.ScopeCondition;
 import agora.script.Script;
 import agora.script.Stack;
@@ -49,24 +50,7 @@ version (unittest)
     import std.stdio : writefln, writeln;  // avoid importing LockType
 }
 
-/// Contains the Lock, which is a tag and either a Hash or set of opcodes
-public struct Lock
-{
-    /// Specifies the type of lock script
-    public LockType type;
-
-    /// May either be a Hash, or a sequence of opcodes
-    public const(ubyte)[] bytes;
-}
-
-/// Contains the Unlock, which can be a data tuple or a set of push opcodes
-public struct Unlock
-{
-    /// May be: <signature>, <signature, key>, <push opcodes>
-    public const(ubyte)[] bytes;
-}
-
-/// The engine executes scripts, and returns a value or throws
+/// Ditto
 public class Engine
 {
     /// Conditional opcodes require the top item on the stack to be one of these
@@ -844,50 +828,52 @@ unittest
         "PUSH_DATA_2 opcode payload exceeds item size or stack size limits");
 
     // within limit, but missing OP.TRUE on stack
-    test!("==")(engine.execute(LockType.Script,
-        Script(MaxItemPush.repeat(MaxPushes).joiner.array),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, MaxItemPush.repeat(MaxPushes).joiner.array),
         Unlock.init, tx),
         "Script failed");
 
-    test!("==")(engine.execute(LockType.Script,
-        Script(MaxItemPush.repeat(MaxPushes).joiner.array ~ [ubyte(OP.TRUE)]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, MaxItemPush.repeat(MaxPushes).joiner.array
+            ~ [ubyte(OP.TRUE)]),
         Unlock.init, tx),
         "Stack overflow while pushing OP.TRUE");
 
-    test!("==")(engine.execute(LockType.Script,
-        Script(MaxItemPush.repeat(MaxPushes).joiner.array ~ [ubyte(OP.FALSE)]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, MaxItemPush.repeat(MaxPushes).joiner.array
+            ~ [ubyte(OP.FALSE)]),
         Unlock.init, tx),
         "Stack overflow while pushing OP.FALSE");
 
-    test!("==")(engine.execute(LockType.Script,
-        Script(MaxItemPush.repeat(MaxPushes).joiner.array
-        ~ [ubyte(1)].toPushData()),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, MaxItemPush.repeat(MaxPushes).joiner.array
+            ~ [ubyte(1)].toPushData()),
         Unlock.init, tx),
         "PUSH_DATA_1 opcode payload exceeds item size or stack size limits");
 
-    test!("==")(engine.execute(LockType.Script,
-        Script(MaxItemPush.repeat(MaxPushes).joiner.array
-        ~ [ubyte(1), ubyte(1)]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, MaxItemPush.repeat(MaxPushes).joiner.array
+            ~ [ubyte(1), ubyte(1)]),
         Unlock.init, tx),
         "Stack overflow while executing PUSH_BYTES_*");
 
-    test!("==")(engine.execute(LockType.Script,
-        Script(MaxItemPush.repeat(MaxPushes).joiner.array
-        ~ [ubyte(OP.DUP)]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, MaxItemPush.repeat(MaxPushes).joiner.array
+            ~ [ubyte(OP.DUP)]),
         Unlock.init, tx),
         "Stack overflow while executing DUP");
 
     // will fit, pops MAX_STACK_ITEM_SIZE and pushes 64 bytes
-    test!("==")(engine.execute(LockType.Script,
-        Script(MaxItemPush.repeat(MaxPushes).joiner.array
-        ~ [ubyte(OP.HASH), ubyte(OP.TRUE)]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, MaxItemPush.repeat(MaxPushes).joiner.array
+            ~ [ubyte(OP.HASH), ubyte(OP.TRUE)]),
         Unlock.init, tx),
         null);
 
-    test!("==")(engine.execute(LockType.Script,
-        Script(MaxItemPush.repeat(MaxPushes - 1).joiner.array
-        ~ [ubyte(1), ubyte(1)].repeat(MAX_STACK_ITEM_SIZE).joiner.array
-        ~ ubyte(OP.HASH) ~ [ubyte(OP.TRUE)]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, MaxItemPush.repeat(MaxPushes - 1).joiner.array
+            ~ [ubyte(1), ubyte(1)].repeat(MAX_STACK_ITEM_SIZE).joiner.array
+            ~ ubyte(OP.HASH) ~ [ubyte(OP.TRUE)]),
         Unlock.init, tx),
         "Stack overflow while executing HASH");
 }
@@ -896,39 +882,44 @@ unittest
 unittest
 {
     scope engine = new Engine();
+    const Transaction tx;
 
     /* simple conditionals */
 
     // IF true => execute if branch
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.TRUE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script,
+            [OP.TRUE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
         Unlock.init, tx),
         null);
 
     // IF false => execute else branch
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.FALSE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script,
+            [OP.FALSE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
         Unlock.init, tx),
         "Script failed");
 
     // NOT_IF true => execute if branch
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.FALSE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script,
+            [OP.FALSE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
         Unlock.init, tx),
         null);
 
     // NOT_IF false => execute else branch
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.TRUE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script,
+            [OP.TRUE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
         Unlock.init, tx),
         "Script failed");
 
     /* nested conditionals */
 
     // IF true => IF true => 3
-    test!("==")(engine.execute(LockType.Script,
-        Script([ubyte(1), ubyte(3), OP.CHECK_EQUAL]),
-        Script([OP.TRUE, OP.IF,
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(1), ubyte(3), OP.CHECK_EQUAL]),
+        Unlock([OP.TRUE, OP.IF,
                            OP.TRUE, OP.IF,
                                       ubyte(1), ubyte(3),
                                     OP.ELSE,
@@ -940,13 +931,14 @@ unittest
                                     OP.ELSE,
                                       ubyte(1), ubyte(6),
                                     OP.END_IF,
-                         OP.END_IF])),
+                         OP.END_IF]),
+        tx),
         null);
 
     // IF true => NOT_IF false => 4
-    test!("==")(engine.execute(LockType.Script,
-        Script([ubyte(1), ubyte(4), OP.CHECK_EQUAL]),
-        Script([OP.TRUE, OP.IF,
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(1), ubyte(4), OP.CHECK_EQUAL]),
+        Unlock([OP.TRUE, OP.IF,
                            OP.TRUE, OP.NOT_IF,
                                       ubyte(1), ubyte(3),
                                     OP.ELSE,
@@ -958,13 +950,14 @@ unittest
                                     OP.ELSE,
                                       ubyte(1), ubyte(6),
                                     OP.END_IF,
-                         OP.END_IF])),
+                         OP.END_IF]),
+        tx),
         null);
 
     // IF false => IF true => 5
-    test!("==")(engine.execute(LockType.Script,
-        Script([ubyte(1), ubyte(5), OP.CHECK_EQUAL]),
-        Script([OP.FALSE, OP.IF,
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(1), ubyte(5), OP.CHECK_EQUAL]),
+        Unlock([OP.FALSE, OP.IF,
                             OP.TRUE, OP.IF,
                                        ubyte(1), ubyte(3),
                                      OP.ELSE,
@@ -976,13 +969,14 @@ unittest
                                      OP.ELSE,
                                        ubyte(1), ubyte(6),
                                      OP.END_IF,
-                          OP.END_IF])),
+                          OP.END_IF]),
+        tx),
         null);
 
     // IF false => NOT_IF FALSE => 6
-    test!("==")(engine.execute(LockType.Script,
-        Script([ubyte(1), ubyte(6), OP.CHECK_EQUAL]),
-        Script([OP.FALSE, OP.IF,
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(1), ubyte(6), OP.CHECK_EQUAL]),
+        Unlock([OP.FALSE, OP.IF,
                             OP.TRUE, OP.IF,
                                        ubyte(1), ubyte(3),
                                      OP.ELSE,
@@ -994,22 +988,23 @@ unittest
                                      OP.ELSE,
                                        ubyte(1), ubyte(6),
                                      OP.END_IF,
-                          OP.END_IF])),
+                          OP.END_IF]),
+        tx),
         null);
 
     /* syntax checks */
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.IF]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.IF]),
         Unlock.init, tx),
         "IF/NOT_IF opcode requires an item on the stack");
 
-    test!("==")(engine.execute(LockType.Script,
-        Script([ubyte(1), ubyte(2), OP.IF]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(1), ubyte(2), OP.IF]),
         Unlock.init, tx),
         "IF/NOT_IF may only be used with OP.TRUE / OP.FALSE values");
 
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.TRUE, OP.IF]),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.TRUE, OP.IF]),
         Unlock.init, tx),
         "IF requires a closing END_IF");
 }
