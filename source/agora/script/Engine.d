@@ -59,32 +59,58 @@ public struct Lock
     public const(ubyte)[] bytes;
 }
 
+/// Contains the Unlock, which can be a data tuple or a set of push opcodes
+public struct Unlock
+{
+    /// May be: <signature>, <signature, key>, <push opcodes>
+    public const(ubyte)[] bytes;
+}
+
 /// The engine executes scripts, and returns a value or throws
 public class Engine
 {
     /// Conditional opcodes require the top item on the stack to be one of these
     private static immutable ubyte[1] TRUE = [OP.TRUE];
+    /// Ditto
     private static immutable ubyte[1] FALSE = [OP.FALSE];
 
     /// historic backwards compatibility for the tests.
     /// The tests were originally written following Bitcoin script layout,
     /// but was later replaced with a lock type tag (see toLock script()).
-    version (unittest)
-    private string execute (Lock lock, in Script unlock)
-    {
-        Transaction tx;
-        return this.execute(lock, unlock, tx);
-    }
+    //version (unittest)
+    //private string execute (in Script lock_script, in Script unlock)
+    //{
+    //    Transaction tx;
+    //    Lock lock = { LockType.Script, lock_script[] };
+    //    return this.execute(lock, unlock[], tx);
+    //}
 
-    /// ditto
-    private string execute (Lock lock, in Script unlock, in Transaction tx)
-    {
-        return this.execute(lock, unlock[], tx);
-    }
+    ///// ditto
+    //version (unittest)
+    //private string execute (Lock lock, in Script unlock, in Transaction tx)
+    //{
+    //    return this.execute(lock, Unlock(unlock[]), tx);
+    //}
 
-    // Main execution dispatch routine
-    public string execute (Lock lock, const(ubyte)[] unlock_bytes,
-        in Transaction tx)
+    /***************************************************************************
+
+        Main dispatch execution routine.
+
+        The lock type will be examined, and based on its type execution will
+        proceed to either simple script-less payments, or script-based payments.
+
+        Params:
+            lock = the lock
+            unlock = may contain a <signature>, <signature, key>,
+                           or <script> which only contains stack push opcodes
+
+        Returns:
+            null if there were no errors,
+            or a string explaining the reason execution failed
+
+    ***************************************************************************/
+
+    public string execute (Lock lock, Unlock unlock, in Transaction tx)
     {
         if (lock.bytes.length == 0)
             return "Lock cannot be empty";
@@ -93,20 +119,19 @@ public class Engine
         {
             case LockType.Key:
             case LockType.KeyHash:
-                if (auto error = handleBasicPayment(lock, unlock_bytes, tx))
+                if (auto error = handleBasicPayment(lock, unlock, tx))
                     return error;
 
                 break;
 
             case LockType.Script:
-                if (auto error = executeScripts(Script(lock.bytes),
-                    Script(unlock_bytes), tx))
+                if (auto error = executeBasicScripts(lock, unlock, tx))
                     return error;
 
                 break;
 
             case LockType.ScriptHash:
-                if (auto error = executeScriptHash(lock, unlock_bytes, tx))
+                if (auto error = executeScriptHash(lock, unlock, tx))
                     return error;
 
                 break;
@@ -119,12 +144,12 @@ public class Engine
 
         Handle stack-less and script-less basic payments.
 
-        If the lock is a P2K, the unlock must only contain the signature.
-        If the lock is a P2KH, the unlock must contain a <signature, key> tuple.
+        If the lock is a P2K, the unlock must only contain a <signature>.
+        If the lock is a P2KH, the unlock must contain a <signature, key>.
 
         Params:
-            lock = the lock
-            unlock_bytes = a signature or <signature, key> tuple
+            lock = must contain a <pubkey> or a <hash>
+            unlock = must contain a <signature> or <signature, key>
 
         Returns:
             null if there were no errors,
@@ -132,8 +157,8 @@ public class Engine
 
     ***************************************************************************/
 
-    private static string handleBasicPayment (Lock lock,
-        const(ubyte)[] unlock_bytes, in Transaction tx)
+    private static string handleBasicPayment (in Lock lock, in Unlock unlock,
+        in Transaction tx)
     {
         // assumed sizes
         static assert(Point.sizeof == 32);
@@ -148,9 +173,9 @@ public class Engine
                 return "Lock script: LockType.Key 32-byte public key in lock script is invalid";
             const Point key = Point(lock.bytes);
 
-            if (unlock_bytes.length != Signature.sizeof)
+            if (unlock.bytes.length != Signature.sizeof)
                 return "Lock script: LockType.Key requires a 64-byte signature in the Unlock script";
-            const sig = Signature(unlock_bytes);
+            const sig = Signature(unlock.bytes);
             if (!Schnorr.verify(key, sig, tx))
                 return "Unlock script: LockType.Key signature failed validation";
 
@@ -161,15 +186,16 @@ public class Engine
                 return "Lock script: LockType.KeyHash requires 64-byte key hash argument";
             const Hash key_hash = Hash(lock.bytes);
 
-            if (unlock_bytes.length != Signature.sizeof + Point.sizeof)
+            const(ubyte)[] bytes = unlock.bytes;
+            if (bytes.length != Signature.sizeof + Point.sizeof)
                 return "Unlock script: LockType.KeyHash requires a 64-byte "
                      ~ "signature and 32-byte key in the Unlock script";
-            const sig = Signature(unlock_bytes[0 .. Signature.sizeof]);
-            unlock_bytes.popFrontN(Signature.sizeof);
+            const sig = Signature(bytes[0 .. Signature.sizeof]);
+            bytes.popFrontN(Signature.sizeof);
 
-            if (!isValidPointBytes(unlock_bytes))
+            if (!isValidPointBytes(bytes))
                 return "Unlock script: LockType.KeyHash 32-byte public key in lock script is invalid";
-            const Point key = Point(unlock_bytes);
+            const Point key = Point(bytes);
 
             if (!Schnorr.verify(key, sig, tx))
                 return "Unlock script: LockType.KeyHash signature failed validation";
@@ -204,20 +230,24 @@ public class Engine
 
     ***************************************************************************/
 
-    private static string executeScripts (in Script lock,
-        in Script unlock, in Transaction tx)
+    private static string executeBasicScripts (in Lock lock,
+        in Unlock unlock, in Transaction tx)
     {
-        if (auto error = unlock.isInvalidSyntaxReason(ScriptType.Unlock))
+        assert(lock.type == LockType.Script);
+
+        Script unlock_script = Script(unlock.bytes);
+        if (auto error = unlock_script.isInvalidSyntaxReason(ScriptType.Unlock))
             return error;
 
-        if (auto error = lock.isInvalidSyntaxReason(ScriptType.Lock))
+        Script lock_script = Script(lock.bytes);
+        if (auto error = lock_script.isInvalidSyntaxReason(ScriptType.Lock))
             return error;
 
         Stack stack;
-        if (auto error = executeScript(unlock, stack, tx))
+        if (auto error = executeScript(unlock_script, stack, tx))
             return error;
 
-        if (auto error = executeScript(lock, stack, tx))
+        if (auto error = executeScript(lock_script, stack, tx))
             return error;
 
         if (hasStackFailed(stack))
@@ -237,9 +267,10 @@ public class Engine
         evaluated with any leftover stack items.
 
         Params:
-            lock_bytes = must contain a 64-byte hash of the redeem script
-            unlock_bytes = must contain only stack push opcodes, where the last
+            lock = must contain a 64-byte hash of the redeem script
+            unlock = must contain only stack push opcodes, where the last
                            push is the redeem script itself
+            tx = the associated spending transaction
 
         Returns:
             null if there were no errors,
@@ -247,8 +278,8 @@ public class Engine
 
     ***************************************************************************/
 
-    private static string executeScriptHash (Lock lock,
-        const(ubyte)[] unlock_bytes, in Transaction tx)
+    private static string executeScriptHash (Lock lock, Unlock unlock,
+        in Transaction tx)
     {
         assert(lock.type == LockType.ScriptHash);
 
@@ -256,12 +287,12 @@ public class Engine
             return "Lock script: LockType.ScriptHash requires 64-byte script hash argument";
         const Hash script_hash = Hash(lock.bytes);
 
-        Script unlock = Script(unlock_bytes);
-        if (auto error = unlock.isInvalidSyntaxReason(ScriptType.Unlock))
+        Script unlock_script = Script(unlock.bytes);
+        if (auto error = unlock_script.isInvalidSyntaxReason(ScriptType.Unlock))
             return error;
 
         Stack stack;
-        if (auto error = executeScript(unlock, stack, tx))
+        if (auto error = executeScript(unlock_script, stack, tx))
             return error;
 
         if (stack.empty())
@@ -272,7 +303,7 @@ public class Engine
             return "Hash of Unlock script does not match script hash argument in Lock script";
 
         Script redeem = Script(redeem_bytes);
-        if (auto error = unlock.isInvalidSyntaxReason(ScriptType.Redeem))
+        if (auto error = redeem.isInvalidSyntaxReason(ScriptType.Redeem))
             return error;
 
         if (auto error = executeScript(redeem, stack, tx))
@@ -588,7 +619,8 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(LockType.Script, Script([OP.DUP]), Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.DUP]), Unlock.init, Transaction.init),
         "DUP opcode requires an item on the stack");
 }
 
@@ -596,7 +628,8 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(LockType.Script, Script([OP.HASH]), Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.HASH]), Unlock.init, Transaction.init),
         "HASH opcode requires an item on the stack");
 }
 
@@ -604,19 +637,21 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.CHECK_EQUAL]), Script.init),
+    const Transaction tx;
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.CHECK_EQUAL]), Unlock.init, tx),
         "CHECK_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]), Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]),
+        Unlock.init, tx),
         "CHECK_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]),
-        Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]),
+        Unlock.init, tx),
         null);
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]),
-        Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.CHECK_EQUAL]),
+        Unlock.init, tx),
         "Script failed");
 }
 
@@ -624,19 +659,21 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.VERIFY_EQUAL]), Script.init),
+    const Transaction tx;
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.VERIFY_EQUAL]), Unlock.init, tx),
         "VERIFY_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL]), Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL]),
+        Unlock.init, tx),
         "VERIFY_EQUAL opcode requires two items on the stack");
-    test!("==")(engine.execute(LockType.Script,   // OP.TRUE needed as VERIFY does not push to stack
-        Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL, OP.TRUE]),
-        Script.init),
+    test!("==")(engine.execute(   // OP.TRUE needed as VERIFY does not push to stack
+        Lock(LockType.Script, [OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL, OP.TRUE]),
+        Unlock.init, tx),
         null);
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL, OP.TRUE]),
-        Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.PUSH_BYTES_1, 2, OP.PUSH_BYTES_1, 1, OP.VERIFY_EQUAL, OP.TRUE]),
+        Unlock.init, tx),
         "VERIFY_EQUAL operation failed");
 }
 
@@ -644,38 +681,40 @@ unittest
 unittest
 {
     scope engine = new Engine();
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.CHECK_SIG]), Script.init),
+    const Transaction tx;
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.CHECK_SIG]), Unlock.init, tx),
         "CHECK_SIG opcode requires two items on the stack");
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.PUSH_BYTES_1, 1, OP.CHECK_SIG]), Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.PUSH_BYTES_1, 1, OP.CHECK_SIG]),
+        Unlock.init, tx),
         "CHECK_SIG opcode requires two items on the stack");
-    test!("==")(engine.execute(LockType.Script,
-        Script([OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.CHECK_SIG]),
-        Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.CHECK_SIG]),
+        Unlock.init, tx),
         "CHECK_SIG opcode requires 32-byte public key on the stack");
 
     // invalid key (crypto_core_ed25519_is_valid_point() fails)
     Point invalid_key;
-    test!("==")(engine.execute(LockType.Script,
-        Script([ubyte(OP.PUSH_BYTES_1), ubyte(1)]
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(OP.PUSH_BYTES_1), ubyte(1)]
             ~ [ubyte(32)] ~ invalid_key[]
-            ~ [ubyte(OP.CHECK_SIG)]), Script.init),
+            ~ [ubyte(OP.CHECK_SIG)]), Unlock.init, tx),
         "CHECK_SIG 32-byte public key on the stack is invalid");
 
     Point valid_key = Point.fromString(
         "0x44404b654d6ddf71e2446eada6acd1f462348b1b17272ff8f36dda3248e08c81");
-    test!("==")(engine.execute(LockType.Script,
-        Script([ubyte(OP.PUSH_BYTES_1), ubyte(1)]
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(OP.PUSH_BYTES_1), ubyte(1)]
             ~ [ubyte(32)] ~ valid_key[]
-            ~ [ubyte(OP.CHECK_SIG)]), Script.init),
+            ~ [ubyte(OP.CHECK_SIG)]), Unlock.init, tx),
         "CHECK_SIG opcode requires 64-byte signature on the stack");
 
     Signature invalid_sig;
-    test!("==")(engine.execute(LockType.Script,
-        Script([ubyte(OP.PUSH_BYTES_64)] ~ invalid_sig[]
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(OP.PUSH_BYTES_64)] ~ invalid_sig[]
             ~ [ubyte(32)] ~ valid_key[]
-            ~ [ubyte(OP.CHECK_SIG)]), Script.init),
+            ~ [ubyte(OP.CHECK_SIG)]), Unlock.init, tx),
         "Script failed");
 }
 
@@ -684,71 +723,67 @@ unittest
 {
     const Pair kp = Pair.random();
     const Transaction tx;
-    auto sig = sign(kp, tx);
-
-    const lock = Script(kp.V[]);
-    const unlock = Script(sig[]);
+    const sig = sign(kp, tx);
 
     scope engine = new Engine();
-    test!("==")(engine.execute(LockType.Key, lock, unlock, tx), null);
+    test!("==")(engine.execute(
+        Lock(LockType.Key, kp.V[]), Unlock(sig[]), tx),
+        null);
 
-    const bad_sig_unlock = Script(sign(kp, "foobar")[]);
-    test!("==")(engine.execute(LockType.Key, lock, bad_sig_unlock, tx),
+    const bad_sig = sign(kp, "foobar");
+    test!("==")(engine.execute(
+        Lock(LockType.Key, kp.V[]), Unlock(bad_sig[]), tx),
         "Unlock script: LockType.Key signature failed validation");
 
-    const rkp = Pair.random();
-    const bad_key_unlock = Script(sign(rkp, tx)[]);
-    test!("==")(engine.execute(LockType.Key, lock, bad_key_unlock, tx),
+    const bad_key = Pair.random().V;
+    test!("==")(engine.execute(
+        Lock(LockType.Key, bad_key[]), Unlock(sig[]), tx),
         "Unlock script: LockType.Key signature failed validation");
 }
 
 // Native P2PKH (Pay to Public Key Hash), consumes 65 bytes
 unittest
 {
-    Pair kp = Pair.random();
-    Transaction tx;
-    auto sig = sign(kp, tx);
-
-    const lock = Script(hashFull(kp.V)[]);
-    const unlock = Script(sig[] ~ kp.V[]);
+    const Pair kp = Pair.random();
+    const key_hash = hashFull(kp.V);
+    const Transaction tx;
+    const sig = sign(kp, tx);
 
     scope engine = new Engine();
-    test!("==")(engine.execute(LockType.KeyHash, lock, unlock, tx), null);
+    test!("==")(engine.execute(
+        Lock(LockType.KeyHash, key_hash[]), Unlock(sig[] ~ kp.V[]), tx),
+        null);
 
-    const bad_sig_unlock = Script(sign(kp, "foo")[] ~ kp.V[]);
-    test!("==")(engine.execute(LockType.KeyHash, lock, bad_sig_unlock, tx),
+    const bad_sig = sign(kp, "foo")[];
+    test!("==")(engine.execute(
+        Lock(LockType.KeyHash, key_hash[]), Unlock(bad_sig[] ~ kp.V[]), tx),
         "Unlock script: LockType.KeyHash signature failed validation");
 
-    const bad_key_unlock = Script(sig[] ~ Pair.random().V[]);
-    test!("==")(engine.execute(LockType.KeyHash, lock, bad_key_unlock, tx),
+    const bad_key = Pair.random().V;
+    test!("==")(engine.execute(
+        Lock(LockType.KeyHash, key_hash[]), Unlock(sig[] ~ bad_key[]), tx),
         "Unlock script: LockType.KeyHash signature failed validation");
 }
 
-// Native P2S (Pay 2 Script)
+// Native script, emulating bitcoin-style P2PKH
 unittest
 {
-    Script unlock = Script([ubyte(32)] ~ kp.V[] ~ [ubyte(OP.CHECK_SIG)]);
-}
-
-// Bitcoin-style P2PKH
-unittest
-{
-    Pair kp = Pair.random();
-    Transaction tx;
-    auto sig = sign(kp, tx);
+    const Pair kp = Pair.random();
+    const Transaction tx;
+    const sig = sign(kp, tx);
 
     const key_hash = hashFull(kp.V);
-    Script lock = createLockP2PKH(key_hash);
-    assert(lock.isValidSyntax());
-
-    Script unlock = createUnlockP2PKH(sig, kp.V);
-    assert(unlock.isValidSyntax());
+    const Script lock = createLockP2PKH(key_hash);
+    const Script unlock = createUnlockP2PKH(sig, kp.V);
 
     scope engine = new Engine();
-    test!("==")(engine.execute(LockType.Script, lock, unlock, tx), null);
+    test!("==")(engine.execute(
+        Lock(LockType.Script, lock[]), Unlock(unlock[]), tx),
+        null);
 
     Script bad_key_unlock = createUnlockP2PKH(sig, Pair.random.V);
-    test!("==")(engine.execute(LockType.Script, lock, bad_key_unlock, tx),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, lock[]), Unlock(bad_key_unlock[]), tx),
         "VERIFY_EQUAL operation failed");
 }
 
@@ -757,22 +792,23 @@ unittest
 {
     Pair kp = Pair.random();
     Transaction tx;
-    auto sig = sign(kp, tx);
+    const sig = sign(kp, tx);
 
     const key_hash = hashFull(kp.V);
     Script lock = createLockP2PKH(key_hash);
-    assert(lock.isValidSyntax());
-
     Script unlock = createUnlockP2PKH(sig, kp.V);
-    assert(unlock.isValidSyntax());
 
     const invalid_script = Script([255]);
     scope engine = new Engine();
-    test!("==")(engine.execute(LockType.Script, lock, unlock, tx), null);
+    test!("==")(engine.execute(
+        Lock(LockType.Script, lock[]), Unlock(unlock[]), tx),
+        null);
     // invalid scripts / sigs
-    test!("==")(engine.execute(LockType.Script, invalid_script, unlock, tx),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, invalid_script[]), Unlock(unlock[]), tx),
         "Lock script error: Script contains an unrecognized opcode");
-    test!("==")(engine.execute(LockType.Script, lock, invalid_script, tx),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, lock[]), Unlock(invalid_script[]), tx),
         "Unlock script error: Script contains an unrecognized opcode");
 }
 
@@ -781,15 +817,17 @@ unittest
 {
     import std.algorithm;
     scope engine = new Engine();
-    test!("==")(engine.execute(LockType.Script,
-        Script([42].toPushData() ~ [ubyte(OP.TRUE)]),
-        Script.init),
+    const Transaction tx;
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [42].toPushData() ~ [ubyte(OP.TRUE)]),
+        Unlock.init, tx),
         null);
 
-    test!("==")(engine.execute(LockType.Script,
-        Script(ubyte(42).repeat(MAX_STACK_ITEM_SIZE + 1).array.toPushData()
-        ~ [ubyte(OP.TRUE)]),
-        Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, ubyte(42).repeat(MAX_STACK_ITEM_SIZE + 1)
+            .array.toPushData()
+            ~ [ubyte(OP.TRUE)]),
+        Unlock.init, tx),
         "Lock script error: PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
 
     const MaxItemPush = ubyte(42).repeat(MAX_STACK_ITEM_SIZE).array.toPushData();
@@ -799,57 +837,58 @@ unittest
     assert(MAX_STACK_TOTAL_SIZE % MAX_STACK_ITEM_SIZE == 0);
 
     // strictly above limit
-    test!("==")(engine.execute(LockType.Script,
-        Script(MaxItemPush.repeat(MaxPushes + 1).joiner.array ~ [ubyte(OP.TRUE)]),
-        Script.init),
+    test!("==")(engine.execute(
+        Lock(LockType.Script, MaxItemPush.repeat(MaxPushes + 1).joiner.array
+            ~ [ubyte(OP.TRUE)]),
+        Unlock.init, tx),
         "PUSH_DATA_2 opcode payload exceeds item size or stack size limits");
 
     // within limit, but missing OP.TRUE on stack
     test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array),
-        Script.init),
+        Unlock.init, tx),
         "Script failed");
 
     test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array ~ [ubyte(OP.TRUE)]),
-        Script.init),
+        Unlock.init, tx),
         "Stack overflow while pushing OP.TRUE");
 
     test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array ~ [ubyte(OP.FALSE)]),
-        Script.init),
+        Unlock.init, tx),
         "Stack overflow while pushing OP.FALSE");
 
     test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array
         ~ [ubyte(1)].toPushData()),
-        Script.init),
+        Unlock.init, tx),
         "PUSH_DATA_1 opcode payload exceeds item size or stack size limits");
 
     test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array
         ~ [ubyte(1), ubyte(1)]),
-        Script.init),
+        Unlock.init, tx),
         "Stack overflow while executing PUSH_BYTES_*");
 
     test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array
         ~ [ubyte(OP.DUP)]),
-        Script.init),
+        Unlock.init, tx),
         "Stack overflow while executing DUP");
 
     // will fit, pops MAX_STACK_ITEM_SIZE and pushes 64 bytes
     test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes).joiner.array
         ~ [ubyte(OP.HASH), ubyte(OP.TRUE)]),
-        Script.init),
+        Unlock.init, tx),
         null);
 
     test!("==")(engine.execute(LockType.Script,
         Script(MaxItemPush.repeat(MaxPushes - 1).joiner.array
         ~ [ubyte(1), ubyte(1)].repeat(MAX_STACK_ITEM_SIZE).joiner.array
         ~ ubyte(OP.HASH) ~ [ubyte(OP.TRUE)]),
-        Script.init),
+        Unlock.init, tx),
         "Stack overflow while executing HASH");
 }
 
@@ -863,25 +902,25 @@ unittest
     // IF true => execute if branch
     test!("==")(engine.execute(LockType.Script,
         Script([OP.TRUE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
-        Script.init),
+        Unlock.init, tx),
         null);
 
     // IF false => execute else branch
     test!("==")(engine.execute(LockType.Script,
         Script([OP.FALSE, OP.IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
-        Script.init),
+        Unlock.init, tx),
         "Script failed");
 
     // NOT_IF true => execute if branch
     test!("==")(engine.execute(LockType.Script,
         Script([OP.FALSE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
-        Script.init),
+        Unlock.init, tx),
         null);
 
     // NOT_IF false => execute else branch
     test!("==")(engine.execute(LockType.Script,
         Script([OP.TRUE, OP.NOT_IF, OP.TRUE, OP.ELSE, OP.FALSE, OP.END_IF]),
-        Script.init),
+        Unlock.init, tx),
         "Script failed");
 
     /* nested conditionals */
@@ -961,16 +1000,16 @@ unittest
     /* syntax checks */
     test!("==")(engine.execute(LockType.Script,
         Script([OP.IF]),
-        Script.init),
+        Unlock.init, tx),
         "IF/NOT_IF opcode requires an item on the stack");
 
     test!("==")(engine.execute(LockType.Script,
         Script([ubyte(1), ubyte(2), OP.IF]),
-        Script.init),
+        Unlock.init, tx),
         "IF/NOT_IF may only be used with OP.TRUE / OP.FALSE values");
 
     test!("==")(engine.execute(LockType.Script,
         Script([OP.TRUE, OP.IF]),
-        Script.init),
+        Unlock.init, tx),
         "IF requires a closing END_IF");
 }
