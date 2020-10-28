@@ -29,6 +29,13 @@ version (unittest)
     import agora.common.Hash;
 }
 
+enum ScriptType
+{
+    Lock,
+    Unlock,
+    Redeem
+}
+
 /// Ditto
 public struct Script
 {
@@ -50,23 +57,11 @@ public struct Script
     /***************************************************************************
 
         Validates the script syntactically, but not semantically.
-        Each opcode is checked for validity, and any push opcodes have their
-        length & payload checked for size constraints.
+        Each opcode is checked if it's recognized, and any push opcodes have
+        their length & payload checked for size constraints.
 
         The semantics of the script are not checked here. They may only be
         checked by the script execution engine.
-
-        Returns:
-            true if the script is syntactically valid
-
-    ***************************************************************************/
-
-    public bool isValidSyntax () const pure nothrow @safe @nogc
-    {
-        return this.isInvalidSyntaxReason() is null;
-    }
-
-    /***************************************************************************
 
         Ditto, but returns the string reason when the script is
         considered syntactically invalid.
@@ -77,7 +72,8 @@ public struct Script
 
     ***************************************************************************/
 
-    public string isInvalidSyntaxReason () const pure nothrow @safe @nogc
+    public string isInvalidSyntaxReason (ScriptType type)
+        const pure nothrow @safe @nogc
     {
         const(ubyte)[] bytes = this.data[];
         if (bytes.empty)
@@ -94,26 +90,34 @@ public struct Script
             bytes.popFront();
             switch (opcode)
             {
-                case OP.PUSH_DATA_1:
-                    if (auto reason = isInvalidPushReason!(OP.PUSH_DATA_1)(bytes))
-                        return reason;
-                    else break;
+            case OP.PUSH_DATA_1:
+                if (auto reason = isInvalidPushReason!(OP.PUSH_DATA_1)(bytes))
+                    return reason;
+                else break;
 
-                case OP.PUSH_DATA_2:
-                    if (auto reason = isInvalidPushReason!(OP.PUSH_DATA_2)(bytes))
-                        return reason;
-                    else break;
+            case OP.PUSH_DATA_2:
+                if (auto reason = isInvalidPushReason!(OP.PUSH_DATA_2)(bytes))
+                    return reason;
+                else break;
 
-                case OP.PUSH_BYTES_1: .. case OP.PUSH_BYTES_64:
-                    const payload_size = opcode;  // encoded in the opcode
-                    if (bytes.length < payload_size)
-                        return "PUSH_BYTES_* opcode exceeds total script size";
+            case OP.PUSH_BYTES_1: .. case OP.PUSH_BYTES_64:
+                const payload_size = opcode;  // encoded in the opcode
+                if (bytes.length < payload_size)
+                    return "PUSH_BYTES_* opcode exceeds total script size";
 
-                    bytes.popFrontN(payload_size);
+                bytes.popFrontN(payload_size);
+                break;
+
+            default:
+                final switch (type)
+                {
+                case Lock:
+                case Redeem:
                     break;
-
-                default:
-                    break;
+                case Unlock:
+                    return "Unlock script may only contain stack pushes";
+                }
+                break;
             }
         }
 

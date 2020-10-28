@@ -49,6 +49,16 @@ version (unittest)
     import std.stdio : writefln, writeln;  // avoid importing LockType
 }
 
+/// Contains the Lock, which is a tag and either a Hash or set of opcodes
+public struct Lock
+{
+    /// Specifies the type of lock script
+    public LockType type;
+
+    /// May either be a Hash, or a sequence of opcodes
+    public const(ubyte)[] bytes;
+}
+
 /// The engine executes scripts, and returns a value or throws
 public class Engine
 {
@@ -60,52 +70,43 @@ public class Engine
     /// The tests were originally written following Bitcoin script layout,
     /// but was later replaced with a lock type tag (see toLock script()).
     version (unittest)
-    private string execute (LockType lock_type, in Script lock,
-        in Script unlock)
+    private string execute (Lock lock, in Script unlock)
     {
         Transaction tx;
-        return this.execute(lock_type, lock, unlock, tx);
+        return this.execute(lock, unlock, tx);
     }
 
     /// ditto
-    private string execute (LockType lock_type, in Script lock,
-        in Script unlock, in Transaction tx)
+    private string execute (Lock lock, in Script unlock, in Transaction tx)
     {
-        return this.execute([ubyte(lock_type)] ~ lock[],
-            unlock[], tx);
+        return this.execute(lock, unlock[], tx);
     }
 
-    // tx: the transaction that's trying to spend (used for the commitment check)
-    public string execute (const(ubyte)[] lock_bytes,
-        const(ubyte)[] unlock_bytes, in Transaction tx)
+    // Main execution dispatch routine
+    public string execute (Lock lock, const(ubyte)[] unlock_bytes,
+        in Transaction tx)
     {
-        // assumed sizes
-        static assert(Point.sizeof == 32);
-        static assert(Hash.sizeof == 64);
+        if (lock.bytes.length == 0)
+            return "Lock cannot be empty";
 
-        if (lock_bytes.length == 0)
-            return "Lock script cannot be empty";
-
-        // pay to script hash, or direct lock script
-        LockType lock_type;
-        if (!toLockType(lock_bytes[0], lock_type))
-            return "Unrecognized lock type";
-        lock_bytes.popFront();
-
-        final switch (lock_type)
+        final switch (lock.type)
         {
             case LockType.Key:
             case LockType.KeyHash:
-                if (auto error = handleBasicPayment(lock_type, lock_bytes,
-                    unlock_bytes, tx))
+                if (auto error = handleBasicPayment(lock, unlock_bytes, tx))
                     return error;
 
                 break;
 
             case LockType.Script:
+                if (auto error = executeScripts(Script(lock.bytes),
+                    Script(unlock_bytes), tx))
+                    return error;
+
+                break;
+
             case LockType.ScriptHash:
-                if (auto error = handleScriptPayment(lock_type, lock_bytes,
-                    unlock_bytes, tx))
+                if (auto error = executeScriptHash(lock, unlock_bytes, tx))
                     return error;
 
                 break;
@@ -114,20 +115,38 @@ public class Engine
         return null;
     }
 
-    /// Stack-less basic payments,
-    /// the Unlock script is either (Sig), or (Sig, PubKey)
-    private static string handleBasicPayment (in LockType lock_type,
-        const(ubyte)[] lock_bytes, const(ubyte)[] unlock_bytes,
-        in Transaction tx)
+    /***************************************************************************
+
+        Handle stack-less and script-less basic payments.
+
+        If the lock is a P2K, the unlock must only contain the signature.
+        If the lock is a P2KH, the unlock must contain a <signature, key> tuple.
+
+        Params:
+            lock = the lock
+            unlock_bytes = a signature or <signature, key> tuple
+
+        Returns:
+            null if there were no errors,
+            or a string explaining the reason execution failed
+
+    ***************************************************************************/
+
+    private static string handleBasicPayment (Lock lock,
+        const(ubyte)[] unlock_bytes, in Transaction tx)
     {
-        switch (lock_type)
+        // assumed sizes
+        static assert(Point.sizeof == 32);
+        static assert(Hash.sizeof == 64);
+
+        switch (lock.type)
         {
         case LockType.Key:
-            if (lock_bytes.length != Point.sizeof)
+            if (lock.bytes.length != Point.sizeof)
                 return "Lock script: LockType.Key requires 32-byte key argument";
-            if (!isValidPointBytes(lock_bytes))
+            if (!isValidPointBytes(lock.bytes))
                 return "Lock script: LockType.Key 32-byte public key in lock script is invalid";
-            const Point key = Point(lock_bytes);
+            const Point key = Point(lock.bytes);
 
             if (unlock_bytes.length != Signature.sizeof)
                 return "Lock script: LockType.Key requires a 64-byte signature in the Unlock script";
@@ -138,9 +157,9 @@ public class Engine
             break;
 
         case LockType.KeyHash:
-            if (lock_bytes.length != Hash.sizeof)
+            if (lock.bytes.length != Hash.sizeof)
                 return "Lock script: LockType.KeyHash requires 64-byte key hash argument";
-            const Hash key_hash = Hash(lock_bytes);
+            const Hash key_hash = Hash(lock.bytes);
 
             if (unlock_bytes.length != Signature.sizeof + Point.sizeof)
                 return "Unlock script: LockType.KeyHash requires a 64-byte "
@@ -164,83 +183,124 @@ public class Engine
         return null;
     }
 
-    private static string handleScriptPayment (in LockType lock_type,
-        in ubyte[] lock_bytes, in ubyte[] unlock_bytes, in Transaction tx)
-    {
-        switch (lock_type)
-        {
-        case LockType.Script:
-        case LockType.ScriptHash:
-            Script lock = Script(lock_bytes);
-            if (auto error = lock.isInvalidSyntaxReason())
-                return "Lock script: error: " ~ error;
-            Script unlock = Script(unlock_bytes);
-            if (auto error = executeScripts(lock_type, lock, unlock, tx))
-                return error;
-            break;
+    /***************************************************************************
 
-            if (lock_bytes.length != Hash.sizeof)
-                return "Lock script: LockType.ScriptHash requires 64-byte key hash argument";
-            const Hash script_hash = Hash(lock_bytes);
+        Execute a LockType.Script type of lock script.
 
-            if (hashFull(unlock_bytes) != script_hash)
-                return "Lock script: Hash of Unlock script does not match lock script hash argument";
+        The unlock script may only contain stack pushes.
+        The unlock script is ran, producing a stack.
 
-            Script unlock = Script(unlock_bytes);
-            Stack stack;
-            if (auto error = executeScript(lock_type, unlock, stack, tx))
-                return error;
+        Thereafter, the lock script will run with the stack
+        of the unlock script.
 
-            if (hasStackFailed(stack))
-                return "Script failed";
-            break;
+        Params:
+            lock = the lock script
+            unlock = the unlock script
+            tx = the spending transaction
 
-        default:
-            assert(0);
-        }
+        Returns:
+            null if there were no errors,
+            or a string explaining the reason execution failed
 
-        return null;
-    }
+    ***************************************************************************/
 
-    private static string executeScripts (in LockType lock_type, in Script lock,
+    private static string executeScripts (in Script lock,
         in Script unlock, in Transaction tx)
     {
+        if (auto error = unlock.isInvalidSyntaxReason(ScriptType.Unlock))
+            return error;
+
+        if (auto error = lock.isInvalidSyntaxReason(ScriptType.Lock))
+            return error;
+
         Stack stack;
         if (auto error = executeScript(unlock, stack, tx))
             return error;
 
-        Stack unlock_stack = stack.copy();
         if (auto error = executeScript(lock, stack, tx))
             return error;
 
         if (hasStackFailed(stack))
             return "Script failed";
 
-        // special handling for P2SH scripts
-        if (lock_type == LockType.ScriptHash)
-        {
-            // todo: check
-            // - push only opcodes
-            // - empty stack
-            stack = unlock_stack.copy();
+        return null;
+    }
 
-            // todo: may want to make this an early return, or move the
-            // stack empty check above
-            assert(!stack.empty);
-            Script redeem = Script(stack.pop());
+    /***************************************************************************
 
-            if (auto error = this.executeScript(redeem, stack, tx))
-                return error;
+        Execute a P2SH (Pay 2 Script Hash) type of lock script.
 
-            if (hasStackFailed(stack))
-                return "Script failed";
-        }
+        The 64-byte hash of the redeem script `H` is read from `lock_bytes`,
+        `unlock_bytes` is evaluated as a set of pushes to the stack where
+        the last push is the redeem script. The redeem script is popped from the
+        stack, hashed, and compared to `H` from the lock script. Then it's
+        evaluated with any leftover stack items.
+
+        Params:
+            lock_bytes = must contain a 64-byte hash of the redeem script
+            unlock_bytes = must contain only stack push opcodes, where the last
+                           push is the redeem script itself
+
+        Returns:
+            null if there were no errors,
+            or a string explaining the reason execution failed
+
+    ***************************************************************************/
+
+    private static string executeScriptHash (Lock lock,
+        const(ubyte)[] unlock_bytes, in Transaction tx)
+    {
+        assert(lock.type == LockType.ScriptHash);
+
+        if (lock.bytes.length != Hash.sizeof)
+            return "Lock script: LockType.ScriptHash requires 64-byte script hash argument";
+        const Hash script_hash = Hash(lock.bytes);
+
+        Script unlock = Script(unlock_bytes);
+        if (auto error = unlock.isInvalidSyntaxReason(ScriptType.Unlock))
+            return error;
+
+        Stack stack;
+        if (auto error = executeScript(unlock, stack, tx))
+            return error;
+
+        if (stack.empty())
+            return "Unlock script did not push a redeem script to the stack";
+
+        const redeem_bytes = stack.pop();
+        if (hashFull(redeem_bytes) != script_hash)
+            return "Hash of Unlock script does not match script hash argument in Lock script";
+
+        Script redeem = Script(redeem_bytes);
+        if (auto error = unlock.isInvalidSyntaxReason(ScriptType.Redeem))
+            return error;
+
+        if (auto error = executeScript(redeem, stack, tx))
+            return error;
+
+        if (hasStackFailed(stack))
+            return "Script failed";
 
         return null;
     }
 
-    private static string executeScript (in Script script,
-        ref Stack stack, in Transaction tx)
+    /***************************************************************************
+
+        Execute the script with the given stack and the associated transaction
+
+        Params:
+            script = the script to execute
+            stack = the stack to use for the script. May be non-empty.
+            tx = the associated spending transaction
+
+        Returns:
+            null if there were no errors,
+            or a string explaining the reason execution failed
+
+    ***************************************************************************/
+
+    private static string executeScript (in Script script, ref Stack stack,
+        in Transaction tx)
     {
         ScopeCondition sc;
         const(ubyte)[] bytes = script[];
@@ -375,6 +435,21 @@ public class Engine
         return null;
     }
 
+    /***************************************************************************
+
+        Handle a conditional opcode
+
+        Params:
+            opcode = the current conditional
+            stack = the stack to evaluate for the conditional
+            sc = the scope condition which may be toggled
+
+        Returns:
+            null if there were no errors,
+            or a string explaining the reason execution failed
+
+    ***************************************************************************/
+
     private static string handleConditional (in OP opcode,
         ref Stack stack, ref ScopeCondition sc)
     {
@@ -417,7 +492,21 @@ public class Engine
         return null;
     }
 
-    private static bool hasStackFailed (/*in*/ ref Stack stack)  // peek() is not const
+    /***************************************************************************
+
+        Checks if the stack has a failing condition.
+        The stack may only be evaluated as true when it has a single
+        OP.TRUE item on the stack.
+
+        Params:
+            stack = the stack to check
+
+        Returns:
+            true if the stack has failed
+
+    ***************************************************************************/
+
+    private static bool hasStackFailed (/*in*/ ref Stack stack) // peek() is not const
         pure nothrow @safe @nogc
     {
         return stack.empty() || stack.peek() != TRUE;
