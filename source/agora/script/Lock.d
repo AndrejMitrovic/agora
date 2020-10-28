@@ -45,9 +45,9 @@ public enum LockType : ubyte
     /// lock is a script, unlock may be anything required by the lock script
     Script = 0x2,
 
-    /// lock is a 64-byte hash of a script, unlock is the stack containing
-    /// the pushes and the script itself
-    ScriptHash = 0x3,
+    /// lock is a 64-byte hash of a script, unlock is the script containing
+    /// only stack pushes which will push the redeem script last
+    Redeem = 0x3,
 }
 
 /*******************************************************************************

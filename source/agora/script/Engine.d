@@ -3,7 +3,7 @@
     Contains the script execution engine (non-webASM)
 
     Note that Bitcoin-style P2SH scripts are not detected,
-    instead one should use LockType.ScriptHash in the Lock script tag.
+    instead one should use LockType.Redeem in the Lock script tag.
 
     // todo: check script weight:
     // - max opcode length
@@ -117,7 +117,7 @@ public class Engine
 
                 break;
 
-            case LockType.ScriptHash:
+            case LockType.Redeem:
                 if (auto error = executeScriptHash(lock, unlock, tx))
                     return error;
 
@@ -268,10 +268,10 @@ public class Engine
     private static string executeScriptHash (Lock lock, Unlock unlock,
         in Transaction tx)
     {
-        assert(lock.type == LockType.ScriptHash);
+        assert(lock.type == LockType.Redeem);
 
         if (lock.bytes.length != Hash.sizeof)
-            return "Lock script: LockType.ScriptHash requires 64-byte script hash argument";
+            return "Lock script: LockType.Redeem requires 64-byte script hash argument";
         const Hash script_hash = Hash(lock.bytes);
 
         Script unlock_script = Script(unlock.bytes);
@@ -287,7 +287,7 @@ public class Engine
 
         const redeem_bytes = stack.pop();
         if (hashFull(redeem_bytes) != script_hash)
-            return "Hash of Unlock script does not match script hash argument in Lock script";
+            return "Hash of redeem script does not match redeem hash in lock script";
 
         Script redeem = Script(redeem_bytes);
         if (auto error = redeem.isInvalidSyntaxReason(ScriptType.Redeem))
@@ -771,7 +771,45 @@ unittest
 // Native P2SH (Pay to Script Hash)
 unittest
 {
+    const Pair kp = Pair.random();
+    const Transaction tx;
+    const Script redeem = Script([ubyte(32)] ~ kp.V[] ~ [ubyte(OP.CHECK_SIG)]);
+    const redeem_hash = hashFull(redeem);
+    const sig = sign(kp, tx);
 
+    // lock is: <redeem hash>
+    // unlock is: <push(sig)> <redeem>
+    // redeem is: check sig against the key embedded in the redeem script
+    scope engine = new Engine();
+    test!("==")(engine.execute(
+        Lock(LockType.Redeem, redeem_hash[]),
+        Unlock([ubyte(64)] ~ sig[] ~ toPushData(redeem[])),
+        tx),
+        null);
+
+    // empty redeem
+    test!("==")(engine.execute(
+        Lock(LockType.Redeem, redeem_hash[]),
+        Unlock(null),
+        tx),
+        "Unlock script did not push a redeem script to the stack");
+
+    // wrong redeem
+    const Script wrong_redeem = Script([ubyte(32)] ~ Pair.random.V[]
+        ~ [ubyte(OP.CHECK_SIG)]);
+    test!("==")(engine.execute(
+        Lock(LockType.Redeem, redeem_hash[]),
+        Unlock([ubyte(64)] ~ sig[] ~ toPushData(wrong_redeem[])),
+        tx),
+        "Hash of redeem script does not match redeem hash in lock script");
+
+    // good redeem, bad signature
+    auto wrong_sig = sign(kp, "bad");
+    test!("==")(engine.execute(
+        Lock(LockType.Redeem, redeem_hash[]),
+        Unlock([ubyte(64)] ~ wrong_sig[] ~ toPushData(redeem[])),
+        tx),
+        "Script failed");
 }
 
 // Basic invalid script verification
