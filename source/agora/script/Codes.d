@@ -13,7 +13,7 @@
 
 module agora.script.Codes;
 
-import std.traits;
+import std.traits : EnumMembers;
 
 /// The supported opcodes
 /// Opcodes named `CHECK_*` push their result to the stack,
@@ -28,13 +28,7 @@ enum OP : ubyte
 {
     /// Using this is an error and will invalidate the transaction
     /// Purposefully located first to default OPs to errors.
-    INVALID = 0x44,
-
-    /// Pushes False onto the stack
-    FALSE = 0x00,
-
-    /// Pushes True onto the stack
-    TRUE = 0x45,
+    INVALID = 0x45,
 
     /// Used to encode small length of data to push to the stack (up to 64 bytes),
     /// may be used with `case PUSH_BYTES_1: .. case PUSH_BYTES_64:` syntax.
@@ -52,6 +46,13 @@ enum OP : ubyte
     /// push onto the stack
     RESERVED_PUSH_DATA_3 = 0x43,
 
+    /// Pushes True onto the stack
+    TRUE = 0x44,
+
+    /// Pushes False onto the stack
+    FALSE = 0x00,
+
+    /// Conditionals
     IF = 0x46,
     NOT_IF = 0x47,
     ELSE = 0x48,

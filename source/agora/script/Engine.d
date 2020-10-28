@@ -2,6 +2,9 @@
 
     Contains the script execution engine (non-webASM)
 
+    Note that Bitcoin-style P2SH scripts are not detected,
+    instead one should use LockType.ScriptHash in the Lock script tag.
+
     // todo: check script weight:
     // - max opcode length
     // - num of opcodes
@@ -790,10 +793,10 @@ unittest
     // invalid scripts / sigs
     test!("==")(engine.execute(
         Lock(LockType.Script, invalid_script[]), Unlock(unlock[]), tx),
-        "Lock script error: Script contains an unrecognized opcode");
+        "Script contains an unrecognized opcode");
     test!("==")(engine.execute(
         Lock(LockType.Script, lock[]), Unlock(invalid_script[]), tx),
-        "Unlock script error: Script contains an unrecognized opcode");
+        "Script contains an unrecognized opcode");
 }
 
 // Item size & stack size limits checks
@@ -812,7 +815,7 @@ unittest
             .array.toPushData()
             ~ [ubyte(OP.TRUE)]),
         Unlock.init, tx),
-        "Lock script error: PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
+        "PUSH_DATA_2 opcode requires payload size value to be between 1 and 512");
 
     const MaxItemPush = ubyte(42).repeat(MAX_STACK_ITEM_SIZE).array.toPushData();
     const MaxPushes = MAX_STACK_TOTAL_SIZE / MAX_STACK_ITEM_SIZE;
@@ -916,81 +919,58 @@ unittest
 
     /* nested conditionals */
 
-    // IF true => IF true => 3
-    test!("==")(engine.execute(
-        Lock(LockType.Script, [ubyte(1), ubyte(3), OP.CHECK_EQUAL]),
-        Unlock([OP.TRUE, OP.IF,
-                           OP.TRUE, OP.IF,
-                                      ubyte(1), ubyte(3),
-                                    OP.ELSE,
-                                      ubyte(1), ubyte(4),
-                                    OP.END_IF,
-                         OP.ELSE,
-                           OP.TRUE, OP.IF,
-                                      ubyte(1), ubyte(5),
-                                    OP.ELSE,
-                                      ubyte(1), ubyte(6),
-                                    OP.END_IF,
-                         OP.END_IF]),
-        tx),
-        null);
+    // IF true => IF true => OP.TRUE
+    const Lock lock_1 =
+        Lock(LockType.Script,
+            [OP.IF,
+                 OP.IF,
+                    OP.TRUE,
+                 OP.ELSE,
+                    OP.FALSE,
+                 OP.END_IF,
+             OP.ELSE,
+                 OP.IF,
+                    OP.FALSE,
+                 OP.ELSE,
+                    OP.FALSE,
+                 OP.END_IF,
+             OP.END_IF]);
 
-    // IF true => NOT_IF false => 4
-    test!("==")(engine.execute(
-        Lock(LockType.Script, [ubyte(1), ubyte(4), OP.CHECK_EQUAL]),
-        Unlock([OP.TRUE, OP.IF,
-                           OP.TRUE, OP.NOT_IF,
-                                      ubyte(1), ubyte(3),
-                                    OP.ELSE,
-                                      ubyte(1), ubyte(4),
-                                    OP.END_IF,
-                         OP.ELSE,
-                           OP.TRUE, OP.IF,
-                                      ubyte(1), ubyte(5),
-                                    OP.ELSE,
-                                      ubyte(1), ubyte(6),
-                                    OP.END_IF,
-                         OP.END_IF]),
-        tx),
+    test!("==")(engine.execute(lock_1, Unlock([OP.TRUE, OP.TRUE]), tx),
         null);
+    test!("==")(engine.execute(lock_1, Unlock([OP.TRUE, OP.FALSE]), tx),
+        "Script failed");
+    test!("==")(engine.execute(lock_1, Unlock([OP.FALSE, OP.TRUE]), tx),
+        "Script failed");
+    test!("==")(engine.execute(lock_1, Unlock([OP.FALSE, OP.FALSE]), tx),
+        "Script failed");
 
-    // IF false => IF true => 5
-    test!("==")(engine.execute(
-        Lock(LockType.Script, [ubyte(1), ubyte(5), OP.CHECK_EQUAL]),
-        Unlock([OP.FALSE, OP.IF,
-                            OP.TRUE, OP.IF,
-                                       ubyte(1), ubyte(3),
-                                     OP.ELSE,
-                                       ubyte(1), ubyte(4),
-                                     OP.END_IF,
-                          OP.ELSE,
-                            OP.TRUE, OP.IF,
-                                       ubyte(1), ubyte(5),
-                                     OP.ELSE,
-                                       ubyte(1), ubyte(6),
-                                     OP.END_IF,
-                          OP.END_IF]),
-        tx),
-        null);
+    // IF true => NOT_IF true => OP.TRUE
+    const Lock lock_2 =
+        Lock(LockType.Script,
+            [OP.IF,
+                 OP.NOT_IF,
+                    OP.TRUE,
+                 OP.ELSE,
+                    OP.FALSE,
+                 OP.END_IF,
+             OP.ELSE,
+                 OP.IF,
+                    OP.FALSE,
+                 OP.ELSE,
+                    OP.FALSE,
+                 OP.END_IF,
+             OP.END_IF]);
 
-    // IF false => NOT_IF FALSE => 6
-    test!("==")(engine.execute(
-        Lock(LockType.Script, [ubyte(1), ubyte(6), OP.CHECK_EQUAL]),
-        Unlock([OP.FALSE, OP.IF,
-                            OP.TRUE, OP.IF,
-                                       ubyte(1), ubyte(3),
-                                     OP.ELSE,
-                                       ubyte(1), ubyte(4),
-                                     OP.END_IF,
-                          OP.ELSE,
-                            OP.TRUE, OP.NOT_IF,
-                                       ubyte(1), ubyte(5),
-                                     OP.ELSE,
-                                       ubyte(1), ubyte(6),
-                                     OP.END_IF,
-                          OP.END_IF]),
-        tx),
+    // note: remember that it's LIFO, second push is evaluted first!
+    test!("==")(engine.execute(lock_2, Unlock([OP.TRUE, OP.TRUE]), tx),
+        "Script failed");
+    test!("==")(engine.execute(lock_2, Unlock([OP.TRUE, OP.FALSE]), tx),
+        "Script failed");
+    test!("==")(engine.execute(lock_2, Unlock([OP.FALSE, OP.TRUE]), tx),
         null);
+    test!("==")(engine.execute(lock_2, Unlock([OP.FALSE, OP.FALSE]), tx),
+        "Script failed");
 
     /* syntax checks */
     test!("==")(engine.execute(

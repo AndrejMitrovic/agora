@@ -115,13 +115,16 @@ public struct Script
                 break;
 
             default:
-                final switch (type)
-                {
-                case ScriptType.Lock:
-                    break;
-                case ScriptType.Unlock:
+                break;
+            }
+
+            final switch (type)
+            {
+            case ScriptType.Lock:
+                break;
+            case ScriptType.Unlock:
+                if (opcode > OP.TRUE)
                     return "Unlock script may only contain stack pushes";
-                }
                 break;
             }
         }
@@ -186,6 +189,8 @@ unittest
     test!"=="(Script.init.isInvalidSyntaxReason(ScriptType.Unlock), null);
 
     // only pushes are allowed for unlock
+    test!"=="(Script([OP.FALSE])
+        .isInvalidSyntaxReason(ScriptType.Unlock), null);
     test!"=="(Script([OP.PUSH_BYTES_1, 1])
         .isInvalidSyntaxReason(ScriptType.Unlock), null);
     test!"=="(Script([OP.PUSH_BYTES_1, 1, OP.HASH])

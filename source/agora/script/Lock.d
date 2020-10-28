@@ -13,6 +13,8 @@
 
 module agora.script.Lock;
 
+import std.traits : EnumMembers;
+
 /// Contains the Lock, which is a tag and either a Hash or set of opcodes
 public struct Lock
 {
