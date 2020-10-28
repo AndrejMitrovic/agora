@@ -596,12 +596,6 @@ unittest
     assert(!isValidPointBytes(data));
 }
 
-// OP.TRUE / OP.FALSE
-unittest
-{
-    // todo: these need elaborate tests later
-}
-
 // OP.DUP
 unittest
 {
