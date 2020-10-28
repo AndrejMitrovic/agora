@@ -768,6 +768,12 @@ unittest
         "VERIFY_EQUAL operation failed");
 }
 
+// Native P2SH (Pay to Script Hash)
+unittest
+{
+
+}
+
 // Basic invalid script verification
 unittest
 {
