@@ -170,15 +170,15 @@ public class Engine
         switch (lock_type)
         {
         case LockType.Script:
+        case LockType.ScriptHash:
             Script lock = Script(lock_bytes);
             if (auto error = lock.isInvalidSyntaxReason())
                 return "Lock script: error: " ~ error;
             Script unlock = Script(unlock_bytes);
-            if (auto error = executeScripts(lock, unlock, tx))
+            if (auto error = executeScripts(lock_type, lock, unlock, tx))
                 return error;
             break;
 
-        case LockType.ScriptHash:
             if (lock_bytes.length != Hash.sizeof)
                 return "Lock script: LockType.ScriptHash requires 64-byte key hash argument";
             const Hash script_hash = Hash(lock_bytes);
@@ -188,7 +188,7 @@ public class Engine
 
             Script unlock = Script(unlock_bytes);
             Stack stack;
-            if (auto error = executeScript(unlock, stack, tx))
+            if (auto error = executeScript(lock_type, unlock, stack, tx))
                 return error;
 
             if (hasStackFailed(stack))
@@ -202,8 +202,8 @@ public class Engine
         return null;
     }
 
-    private static string executeScripts (in Script lock, in Script unlock,
-        in Transaction tx)
+    private static string executeScripts (in LockType lock_type, in Script lock,
+        in Script unlock, in Transaction tx)
     {
         Stack stack;
         if (auto error = executeScript(unlock, stack, tx))
@@ -217,24 +217,24 @@ public class Engine
             return "Script failed";
 
         // special handling for P2SH scripts
-        //if (lock.isLockP2SH())
-        //{
-        //    // todo: check
-        //    // - push only opcodes
-        //    // - empty stack
-        //    stack = unlock_stack.copy();
+        if (lock_type == LockType.ScriptHash)
+        {
+            // todo: check
+            // - push only opcodes
+            // - empty stack
+            stack = unlock_stack.copy();
 
-        //    // todo: may want to make this an early return, or move the
-        //    // stack empty check above
-        //    assert(!stack.empty);
-        //    Script redeem = Script(stack.pop());
+            // todo: may want to make this an early return, or move the
+            // stack empty check above
+            assert(!stack.empty);
+            Script redeem = Script(stack.pop());
 
-        //    if (auto error = this.executeScript(redeem, stack, tx))
-        //        return error;
+            if (auto error = this.executeScript(redeem, stack, tx))
+                return error;
 
-        //    if (hasStackFailed(stack))
-        //        return "Script failed";
-        //}
+            if (hasStackFailed(stack))
+                return "Script failed";
+        }
 
         return null;
     }
