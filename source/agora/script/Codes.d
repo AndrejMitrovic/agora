@@ -67,7 +67,8 @@ enum OP : ubyte
     /// Checks the stack item is equal to the input value
     CHECK_EQUAL,
 
-    /// Verifies the stack item is equal to the input value
+    /// Verifies the stack item is equal to the input value,
+    /// fails the script if it's false
     VERIFY_EQUAL,
 
     /// Checks the signature with the given public key,

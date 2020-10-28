@@ -256,6 +256,8 @@ unittest
 
 /*******************************************************************************
 
+    Create a bitcoin-style P2PKH lock script.
+
     Params:
         key_hash = the key hash to encode in the P2PKH lock script
 
@@ -274,6 +276,8 @@ public Script createLockP2PKH (Hash key_hash) pure nothrow @safe
 }
 
 /*******************************************************************************
+
+    Create a bitcoin-style P2PKH unlock script.
 
     Params:
         sig = the signature
