@@ -93,12 +93,15 @@ public enum OP : ubyte
     /// execution to fail if the two items are not equal to each other.
     VERIFY_EQUAL = 0x4D,
 
+    /// Verify the time lock of a spending Transaction
+    VERIFY_TX_LOCK = 0x4E,
+
     /// Pops two items from the stack. The two items must be a Point (Schnorr),
     /// and a Signature. If the items cannot be deserialized as a Point and
     /// Signature, the script validation fails.
     /// The signature is then validated using Schnorr, if the signature is
     /// valid then `TRUE` is pushed to the stack.
-    CHECK_SIG = 0x4E,
+    CHECK_SIG = 0x4F,
 }
 
 /*******************************************************************************
