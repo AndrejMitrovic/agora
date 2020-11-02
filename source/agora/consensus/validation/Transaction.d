@@ -79,6 +79,9 @@ public string isInvalidReason (
         if (!sum_unspent.add(utxo_value.output.value))
             return "Transaction: Input overflow";
 
+        if (height < utxo_value.unlock_height + input.unlock_age)
+            return "Transanction: Input's unlock age cannot be used for this block height";
+
         return null;
     }
 
@@ -810,5 +813,52 @@ unittest
     test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(10)),
         null);
     test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(1024)),
+        null);
+}
+
+/// input-level relative time lock
+unittest
+{
+    import ocean.core.Test;
+    scope storage = new TestUTXOSet;
+    KeyPair kp = KeyPair.random();
+
+    Transaction prev_tx = { outputs: [Output(Amount(100), kp.address)] };
+    storage.put(prev_tx);
+
+    Transaction tx = Transaction(
+        TxType.Payment, [Input(hashFull(prev_tx), 0)],
+        [Output(Amount(50), kp.address)]);
+
+    tx.unlock_height = 0;
+    tx.inputs[0].unlock_age = 0;
+    tx.inputs[0].signature = kp.secret.sign(hashFull(tx)[]);
+    test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(0)), null);
+    test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(1024)), null);
+
+    tx.inputs[0].unlock_age = 10;
+    tx.inputs[0].signature = kp.secret.sign(hashFull(tx)[]);
+    test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(0)),
+        "Transanction: Input's unlock age cannot be used for this block height");
+    test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(9)),
+        "Transanction: Input's unlock age cannot be used for this block height");
+    test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(10)),
+        null);
+    test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(1024)),
+        null);
+
+    storage.put(tx, 10);  // put it at height 10
+    tx = Transaction(
+        TxType.Payment, [Input(hashFull(tx), 0)],
+        [Output(Amount(50), kp.address)]);
+    tx.inputs[0].unlock_age = 5;
+    tx.inputs[0].signature = kp.secret.sign(hashFull(tx)[]);
+    test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(5)),
+        "Transanction: Input's unlock age cannot be used for this block height");
+    test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(14)),
+        "Transanction: Input's unlock age cannot be used for this block height");
+    test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(15)),
+        null);
+    test!"=="(tx.isInvalidReason(&storage.findUTXO, Height(16)),
         null);
 }

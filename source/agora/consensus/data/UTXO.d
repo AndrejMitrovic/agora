@@ -105,13 +105,14 @@ public class TestUTXOSet
     }
 
     /// Short hand to add a transaction
-    public void put (const Transaction tx) nothrow @safe
+    public void put (const Transaction tx, uint unlock_height = 0) nothrow @safe
     {
         Hash txhash = hashFull(tx);
         foreach (size_t idx, ref output_; tx.outputs)
         {
             Hash h = UTXO.getHash(txhash, idx);
             UTXO v = {
+                unlock_height: unlock_height,
                 type: tx.type,
                 output: output_
             };
