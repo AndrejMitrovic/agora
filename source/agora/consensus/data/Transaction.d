@@ -53,6 +53,32 @@ public struct Transaction
     /// The list of newly created outputs to put in the UTXO
     public Output[] outputs;
 
+    /// This transaction may only be included in a block with height >= this
+    /// Note that another tx with a lower lock time could double-spend this tx.
+    /// By default it's 1 (spendable at any block height other than genesis
+    /// which has special rules anyway). 0 could be a special flag.
+    public uint lock_until = 1;
+
+    /***************************************************************************
+
+        Implements hashing support
+        Temporarily skips hashing `lock_until` to avoid breaking tests.
+
+        todo: remove
+
+        Params:
+            dg = hashing function
+
+    ***************************************************************************/
+
+    public void computeHash (scope HashDg dg) const nothrow @safe @nogc
+    {
+        // skip `lock_until` for now..
+        hashPart(this.type, dg);
+        hashPart(this.inputs, dg);
+        hashPart(this.outputs, dg);
+    }
+
     /***************************************************************************
 
         Transactions Serialization
@@ -73,6 +99,8 @@ public struct Transaction
         serializePart(this.outputs.length, dg);
         foreach (const ref output; this.outputs)
             serializePart(output, dg);
+
+        serializePart(this.lock_until, dg);
     }
 
     /// Support for sorting transactions
