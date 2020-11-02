@@ -55,14 +55,12 @@ public struct Transaction
 
     /// This transaction may only be included in a block with height >= this
     /// Note that another tx with a lower lock time could double-spend this tx.
-    /// By default it's 1 (spendable at any block height other than genesis
-    /// which has special rules anyway). 0 could be a special flag.
-    public uint lock_until = 1;
+    public uint unlock_height = 0;
 
     /***************************************************************************
 
         Implements hashing support
-        Temporarily skips hashing `lock_until` to avoid breaking tests.
+        Temporarily skips hashing `unlock_height` to avoid breaking tests.
 
         todo: remove
 
@@ -73,7 +71,7 @@ public struct Transaction
 
     public void computeHash (scope HashDg dg) const nothrow @safe @nogc
     {
-        // skip `lock_until` for now..
+        // skip `unlock_height` for now..
         hashPart(this.type, dg);
         hashPart(this.inputs, dg);
         hashPart(this.outputs, dg);
@@ -100,7 +98,7 @@ public struct Transaction
         foreach (const ref output; this.outputs)
             serializePart(output, dg);
 
-        serializePart(this.lock_until, dg);
+        serializePart(this.unlock_height, dg);
     }
 
     /// Support for sorting transactions
