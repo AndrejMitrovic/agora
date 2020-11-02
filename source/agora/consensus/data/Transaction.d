@@ -53,6 +53,10 @@ public struct Transaction
     /// The list of newly created outputs to put in the UTXO
     public Output[] outputs;
 
+    /// This transaction may only be included in a block with height >= this
+    /// Note that another tx with a lower lock time could double-spend this tx.
+    public uint unlock_height = 0;
+
     /***************************************************************************
 
         Transactions Serialization
@@ -73,6 +77,8 @@ public struct Transaction
         serializePart(this.outputs.length, dg);
         foreach (const ref output; this.outputs)
             serializePart(output, dg);
+
+        serializePart(this.unlock_height, dg);
     }
 
     /// Support for sorting transactions
