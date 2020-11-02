@@ -141,24 +141,33 @@ public struct Input
     /// A signature that should be verified using the `previous[index].address` public key
     public Signature signature;
 
+    /// Used to implement relative time locks.
+    /// If Input is otherwise valid, but the age compared to the UTXO its
+    /// spending is less than the unlock age, then this Input cannot be used,
+    /// but it may be used at a future block height.
+    public uint unlock_age = 0;
+
     /// Simple ctor
-    public this (in Hash utxo_, in Signature sig = Signature.init)
+    public this (in Hash utxo_, in Signature sig = Signature.init, uint unlock_age = 0)
         inout pure nothrow @nogc @safe
     {
         this.utxo = utxo_;
         this.signature = sig;
+        this.unlock_age = unlock_age;
     }
 
     /// Ctor which does hashing based on index
-    public this (Hash txhash, ulong index) nothrow @safe
+    public this (Hash txhash, ulong index, uint unlock_age = 0) nothrow @safe
     {
         this.utxo = hashMulti(txhash, index);
+        this.unlock_age = unlock_age;
     }
 
     /// Ctor which does hashing based on the `Transaction` and index
-    public this (in Transaction tx, ulong index) nothrow @safe
+    public this (in Transaction tx, ulong index, uint unlock_age = 0) nothrow @safe
     {
         this.utxo = hashMulti(tx.hashFull(), index);
+        this.unlock_age = unlock_age;
     }
 
     /***************************************************************************
@@ -173,6 +182,7 @@ public struct Input
     public void computeHash (scope HashDg dg) const nothrow @safe @nogc
     {
         dg(this.utxo[]);
+        hashPart(this.unlock_age, dg);
     }
 }
 
