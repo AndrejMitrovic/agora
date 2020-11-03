@@ -31,6 +31,7 @@ import agora.script.Script;
 import agora.script.Stack;
 
 import std.bitmanip;
+import std.conv;
 import std.range;
 import std.traits;
 
@@ -473,29 +474,23 @@ public class Engine
                 break;
 
             case OP.CHECK_SIG:
-                // if changed, check assumptions
-                static assert(Point.sizeof == 32);
-                static assert(Signature.sizeof == 64);
+                bool is_valid;
+                if (auto error = this.verifySignature!(OP.CHECK_SIG)(
+                    stack, tx, is_valid))
+                    return error;
 
-                if (stack.count() < 2)
-                    return "CHECK_SIG opcode requires two items on the stack";
+                // canPush() check unnecessary
+                stack.push(is_valid ? TrueValue : FalseValue);
+                break;
 
-                const key_bytes = stack.pop();
-                if (key_bytes.length != Point.sizeof)
-                    return "CHECK_SIG opcode requires 32-byte public key on the stack";
-                if (!isValidPointBytes(key_bytes))
-                    return "CHECK_SIG 32-byte public key on the stack is invalid";
+            case OP.VERIFY_SIG:
+                bool is_valid;
+                if (auto error = this.verifySignature!(OP.VERIFY_SIG)(
+                    stack, tx, is_valid))
+                    return error;
 
-                const sig_bytes = stack.pop();
-                if (sig_bytes.length != Signature.sizeof)
-                    return "CHECK_SIG opcode requires 64-byte signature on the stack";
-
-                const point = Point(key_bytes);
-                const sig = Signature(sig_bytes);
-                if (Schnorr.verify(point, sig, tx))
-                    stack.push(TrueValue);  // canPush() check unnecessary
-                else
-                    stack.push(FalseValue);
+                if (!is_valid)
+                    return "VERIFY_SIG signature failed validation";
                 break;
 
             case OP.VERIFY_TX_LOCK:
@@ -667,6 +662,74 @@ public class Engine
 
         payload = opcodes[0 .. size];
         opcodes.popFrontN(size);  // advance to next opcode
+        return null;
+    }
+
+    /***************************************************************************
+
+        Reads the Signature and Public key from the stack,
+        and validates the signature against the provided
+        spending transaction.
+
+        If the Signature and Public key are missing or in an invalid format,
+        an error string is returned.
+
+        Otherwise the signature is validated and the `sig_valid` parameter
+        is set to the validation result.
+
+        Params:
+            OP = the opcode
+            stack = should contain the Signature and Public Key
+            tx = the transaction that should have been signed
+
+        Returns:
+            an error string if the Signature and Public key are missing or
+            invalid, otherwise returns null.
+
+    ***************************************************************************/
+
+    private string verifySignature (OP op)(ref Stack stack, in Transaction tx,
+        out bool sig_valid) nothrow @safe //@nogc  // stack.pop() is not @nogc
+    {
+        static assert(op == OP.CHECK_SIG || op == OP.VERIFY_SIG);
+
+        // if changed, check assumptions
+        static assert(Point.sizeof == 32);
+        static assert(Signature.sizeof == 64);
+
+        if (stack.count() < 2)
+        {
+            static immutable err1 = op.to!string
+                ~ " opcode requires two items on the stack";
+            return err1;
+        }
+
+        const key_bytes = stack.pop();
+        if (key_bytes.length != Point.sizeof)
+        {
+            static immutable err2 = op.to!string
+                ~ " opcode requires 32-byte public key on the stack";
+            return err2;
+        }
+
+        if (!isValidPointBytes(key_bytes))
+        {
+            static immutable err3 = op.to!string
+                ~ " 32-byte public key on the stack is invalid";
+            return err3;
+        }
+
+        const sig_bytes = stack.pop();
+        if (sig_bytes.length != Signature.sizeof)
+        {
+            static immutable err4 = op.to!string
+                ~ " opcode requires 64-byte signature on the stack";
+            return err4;
+        }
+
+        const point = Point(key_bytes);
+        const sig = Signature(sig_bytes);
+        sig_valid = Schnorr.verify(point, sig, tx);
         return null;
     }
 }
@@ -897,6 +960,60 @@ unittest
         Lock(LockType.Script, [ubyte(64)] ~ sig[]
             ~ [ubyte(32)] ~ kp.V[]
             ~ [ubyte(OP.CHECK_SIG)]), Unlock.init, tx, Input.init),
+        null);
+}
+
+// OP.VERIFY_SIG
+unittest
+{
+    scope engine = new Engine(TestStackMaxTotalSize, TestStackMaxItemSize);
+    const Transaction tx;
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.VERIFY_SIG]), Unlock.init, tx, Input.init),
+        "VERIFY_SIG opcode requires two items on the stack");
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [OP.PUSH_BYTES_1, 1, OP.VERIFY_SIG]),
+        Unlock.init, tx, Input.init),
+        "VERIFY_SIG opcode requires two items on the stack");
+    test!("==")(engine.execute(
+        Lock(LockType.Script,
+            [OP.PUSH_BYTES_1, 1, OP.PUSH_BYTES_1, 1, OP.VERIFY_SIG]),
+        Unlock.init, tx, Input.init),
+        "VERIFY_SIG opcode requires 32-byte public key on the stack");
+
+    // invalid key (crypto_core_ed25519_is_valid_point() fails)
+    Point invalid_key;
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(OP.PUSH_BYTES_1), ubyte(1)]
+            ~ [ubyte(32)] ~ invalid_key[]
+            ~ [ubyte(OP.VERIFY_SIG)]), Unlock.init, tx, Input.init),
+        "VERIFY_SIG 32-byte public key on the stack is invalid");
+
+    Point valid_key = Point.fromString(
+        "0x44404b654d6ddf71e2446eada6acd1f462348b1b17272ff8f36dda3248e08c81");
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(OP.PUSH_BYTES_1), ubyte(1)]
+            ~ [ubyte(32)] ~ valid_key[]
+            ~ [ubyte(OP.VERIFY_SIG)]), Unlock.init, tx, Input.init),
+        "VERIFY_SIG opcode requires 64-byte signature on the stack");
+
+    Signature invalid_sig;
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(64)] ~ invalid_sig[]
+            ~ [ubyte(32)] ~ valid_key[]
+            ~ [ubyte(OP.VERIFY_SIG)]), Unlock.init, tx, Input.init),
+        "VERIFY_SIG signature failed validation");
+    const Pair kp = Pair.random();
+    const sig = sign(kp, tx);
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(64)] ~ sig[]
+            ~ [ubyte(32)] ~ kp.V[]
+            ~ [ubyte(OP.VERIFY_SIG)]), Unlock.init, tx, Input.init),
+        "Script failed");  // VERIFY_SIG does not push TRUE to the stack
+    test!("==")(engine.execute(
+        Lock(LockType.Script, [ubyte(64)] ~ sig[]
+            ~ [ubyte(32)] ~ kp.V[]
+            ~ [ubyte(OP.VERIFY_SIG)]), Unlock([ubyte(OP.TRUE)]), tx, Input.init),
         null);
 }
 
