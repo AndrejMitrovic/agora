@@ -672,10 +672,11 @@ public class Engine
 }
 
 // workaround to allow pure
-extern (C) int crypto_core_ed25519_is_valid_point (const(ubyte)* p) pure nothrow;
+extern (C) int crypto_core_ed25519_is_valid_point (const(ubyte)* p)
+    pure nothrow @nogc;
 
 /// Checks whether the array is a valid Point on the curve we use. See #1279
-private bool isValidPointBytes (in ubyte[] bytes) pure nothrow @trusted
+private bool isValidPointBytes (in ubyte[] bytes) pure nothrow @nogc @trusted
 {
     import libsodium.crypto_core_ed25519;
     return crypto_core_ed25519_is_valid_point(bytes.ptr) == 1;
