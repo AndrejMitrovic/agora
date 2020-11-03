@@ -96,12 +96,15 @@ public enum OP : ubyte
     /// Verify the time lock of a spending Transaction
     VERIFY_TX_LOCK = 0x4E,
 
+    /// Verify the time lock of the associated spending Input
+    VERIFY_INPUT_LOCK = 0x4F,
+
     /// Pops two items from the stack. The two items must be a Point (Schnorr),
     /// and a Signature. If the items cannot be deserialized as a Point and
     /// Signature, the script validation fails.
     /// The signature is then validated using Schnorr, if the signature is
     /// valid then `TRUE` is pushed to the stack.
-    CHECK_SIG = 0x4F,
+    CHECK_SIG = 0x5A,
 }
 
 /*******************************************************************************
