@@ -187,8 +187,12 @@ public struct Input
     /// >= `prev_utxo.unlock_height + unlock_age`
     public uint unlock_age = 0;
 
+    /// Segwit-style unlock script
+    public Unlock unlock;
+
     /// Simple ctor
-    public this (in Hash utxo_, in Signature sig = Signature.init, uint unlock_age = 0)
+    public this (in Hash utxo_, in Signature sig = Signature.init, uint unlock_age = 0,
+        Unlock unlock = Unlock.init)
         inout pure nothrow @nogc @safe
     {
         this.utxo = utxo_;
@@ -197,14 +201,16 @@ public struct Input
     }
 
     /// Ctor which does hashing based on index
-    public this (Hash txhash, ulong index, uint unlock_age = 0) nothrow @safe
+    public this (Hash txhash, ulong index, uint unlock_age = 0,
+        Unlock unlock = Unlock.init) nothrow @safe
     {
         this.utxo = hashMulti(txhash, index);
         this.unlock_age = unlock_age;
     }
 
     /// Ctor which does hashing based on the `Transaction` and index
-    public this (in Transaction tx, ulong index, uint unlock_age = 0) nothrow @safe
+    public this (in Transaction tx, ulong index, uint unlock_age = 0,
+        Unlock unlock = Unlock.init) nothrow @safe
     {
         this.utxo = hashMulti(tx.hashFull(), index);
         this.unlock_age = unlock_age;
@@ -223,7 +229,7 @@ public struct Input
     {
         dg(this.utxo[]);
 
-        // todo: hash `unlock_age`
+        // todo: hash `unlock_age`, but not `unlock`
     }
 }
 
