@@ -57,6 +57,10 @@ public struct Transaction
     /// Note that another tx with a lower lock time could double-spend this tx.
     public uint unlock_height = 0;
 
+    /// The sequence ID of this transaction. Used primarily for the Flash layer,
+    /// and is not validated by the protocol itself, only by the lock scripts.
+    public uint seq_id;
+
     /***************************************************************************
 
         Transactions Serialization
@@ -79,6 +83,7 @@ public struct Transaction
             serializePart(output, dg);
 
         serializePart(this.unlock_height, dg);
+        serializePart(this.seq_id, dg);
     }
 
     /// Support for sorting transactions
