@@ -48,6 +48,7 @@ version (unittest)
                    age-constrained settlement branch
         update_X = the Schnorr sum of the multi-party public keys for the
                    sequence-constrained update branch
+        next_seq_id = the sequence ID to lock to for the update spend branch
 
     Returns:
         a lock script which can be unlocked instantly with an update key-pair,
@@ -57,7 +58,7 @@ version (unittest)
 *******************************************************************************/
 
 public Lock createLockEltoo (uint age, Point settle_X, Point update_X,
-    uint seq_id) pure nothrow @safe
+    uint next_seq_id) pure nothrow @safe
 {
     /*
         Eltoo whitepaper Figure 4:
@@ -85,7 +86,7 @@ public Lock createLockEltoo (uint age, Point settle_X, Point update_X,
         OP_ENDIF
     */
     const age_bytes = nativeToLittleEndian(age);
-    const ubyte[4] seq_id_bytes = nativeToLittleEndian(seq_id);
+    const ubyte[4] seq_id_bytes = nativeToLittleEndian(next_seq_id);
 
     return Lock(LockType.Script,
         [ubyte(OP.IF)]
