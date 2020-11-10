@@ -461,13 +461,24 @@ GCOQ...LRIJ(61,000,000), GCOQ...LRIJ(61,000,000)
 ====================
 Height: 1, Prev: 0x0456...8f1d, Root: 0xd437...e2c9, Enrollments: [],
 Transactions: 2
-Type : Payment, Inputs (1): 0x533f...5e2e:0xac4d...b604
+Type : Payment, Inputs (1): 0x533f...5e2e:0x1da7...bf5f
 Outputs (1): GCOQ...LRIJ(61,000,000)
-Type : Payment, Inputs (1): 0x915d...fde1:0x4b11...5f86
+Type : Payment, Inputs (1): 0x915d...fde1:0x1b16...fa1f
 Outputs (1): GCOQ...LRIJ(61,000,000)`;
+
+    import agora.common.crypto.ECC;
+    import agora.common.crypto.Schnorr;
+    // use determenistic R for the test
+    Signature signer (in Pair kp, in Transaction tx) @safe nothrow
+    {
+        const Pair R = Pair.fromScalar(Scalar(`0x074360d5eab8e888df07d862c4fc845ebd10b6a6c530919d66221219bba50216`));
+        return sign(kp.v, kp.V, R.V, R.v, tx);
+    }
+
     import agora.utils.Test : genesisSpendable;
     const Block secondBlock = makeNewBlock(GenesisBlock,
-        genesisSpendable().take(2).map!(txb => txb.sign()));
+        genesisSpendable().take(2).map!(txb => txb.sign(TxType.Payment,
+            Height(0), 0, &signer)));
     const(Block)[] blocks = [GenesisBlock, secondBlock];
     const actual = format("%s", prettify(blocks));
     assert(ResultStr == actual, actual);

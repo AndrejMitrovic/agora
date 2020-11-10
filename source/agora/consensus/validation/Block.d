@@ -21,6 +21,7 @@ import agora.consensus.data.Block;
 import agora.consensus.data.Enrollment;
 import agora.consensus.data.Transaction;
 import agora.consensus.state.UTXOSet;
+import agora.script.Engine;
 import agora.script.Lock;
 import VEn = agora.consensus.validation.Enrollment;
 import VTx = agora.consensus.validation.Transaction;
@@ -64,6 +65,7 @@ version (unittest)
 
     Params:
         block = the block to check
+        engine = script execution engine
         prev_height = the height of the direct ancestor of this block
         prev_hash = the hash of the direct ancestor of this block
         findUTXO = delegate to find the referenced unspent UTXOs with
@@ -76,8 +78,8 @@ version (unittest)
 
 *******************************************************************************/
 
-public string isInvalidReason (const ref Block block, Height prev_height,
-    in Hash prev_hash, scope UTXOFinder findUTXO,
+public string isInvalidReason (const ref Block block, Engine engine,
+    Height prev_height, in Hash prev_hash, scope UTXOFinder findUTXO,
     size_t active_enrollments) nothrow @safe
 {
     import std.algorithm;
@@ -98,7 +100,8 @@ public string isInvalidReason (const ref Block block, Height prev_height,
 
     foreach (const ref tx; block.txs)
     {
-        if (auto fail_reason = VTx.isInvalidReason(tx, findUTXO, block.header.height))
+        if (auto fail_reason = VTx.isInvalidReason(tx, engine, findUTXO,
+            block.header.height))
             return fail_reason;
     }
 
@@ -249,16 +252,25 @@ public string isGenesisBlockInvalidReason (const ref Block block) nothrow @safe
     return null;
 }
 
+version (unittest)
+{
+    // sensible defaults
+    private const TestStackMaxTotalSize = 16_384;
+    private const TestStackMaxItemSize = 512;
+}
+
 /// Genesis block validation fail test
 unittest
 {
+    scope engine = new Engine(TestStackMaxTotalSize, TestStackMaxItemSize);
     import agora.common.Serializer;
 
     Block block = GenesisBlock.serializeFull.deserializeFull!Block;
     assert(block.isGenesisBlockValid());
 
     // don't accept block height 0 from the network
-    assert(!block.isValid(Height(0), Hash.init, null, Enrollment.MinValidatorCount));
+    assert(!block.isValid(engine, Height(0), Hash.init, null,
+        Enrollment.MinValidatorCount));
 
     // height check
     block.header.height = 1;
@@ -413,11 +425,11 @@ public bool isGenesisBlockValid (const ref Block genesis_block)
 
 /// Ditto but returns `bool`, only usable in unittests
 version (unittest)
-public bool isValid (const ref Block block, Height prev_height,
+public bool isValid (const ref Block block, Engine engine, Height prev_height,
     Hash prev_hash, scope UTXOFinder findUTXO,
     size_t active_enrollments) nothrow @safe
 {
-    return isInvalidReason(block, prev_height, prev_hash, findUTXO,
+    return isInvalidReason(block, engine, prev_height, prev_hash, findUTXO,
         active_enrollments) is null;
 }
 
@@ -427,6 +439,7 @@ unittest
     import std.algorithm;
     import std.range;
 
+    scope engine = new Engine(TestStackMaxTotalSize, TestStackMaxItemSize);
     scope utxos = new TestUTXOSet();
     scope findUTXO = &utxos.peekUTXO;
 
@@ -438,24 +451,24 @@ unittest
     auto block = GenesisBlock.makeNewBlock(genesisSpendable().map!(txb => txb.sign()));
 
     // height check
-    assert(block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+    assert(block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
         Enrollment.MinValidatorCount));
 
     block.header.height = 100;
-    assert(!block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+    assert(!block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
         Enrollment.MinValidatorCount));
 
     block.header.height = GenesisBlock.header.height + 1;
-    assert(block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+    assert(block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
         Enrollment.MinValidatorCount));
 
     /// .prev_block check
     block.header.prev_block = block.header.hashFull();
-    assert(!block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+    assert(!block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
         Enrollment.MinValidatorCount));
 
     block.header.prev_block = gen_hash;
-    assert(block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+    assert(block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
         Enrollment.MinValidatorCount));
 
     /// Check consistency of `txs` field
@@ -463,34 +476,34 @@ unittest
         auto saved_txs = block.txs;
 
         block.txs = saved_txs[0 .. $ - 1];
-        assert(!block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+        assert(!block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
             Enrollment.MinValidatorCount));
 
         block.txs = (saved_txs ~ saved_txs).sort.array;
-        assert(!block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+        assert(!block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
             Enrollment.MinValidatorCount));
 
         block.txs = saved_txs;
-        assert(block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+        assert(block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
             Enrollment.MinValidatorCount));
 
         /// Txs sorting check
         block.txs.reverse;
-        assert(!block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+        assert(!block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
             Enrollment.MinValidatorCount));
 
         block.txs.reverse;
-        assert(block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+        assert(block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
             Enrollment.MinValidatorCount));
     }
 
     /// no matching utxo => fail
     utxos.clear();
-    assert(!block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+    assert(!block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
         Enrollment.MinValidatorCount));
 
     GenesisBlock.txs.each!(tx => utxos.put(tx));
-    assert(block.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+    assert(block.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
         Enrollment.MinValidatorCount));
 
     utxos.clear();  // genesis is spent
@@ -499,7 +512,7 @@ unittest
 
     auto prev_block = block;
     block = block.makeNewBlock(prev_txs.map!(tx => TxBuilder(tx).sign()));
-    assert(block.isValid(prev_block.header.height, prev_block.header.hashFull(),
+    assert(block.isValid(engine, prev_block.header.height, prev_block.header.hashFull(),
         findUTXO, Enrollment.MinValidatorCount));
 
     assert(prev_txs.length > 0);  // sanity check
@@ -507,11 +520,11 @@ unittest
     {
         // one utxo missing from the set => fail
         utxos.storage.remove(UTXO.getHash(tx.hashFull(), 0));
-        assert(!block.isValid(prev_block.header.height, prev_block.header.hashFull(),
+        assert(!block.isValid(engine, prev_block.header.height, prev_block.header.hashFull(),
             findUTXO, Enrollment.MinValidatorCount));
 
         utxos.put(tx);
-        assert(block.isValid(prev_block.header.height, prev_block.header.hashFull(),
+        assert(block.isValid(engine, prev_block.header.height, prev_block.header.hashFull(),
             findUTXO, Enrollment.MinValidatorCount));
     }
 
@@ -546,7 +559,7 @@ unittest
 
     // consumed all utxo => fail
     block = GenesisBlock.makeNewBlock(genesisSpendable().map!(txb => txb.sign()));
-    assert(block.isValid(GenesisBlock.header.height, GenesisBlock.header.hashFull(),
+    assert(block.isValid(engine, GenesisBlock.header.height, GenesisBlock.header.hashFull(),
             findNonSpent, Enrollment.MinValidatorCount));
 
     // All `payment` utxos have been consumed
@@ -560,38 +573,46 @@ unittest
     auto double_spend = block.txs.dup;
     double_spend[$ - 1] = double_spend[$ - 2];
     block = makeNewBlock(GenesisBlock, double_spend);
-    assert(!block.isValid(GenesisBlock.header.height, GenesisBlock.header.hashFull(),
+    assert(!block.isValid(engine, GenesisBlock.header.height, GenesisBlock.header.hashFull(),
             findNonSpent, Enrollment.MinValidatorCount));
 
     // we stopped validation due to a double-spend
     assert(used_set.length == double_spend.length - 1);
 
     block = GenesisBlock.makeNewBlock(prev_txs.map!(tx => TxBuilder(tx).sign()));
-    assert(block.isValid(GenesisBlock.header.height, GenesisBlock.header.hashFull(),
+    assert(block.isValid(engine, GenesisBlock.header.height, GenesisBlock.header.hashFull(),
         findUTXO, Enrollment.MinValidatorCount));
 
     // modify the last hex byte of the merkle root
     block.header.merkle_root[][$ - 1]++;
 
-    assert(!block.isValid(GenesisBlock.header.height, GenesisBlock.header.hashFull(),
+    assert(!block.isValid(engine, GenesisBlock.header.height, GenesisBlock.header.hashFull(),
         findUTXO, Enrollment.MinValidatorCount));
 
     // now restore it back to what it was
     block.header.merkle_root[][$ - 1]--;
-    assert(block.isValid(GenesisBlock.header.height, GenesisBlock.header.hashFull(),
+    assert(block.isValid(engine, GenesisBlock.header.height, GenesisBlock.header.hashFull(),
         findUTXO, Enrollment.MinValidatorCount));
     const last_root = block.header.merkle_root;
 
     block = GenesisBlock.makeNewBlock(prev_txs.enumerate.map!(en =>
         TxBuilder(en.value).split(WK.Keys.byRange().take(en.index + 1).map!(k => k.address)).sign()));
 
-    assert(block.isValid(GenesisBlock.header.height, GenesisBlock.header.hashFull(),
+    assert(block.isValid(engine, GenesisBlock.header.height, GenesisBlock.header.hashFull(),
         findUTXO, Enrollment.MinValidatorCount));
 
     // the previous merkle root should not match the new txs
     block.header.merkle_root = last_root;
-    assert(!block.isValid(GenesisBlock.header.height, GenesisBlock.header.hashFull(),
+    assert(!block.isValid(engine, GenesisBlock.header.height, GenesisBlock.header.hashFull(),
         findUTXO, Enrollment.MinValidatorCount));
+}
+
+version (unittest)
+private Unlock signUnlock (KeyPair key_pair, Transaction tx)
+{
+    auto secret = secretKeyToCurveScalar(key_pair.secret);
+    auto kp = Pair(secret, secret.toPoint());
+    return genKeyUnlock(sign(kp, tx));
 }
 
 ///
@@ -604,6 +625,7 @@ unittest
     import std.algorithm;
     import std.range;
 
+    scope engine = new Engine(TestStackMaxTotalSize, TestStackMaxItemSize);
     scope utxo_set = new TestUTXOSet();
     UTXOFinder findUTXO = utxo_set.getUTXOFinder();
 
@@ -616,7 +638,7 @@ unittest
     auto txs_1 = genesisSpendable().map!(txb => txb.sign()).array();
 
     auto block1 = makeNewBlock(GenesisBlock, txs_1);
-    assert(block1.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+    assert(block1.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
         Enrollment.MinValidatorCount));
 
     foreach (ref tx; txs_1)
@@ -654,13 +676,14 @@ unittest
             tx.outputs ~= output;
         }
 
-        tx.inputs[0].unlock = genKeyUnlock(gen_key.secret.sign(hashFull(tx)[]));
+        tx.inputs[0].unlock = signUnlock(gen_key, tx);
         txs_2 ~= tx;
     }
 
     auto block2 = makeNewBlock(block1, txs_2);
-    assert(block2.isValid(block1.header.height, hashFull(block1.header), findUTXO,
-        Enrollment.MinValidatorCount));
+    const reason = block2.isInvalidReason(engine, block1.header.height,
+        hashFull(block1.header), findUTXO, Enrollment.MinValidatorCount);
+    assert(reason is null, reason);
     foreach (ref tx; txs_2)
         utxo_set.put(tx);
 
@@ -676,7 +699,7 @@ unittest
             [input],
             [Output(Amount(1), keypair2.address)]
         };
-        tx.inputs[0].unlock = genKeyUnlock(keypair.secret.sign(hashFull(tx)[]));
+        tx.inputs[0].unlock = signUnlock(keypair, tx);
         txs_3 ~= tx;
     }
 
@@ -704,13 +727,13 @@ unittest
     enrollments ~= enroll2;
     enrollments.sort!("a.utxo_key < b.utxo_key");
     auto block3 = makeNewBlock(block2, txs_3, enrollments);
-    assert(block3.isValid(block2.header.height, hashFull(block2.header), findUTXO,
-        Enrollment.MinValidatorCount));
+    assert(block3.isValid(engine, block2.header.height, hashFull(block2.header),
+        findUTXO, Enrollment.MinValidatorCount));
     enrollments.sort!("a.utxo_key > b.utxo_key");
     findUTXO = utxo_set.getUTXOFinder();
     // Block: The enrollments are not sorted in ascending order
-    assert(!block3.isValid(block2.header.height, hashFull(block2.header), findUTXO,
-        Enrollment.MinValidatorCount));
+    assert(!block3.isValid(engine, block2.header.height, hashFull(block2.header),
+        findUTXO, Enrollment.MinValidatorCount));
 }
 
 /// test that there must always exist active validators
@@ -723,6 +746,7 @@ unittest
     import std.algorithm;
     import std.range;
 
+    scope engine = new Engine(TestStackMaxTotalSize, TestStackMaxItemSize);
     scope utxo_set = new TestUTXOSet();
     UTXOFinder findUTXO = utxo_set.getUTXOFinder();
 
@@ -735,7 +759,7 @@ unittest
     auto txs_1 = genesisSpendable().map!(txb => txb.sign()).array();
 
     auto block1 = makeNewBlock(GenesisBlock, txs_1);
-    assert(block1.isValid(GenesisBlock.header.height, gen_hash, findUTXO,
+    assert(block1.isValid(engine, GenesisBlock.header.height, gen_hash, findUTXO,
         Enrollment.MinValidatorCount));
 
     foreach (ref tx; txs_1)
@@ -764,13 +788,13 @@ unittest
                 tx.outputs ~= Output(Amount(100), keypair.address);
         }
 
-        tx.inputs[0].unlock = genKeyUnlock(gen_key.secret.sign(hashFull(tx)[]));
+        tx.inputs[0].unlock = signUnlock(gen_key, tx);
         txs_2 ~= tx;
     }
 
     auto block2 = makeNewBlock(block1, txs_2);
-    assert(block2.isValid(block1.header.height, hashFull(block1.header), findUTXO,
-        Enrollment.MinValidatorCount));
+    assert(block2.isValid(engine, block1.header.height, hashFull(block1.header),
+        findUTXO, Enrollment.MinValidatorCount));
     foreach (ref tx; txs_2)
         utxo_set.put(tx);
 
@@ -787,7 +811,7 @@ unittest
                 [Input(hashFull(txs_2[$-4]), idx)],
                 [Output(Amount(1), keypair2.address)]
             };
-            tx.inputs[0].unlock = genKeyUnlock(keypair.secret.sign(hashFull(tx)[]));
+            tx.inputs[0].unlock = signUnlock(keypair, tx);
             txs_3 ~= tx;
         }
 
@@ -796,7 +820,8 @@ unittest
 
         auto block3 = makeNewBlock(block2, txs_3);
         assert(block3.header.enrollments.length == 0);
-        assert(!block3.isValid(block2.header.height, hashFull(block2.header), findUTXO, 0));
+        assert(!block3.isValid(engine, block2.header.height,
+            hashFull(block2.header), findUTXO, 0));
     }
 
     // When all existing validators expire at the new block height but the number of enrollments
@@ -812,7 +837,7 @@ unittest
                 [Input(hashFull(txs_2[$-3]), idx)],
                 [Output(Amount(1), keypair2.address)]
             };
-            tx.inputs[0].unlock = genKeyUnlock(keypair.secret.sign(hashFull(tx)[]));
+            tx.inputs[0].unlock = signUnlock(keypair, tx);
             txs_3 ~= tx;
         }
 
@@ -832,7 +857,8 @@ unittest
         enrollments.sort!("a.utxo_key < b.utxo_key");
         auto block3 = makeNewBlock(block2, txs_3, enrollments);
         assert(block3.header.enrollments.length == Enrollment.MinValidatorCount);
-        assert(block3.isValid(block2.header.height, hashFull(block2.header), findUTXO, 0));
+        assert(block3.isValid(engine, block2.header.height,
+            hashFull(block2.header), findUTXO, 0));
     }
 
     // When there are still active validators at the new block height,
@@ -848,16 +874,18 @@ unittest
                 [Input(hashFull(txs_2[$-1]), idx)],
                 [Output(Amount(1), keypair2.address)]
             };
-            tx.inputs[0].unlock = genKeyUnlock(keypair.secret.sign(hashFull(tx)[]));
+            tx.inputs[0].unlock = signUnlock(keypair, tx);
             txs_3 ~= tx;
         }
 
         auto block3 = makeNewBlock(block2, txs_3);
         assert(block3.header.enrollments.length == 0);
 
-        assert(!block3.isValid(block2.header.height, hashFull(block2.header), findUTXO, 0));
+        assert(!block3.isValid(engine, block2.header.height,
+            hashFull(block2.header), findUTXO, 0));
 
         findUTXO = utxo_set.getUTXOFinder();
-        assert(block3.isValid(block2.header.height, hashFull(block2.header), findUTXO, 1));
+        assert(block3.isValid(engine, block2.header.height,
+            hashFull(block2.header), findUTXO, 1));
     }
 }

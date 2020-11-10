@@ -421,6 +421,14 @@ public struct TxBuilder
         return this;
     }
 
+    // Uses a random nonce when signing (non-determenistic signature)
+    private Signature defaultSigner (in Pair kp, in Transaction tx)
+        @safe nothrow
+    {
+        import Schnorr = agora.common.crypto.Schnorr;
+        return Schnorr.sign(kp, tx);
+    }
+
     /***************************************************************************
 
         Finalize the transaction, signing the input, and reset the builder
@@ -436,12 +444,16 @@ public struct TxBuilder
     ***************************************************************************/
 
     public Transaction sign (TxType type = TxType.Payment,
-        Height height_lock = Height(0), uint unlock_age = 0) @safe nothrow
+        Height height_lock = Height(0), uint unlock_age = 0,
+        Signature delegate (in Pair kp, in Transaction tx)
+            @safe nothrow signer = null) @safe nothrow
     {
         assert(this.inputs.length, "Cannot sign input-less transaction");
         assert(this.data.outputs.length || this.leftover.value > Amount(0),
                "Output-less transactions are not valid");
 
+        if (signer is null)
+            signer = &this.defaultSigner;
         this.data.type = type;
         this.data.height_lock = height_lock;
 
@@ -463,7 +475,12 @@ public struct TxBuilder
                     "Address not found in Well-Known keypairs: "
                     ~ in_.output.address.toString());
             this.data.inputs[idx].unlock = () @trusted
-                { return genKeyUnlock(ownerKP.secret.sign(txHash[])); }();
+                {
+                    auto pk = secretKeyToCurveScalar(ownerKP.secret);
+                    Pair pair = Pair(pk, pk.toPoint());
+                    auto sig = signer(pair, this.data);
+                    return genKeyUnlock(sig);
+                }();
         }
 
         // Return the result and reset this
