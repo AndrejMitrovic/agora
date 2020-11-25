@@ -166,6 +166,15 @@ private Pair getDerivedPair (in Pair origin, in ulong seq_id)
     return Pair(derived, derived.toPoint());
 }
 
+// ditto
+public Point getDerivedPoint (in Point origin, in ulong seq_id)
+{
+    assert(seq_id > 0);
+    const seq_scalar = Scalar(hashFull(seq_id));
+    const derived = origin + seq_scalar.toPoint();
+    return derived;
+}
+
 // Example of the Eltoo whitepaper on-chain protocol from Figure 4
 // note: throughout this code the R is never incremented, which makes
 // the signature scheme itself insecure but helps simplify the tests.
