@@ -111,15 +111,36 @@ private struct Channel
     Hash funding_tx_hash;    // stored by both (shared by funder)
 
     // need it in order to publish to begin closing the channel
-    Transaction trigger_tx;
+    //Transaction trigger_tx;
 
+    Trigger pending_trigger;
     Settlement pending_settlement;
     Update pending_update;
 
     // all of these must be set before channel is considered opened
+    Trigger trigger;
     Settlement last_settlement;
     Update last_update;
     bool funding_externalized;
+}
+
+///
+private struct Trigger
+{
+    Hash chan_id;
+    Pair our_trigger_nonce_kp;
+    Point their_trigger_nonce_pk;
+    Transaction trigger_tx;
+}
+
+///
+private struct Update
+{
+    Hash chan_id;
+    uint seq_id;
+    Pair our_update_nonce_kp;
+    Point their_update_nonce_pk;
+    Transaction update_tx;
 }
 
 ///
@@ -135,17 +156,6 @@ private struct Settlement
     /// 1 of 2 signature that belongs to us. funder needs this so he can
     /// send it to the peer once the trigger tx is signed and validated.
     Signature our_sig;
-}
-
-/// Also used for trigger transactions because a trigger is the same as an update,
-/// it's only conceptually the trigger
-private struct Update
-{
-    Hash chan_id;
-    uint seq_id;
-    Pair our_update_nonce_kp;
-    Point their_update_nonce_pk;
-    Transaction update_tx;  // may be trigger too
 }
 
 // type-safe number of channel owners
@@ -333,6 +343,64 @@ public interface FlashAPI
 
     /***************************************************************************
 
+        Request the peer to sign the trigger transaction, from which the
+        settlement transaction spends.
+
+        The peer should use the agreed-upon update key-pair and the nonce
+        sum of the provided nonce and the peer's own genereated nonce
+        to enable schnorr multisig signatures.
+
+        The peer should then call `receiveTriggerSig()` to return their
+        end of the signature. The calling node will then also provide
+        their part of the signature in a call to `receiveTriggerSig()`,
+        making the symmetry complete.
+
+        Params:
+            temp_chan_id = A previously seen pending channel ID provided
+                by the funder node through the call to `openChannel()`
+            peer_nonce_pk = the nonce the calling peer is using for its
+                own signature
+
+        Returns:
+            null, or an error string if the peer could not sign the trigger
+            transaction for whatever reason
+
+    ***************************************************************************/
+
+    public string requestUpdateSig (in Hash chan_id,
+        in Point peer_nonce_pk, Transaction trigger_tx);
+
+    /***************************************************************************
+
+        Return a signature for the trigger transaction for the previously
+        requested one via requestTriggerSig().
+
+        The peer should use the agreed-upon update key-pair and the nonce
+        sum of the provided nonce and the peer's own genereated nonce
+        to enable schnorr multisig signatures.
+
+        The peer should then call `receiveTriggerSig()` to return their
+        end of the signature. The calling node will then also provide
+        their part of the signature in a call to `receiveTriggerSig()`,
+        making the symmetry complete.
+
+        Params:
+            temp_chan_id = A previously seen pending channel ID provided
+                by the funder node through the call to `openChannel()`
+            peer_nonce_pk = the nonce the calling peer is using for its
+                own signature
+            peer_sig = the signature of the calling peer
+
+        Returns:
+            null, or an error string if the peer could not accept this signature
+
+    ***************************************************************************/
+
+    public string receiveUpdateSig (in Hash chan_id,
+        in Point peer_nonce_pk, in Signature peer_sig);
+
+    /***************************************************************************
+
         Send the funding transaction hash to the counter-party.
 
         The hash must be sent before requesting signing of any trigger
@@ -460,7 +528,7 @@ public class User : TestFlashAPI
         {
             if (channel.funding_externalized
                 && channel.last_settlement != Settlement.init
-                && channel.last_update != Update.init)
+                && channel.trigger != Trigger.init)
             {
                 writefln("%s: Channel open(%s)", this.kp.V.prettify,
                     hash.prettify);
@@ -642,7 +710,8 @@ public class User : TestFlashAPI
         }
 
         // create trigger, don't sign yet but do share it
-        auto trigger_tx = this.createTriggerTx(channel, funding_tx);
+        const next_seq_id = 0;
+        auto trigger_tx = this.createUpdateTx(channel, funding_tx, next_seq_id);
 
         // initial output allocates all the funds back to the channel creator
         Output output = Output(channel.funding_amount,
@@ -846,24 +915,20 @@ public class User : TestFlashAPI
     // we sign the trigger tx with the update key-pair,
     // we share the signature and our nonce, and we expect
     // to get back the peer's signature and nonce.
-    private void signTriggerTx (ref Channel channel,
-        Transaction trigger_tx)
+    private void signTriggerTx (ref Channel channel, Transaction trigger_tx)
     {
-        const our_update_nonce_kp = Pair.random();
-
+        const our_trigger_nonce_kp = Pair.random();
         auto peer = this.getFlashClient(channel.peer_pk);
 
-        const uint seq_id_1 = 1;
-        channel.pending_update = Update(
+        channel.pending_trigger = Trigger(
             channel.temp_chan_id,
-            seq_id_1,
-            our_update_nonce_kp,
+            our_trigger_nonce_kp,
             Point.init,  // set later when we receive it from counter-party
             trigger_tx);
 
         this.taskman.schedule({
             if (auto error = peer.requestTriggerSig(channel.temp_chan_id,
-                our_update_nonce_kp.V, trigger_tx))
+                our_trigger_nonce_kp.V, trigger_tx))
             {
                 writefln("Error calling requestTriggerSig(): %s", error);
             }
@@ -887,7 +952,7 @@ public class User : TestFlashAPI
         // todo: we should just keep the old signatures in case the other
         // node needs it (technically we should just return the latest update tx
         // and the sequence ID)
-        if (channel.pending_update != Update.init)
+        if (channel.pending_trigger != Trigger.init)
             return "Error: Multiple calls to requestTriggerSig() not supported";
 
         auto settle = &channel.pending_settlement;
@@ -908,30 +973,22 @@ public class User : TestFlashAPI
 
         settle.prev_tx = trigger_tx;
 
-        const our_update_nonce_kp = Pair.random();
+        const our_trigger_nonce_kp = Pair.random();
 
         auto peer = this.getFlashClient(channel.funder_pk);
+        const nonce_pair_pk = our_trigger_nonce_kp.V + peer_nonce_pk;
 
-        const our_update_scalar = getUpdateScalar(this.kp.v, channel.utxo);
-        const num_peers = NumPeers(2);  // hardcoded for now
-        const update_pair_pk = getUpdatePk(channel.pair_pk, channel.utxo,
-            num_peers);
+        const our_sig = sign(this.kp.v, channel.pair_pk,
+            nonce_pair_pk, our_trigger_nonce_kp.v, trigger_tx);
 
-        const nonce_pair_pk = our_update_nonce_kp.V + peer_nonce_pk;
-
-        const our_sig = sign(our_update_scalar, update_pair_pk,
-            nonce_pair_pk, our_update_nonce_kp.v, trigger_tx);
-
-        const uint seq_id_1 = 1;  // implicit
-        channel.pending_update = Update(
+        channel.pending_trigger = Trigger(
             channel.temp_chan_id,
-            seq_id_1,
-            our_update_nonce_kp,
+            our_trigger_nonce_kp,
             peer_nonce_pk,
             settle.prev_tx);
 
         this.taskman.schedule({
-            peer.receiveTriggerSig(channel.temp_chan_id, our_update_nonce_kp.V,
+            peer.receiveTriggerSig(channel.temp_chan_id, our_trigger_nonce_kp.V,
                 our_sig);
         });
 
@@ -948,44 +1005,44 @@ public class User : TestFlashAPI
         if (channel is null)
             return "Pending channel with this ID not found";
 
-        auto trigger = &channel.pending_update;
-        if (*trigger == Update.init)
+        auto trigger = &channel.pending_trigger;
+        if (*trigger == Trigger.init)
             return "Could not find this pending trigger tx";
 
         auto settle = &channel.pending_settlement;
         if (*settle == Settlement.init)
             return "Pending settlement with this channel ID not found";
 
-        // todo: not sure about this yet, maybe we should move triggers
-        // to a separate map.
-        if (trigger.seq_id != 1)
-            return "Trigger signature was already received";
-
-        trigger.their_update_nonce_pk = peer_nonce_pk;
+        trigger.their_trigger_nonce_pk = peer_nonce_pk;
 
         auto peer = this.getFlashClient(channel.peer_pk);
-
-        const our_update_scalar = getUpdateScalar(this.kp.v, channel.utxo);
-        const nonce_pair_pk = trigger.our_update_nonce_kp.V + peer_nonce_pk;
-
-        const our_sig = sign(our_update_scalar, channel.update_pair_pk,
-            nonce_pair_pk, trigger.our_update_nonce_kp.v, trigger.update_tx);
+        const our_sig = sign(this.kp.v, channel.pair_pk,
+            nonce_pair_pk, our_trigger_nonce_kp.v, trigger.trigger_tx);
 
         // verify signature first
-
         const trigger_multi_sig = Sig(nonce_pair_pk,
               Sig.fromBlob(our_sig).s
             + Sig.fromBlob(peer_sig).s).toBlob();
 
-        if (!verify(channel.update_pair_pk, trigger_multi_sig, trigger.update_tx))
-            return "Signature does not validate!";
+        const Unlock trigger_unlock = genKeyUnlock(trigger_multi_sig);
+        settle.prev_tx.inputs[0].unlock = trigger_unlock;
+
+        const TestStackMaxTotalSize = 16_384;
+        const TestStackMaxItemSize = 512;
+        scope engine = new Engine(TestStackMaxTotalSize, TestStackMaxItemSize);
+        if (auto error = engine.execute(
+            channel.funding_tx.outputs[0].lock, trigger_unlock,
+            settle.prev_tx, settle.prev_tx.inputs[0]))
+        {
+            assert(0, error);
+        }
 
         writefln("%s: receiveTriggerSig(%s) VALIDATED", this.kp.V.prettify,
             temp_chan_id.prettify);
 
         channel.last_update = *trigger;
 
-        channel.trigger_tx = trigger.update_tx;
+        //channel.trigger_tx = trigger.update_tx;
 
         // this prevents infinite loops, we may want to optimize this
         if (channel.funder_pk == this.kp.V)
@@ -993,7 +1050,7 @@ public class User : TestFlashAPI
             // send the trigger signature
             this.taskman.schedule({
                 if (auto error = peer.receiveTriggerSig(
-                    channel.temp_chan_id, trigger.our_update_nonce_kp.V,
+                    channel.temp_chan_id, trigger.our_trigger_nonce_kp.V,
                     our_sig))
                 {
                     writefln("Error sending trigger signature back: %s", error);
@@ -1027,6 +1084,151 @@ public class User : TestFlashAPI
         return null;
     }
 
+    public override string requestUpdateSig (in Hash temp_chan_id,
+        in Point peer_nonce_pk, Transaction update_tx)
+    {
+        writefln("%s: requestUpdateSig(%s)", this.kp.V.prettify,
+            temp_chan_id.prettify);
+
+        // todo: should not accept this call unless we already signed
+        // a settlement transaction. Although there's no danger in accepting it.
+        auto channel = temp_chan_id in this.pending_channels;
+        if (channel is null)
+            return "Pending channel with this ID not found";
+
+        // todo: if this is called again, we should just return the existing
+        // signature which would be encoded in the Update
+        // todo: we should just keep the old signatures in case the other
+        // node needs it (technically we should just return the latest update tx
+        // and the sequence ID)
+        if (channel.pending_update != Update.init)
+            return "Error: Multiple calls to requestUpdateSig() not supported";
+
+        auto settle = &channel.pending_settlement;
+        if (*settle == Settlement.init)
+            return "Pending settlement with this channel ID not found";
+
+        if (channel.funding_tx_hash == Hash.init)
+            return "Funder has not sent us the funding transaction hash. "
+                ~ "Refusing to sign update transaction";
+
+        // todo: the semantics of the update tx need to be validated properly
+        if (update_tx.inputs.length == 0)
+            return "Invalid update tx";
+
+        const funding_utxo = UTXO.getHash(channel.funding_tx_hash, 0);
+        if (update_tx.inputs[0].utxo != funding_utxo)
+            return "Update transaction does not reference the funding tx hash";
+
+        settle.prev_tx = update_tx;
+
+        const our_update_nonce_kp = Pair.random();
+
+        auto peer = this.getFlashClient(channel.funder_pk);
+
+        const our_update_scalar = getUpdateScalar(this.kp.v, channel.utxo);
+        const num_peers = NumPeers(2);  // hardcoded for now
+        const update_pair_pk = getUpdatePk(channel.pair_pk, channel.utxo,
+            num_peers);
+
+        const nonce_pair_pk = our_update_nonce_kp.V + peer_nonce_pk;
+
+        const our_sig = sign(our_update_scalar, update_pair_pk,
+            nonce_pair_pk, our_update_nonce_kp.v, update_tx);
+
+        channel.pending_update = Update(
+            channel.temp_chan_id,
+            our_update_nonce_kp,
+            peer_nonce_pk,
+            settle.prev_tx);
+
+        this.taskman.schedule({
+            peer.receiveUpdateSig(channel.temp_chan_id, our_update_nonce_kp.V,
+                our_sig);
+        });
+
+        return null;
+    }
+
+    public override string receiveUpdateSig (in Hash temp_chan_id,
+        in Point peer_nonce_pk, in Signature peer_sig)
+    {
+        writefln("%s: receiveUpdateSig(%s)", this.kp.V.prettify,
+            temp_chan_id.prettify);
+
+        auto channel = temp_chan_id in this.pending_channels;
+        if (channel is null)
+            return "Pending channel with this ID not found";
+
+        auto update = &channel.pending_update;
+        if (*update == Update.init)
+            return "Could not find this pending update tx";
+
+        auto settle = &channel.pending_settlement;
+        if (*settle == Settlement.init)
+            return "Pending settlement with this channel ID not found";
+
+        // todo: not sure about this yet, maybe we should move updates
+        // to a separate map.
+        if (update.seq_id != 1)
+            return "Update signature was already received";
+
+        update.their_update_nonce_pk = peer_nonce_pk;
+
+        auto peer = this.getFlashClient(channel.peer_pk);
+
+        const our_update_scalar = getUpdateScalar(this.kp.v, channel.utxo);
+        const nonce_pair_pk = update.our_update_nonce_kp.V + peer_nonce_pk;
+
+        const our_sig = sign(our_update_scalar, channel.update_pair_pk,
+            nonce_pair_pk, update.our_update_nonce_kp.v, update.update_tx);
+
+        // verify signature first
+        const update_multi_sig = Sig(nonce_pair_pk,
+              Sig.fromBlob(our_sig).s
+            + Sig.fromBlob(peer_sig).s).toBlob();
+
+        // todo: this is wrong, we should check if update can be attached
+        // to the funding tx (it can't, it's the wrong signature)
+        if (!verify(channel.update_pair_pk, update_multi_sig, update.update_tx))
+            return "Signature does not validate!";
+
+        const Unlock update_unlock = createUnlockUpdate(update_multi_sig,
+            update.seq_id);
+        settle.prev_tx.inputs[0].unlock = update_unlock;
+
+        const TestStackMaxTotalSize = 16_384;
+        const TestStackMaxItemSize = 512;
+        scope engine = new Engine(TestStackMaxTotalSize, TestStackMaxItemSize);
+        if (auto error = engine.execute(
+            channel.funding_tx.outputs[0].lock, update_unlock,
+            settle.prev_tx, settle.prev_tx.inputs[0]))
+        {
+            assert(0, error);
+        }
+
+        writefln("%s: receiveUpdateSig(%s) VALIDATED", this.kp.V.prettify,
+            temp_chan_id.prettify);
+
+        channel.last_update = *update;
+
+        // this prevents infinite loops, we may want to optimize this
+        if (channel.funder_pk == this.kp.V)
+        {
+            // send the update signature
+            this.taskman.schedule({
+                if (auto error = peer.receiveUpdateSig(
+                    channel.temp_chan_id, update.our_update_nonce_kp.V,
+                    our_sig))
+                {
+                    writefln("Error sending update signature back: %s", error);
+                }
+            });
+        }
+
+        return null;
+    }
+
     ///
     private Transaction createSettleTx (in Transaction prev_tx,
         in uint settle_age, in Output[] outputs)
@@ -1054,24 +1256,22 @@ public class User : TestFlashAPI
         return funding_tx;
     }
 
-    ///
-    private Transaction createTriggerTx (in Channel channel,
-        in Transaction funding_tx)
+    /// Also used for the first trigger tx (using next_seq_id of 0)
+    private Transaction createUpdateTx (in Channel channel,
+        in Transaction funding_tx, in uint next_seq_id)
     {
-        const seq_id_1 = uint(1);
         const num_peers = NumPeers(2);  // hardcoded for now
-        const FundingLockSeq_1 = createLockEltoo(channel.settle_time,
-            channel.utxo, channel.pair_pk, seq_id_1, num_peers);
+        const Lock = createLockEltoo(channel.settle_time,
+            channel.utxo, channel.pair_pk, next_seq_id, num_peers);
 
-        Transaction trigger_tx = {
+        Transaction update_tx = {
             type: TxType.Payment,
             inputs: [Input(funding_tx, 0 /* index */, 0 /* unlock age */)],
             outputs: [
-                Output(channel.funding_amount,
-                    FundingLockSeq_1)]  // bind to next sequence (seq 1)
+                Output(channel.funding_amount, Lock)]  // bind to next sequence
         };
 
-        return trigger_tx;
+        return update_tx;
     }
 
     private RemoteAPI!FlashAPI getFlashClient (in Point peer_pk)
