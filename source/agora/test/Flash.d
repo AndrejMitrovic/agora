@@ -219,40 +219,17 @@ public interface FlashAPI
         Requests opening a channel with this node.
 
         Params:
-            gen_hash = The hash of the genesis block. Since the node may
-                be a testnet / livenet / othernet node we need to know if we're
-                following the same blockchain before establishing a channel
-                with the funder node.
-            chan_id = A randomly generated temporary and unique channel ID.
-                It only has to be unique per-peer, in this case per funding key.
-                Once the channel is accepted and a funding transaction is
-                created, a new channel ID derived from the funding transaction
-                hash will be created and used in place of the temporary ID.
-            funder_pk = the public key of the funding transaction
-            funding_amount = the total funding amount. May not exceed the UTXO's
-                output value. If less than the UTXO's total amount then the rest
-                is just discarded (becomes the fee).
-            settle_time = how many blocks the node has to publish the latest
-                state after a trigger transaction has been published &
-                externalized in the blockchain
-            funder_update_pk = the channel funder update public key.
-                This update pk will be combined with our own generated pk
-                to generate the schnorr sum pk that will be used for 2/2
-                Schnorr signatures.
-                TODO: Provide proof that funder owns this key.
-            funder_settle_origin_pk = the channel funder settlement origin
-                public key. All further settlement keys will be derived
-                from this origin based on the sequence ID of the transaction.
-                TODO: Provide proof that funder owns this key.
+            chan_conf = contains all the static configuration for this channel.
 
     ***************************************************************************/
 
-    public string openChannel (in ChannelConfig channel);
+    public string openChannel (in ChannelConfig chan_conf);
 
     /***************************************************************************
 
-        Accepts opening a channel for the given temporary channel ID which
-        was previously proposed by the funder node with a call to `openChannel()`.
+        Accepts opening a channel for the given channel ID which
+        was previously proposed by the funder node with a call to
+        `openChannel()`.
 
         If the given pending channel ID does not exist,
         an error string is returned.
@@ -446,46 +423,29 @@ public interface FlashAPI
 
 /// In addition to the Flash API, we provide controller methods to initiate
 /// the channel creation procedures, and control each flash node's behavior.
-public interface TestFlashAPI : FlashAPI
+public interface ControlAPI : FlashAPI
 {
-    /// Used for waiting until node finished booting up.
-    public void wait ();
+    /// Prepare timers
+    public void prepare ();
 
     /// Open a channel with another flash node.
-    public string ctrlOpenChannel (in Hash funding_hash, in Amount funding_amount,
-        in uint settle_time, in Point peer_pk);
+    public string ctrlOpenChannel (in Hash funding_hash,
+        in Amount funding_amount, in uint settle_time, in Point peer_pk);
 
     public void sendFlash (in Amount amount);
 
-    /// used to signal back to the main thread to create more txs
+    /// convenience
     public bool readyToExternalize ();
 
+    /// ditto
     public bool channelOpen ();
-}
-
-///
-private Hash randomHash ()
-{
-    Hash rand_hash;
-    randombytes_buf(&rand_hash, Hash.sizeof);
-    return rand_hash;
-}
-
-///
-private class SchedulingTaskManager : LocalRestTaskManager
-{
-    ///
-    public void schedule (void delegate() dg) nothrow
-    {
-        super.setTimer(0.seconds, dg);
-    }
 }
 
 /// Could be a payer, or a merchant. funds can go either way in the channel.
 /// There may be any number of channels between two parties
 /// (e.g. think multiple different micropayment services)
 /// In this test we assume there may only be one payment channel between two parties.
-public class User : TestFlashAPI
+public abstract class User : FlashAPI
 {
     /// Schnorr key-pair belonging to this user
     private const Pair kp;
@@ -506,16 +466,6 @@ public class User : TestFlashAPI
     private Channel[Hash] open_channels;
 
     private bool ready_to_externalize;
-
-    public override bool readyToExternalize ()
-    {
-        return this.ready_to_externalize;
-    }
-
-    public override bool channelOpen ()
-    {
-        return this.open_channels.length > 0;
-    }
 
     /// Ctor
     public this (const Pair kp, Registry* agora_registry,
@@ -580,92 +530,6 @@ public class User : TestFlashAPI
             this.pending_channels.remove(id);
     }
 
-    /// Control API
-    public override void wait ()
-    {
-        //writefln("%s: spawned & waiting..", this.kp.V.prettify);
-    }
-
-    /// Control API
-    public override string ctrlOpenChannel (in Hash funding_utxo,
-        in Amount funding_amount, in uint settle_time, in Point peer_pk)
-    {
-        // todo: this should only be done once, but we can't call it
-        // from the ctor because in LocalRest the ctor blabla etc etc
-        this.taskman.setTimer(200.msecs, &this.listenFundingEvent, Periodic.Yes);
-
-        writefln("%s: ctrlOpenChannel(%s, %s, %s)", this.kp.V.prettify,
-            funding_amount, settle_time, peer_pk.prettify);
-
-        auto peer = this.getFlashClient(peer_pk);
-
-        const pair_pk = this.kp.V + peer_pk;
-
-        // create funding, don't sign it yet as we'll share it first
-        auto funding_tx = this.createFundingTx(funding_utxo, funding_amount,
-            pair_pk);
-
-        const funding_tx_hash = hashFull(funding_tx);
-        const Hash chan_id = funding_tx_hash;
-
-        const ChannelConfig chan_conf =
-        {
-            gen_hash        : hashFull(GenesisBlock),
-            funder_pk       : this.kp.V,
-            peer_pk         : peer_pk,
-            pair_pk         : this.kp.V + peer_pk,
-            funding_tx      : funding_tx,
-            funding_tx_hash : funding_tx_hash,
-            funding_amount  : funding_amount,
-            settle_time     : settle_time,
-        };
-
-        // add it to the pending before the openChannel() request is even
-        // issued to avoid data races
-        this.pending_channels[chan_id] = new Channel(chan_conf);
-
-        this.taskman.schedule(
-        {
-            if (auto error = peer.openChannel(chan_conf))
-            {
-                writefln("Peer rejected openChannel() request: %s", error);
-                this.pending_channels.remove(chan_id);
-            }
-        });
-
-        // todo: we don't have a real error message here because this function
-        // is non-blocking
-        return null;
-    }
-
-    public void sendFlash (in Amount amount)
-    {
-        writefln("%s: sendFlash()", this.kp.V.prettify);
-
-        //// todo: use actual channel IDs, or perhaps an invoice API
-        auto channel = this.open_channels[this.open_channels.byKey.front];
-
-        //auto update_tx = this.createUpdateTx(channel.update_pair_pk,
-        //    channel.trigger.tx,
-        //    channel.funding_amount, channel.settle_time,
-        //    channel.settle_origin_pair_pk);
-
-        //auto peer = this.getFlashClient(channel.peer_pk);
-
-        //peer.requestSettlementSig (in Hash chan_id,
-        //    in Transaction prev_tx, Output[] outputs, in uint seq_id,
-        //    in Point peer_nonce_pk)
-
-        //this.taskman.schedule(
-        //{
-        //    if (auto error = peer.acceptChannel(chan_id))
-        //    {
-        //        // todo: handle this
-        //        writefln("Error after acceptChannel() call: %s", error);
-        //    }
-        //});
-    }
-
     /// Flash API
     public override string openChannel (in ChannelConfig chan_conf)
     {
@@ -674,10 +538,6 @@ public class User : TestFlashAPI
         // add a sumOutputs thingy here.
         // todo: verify Outputs[] sum is equal to `funding_amoutn`
         // todo: verify `chan_conf.peer_pk` equals our own!
-
-        // todo: this should only be done once, but we can't call it
-        // from the ctor because in LocalRest the ctor blabla etc etc
-        this.taskman.setTimer(200.msecs, &this.listenFundingEvent, Periodic.Yes);
 
         writefln("%s: openChannel()", this.kp.V.prettify);
 
@@ -1287,6 +1147,109 @@ public class User : TestFlashAPI
     }
 }
 
+public class ControlUser : User, ControlAPI
+{
+    public this (const Pair kp, Registry* agora_registry,
+        string agora_address, Registry* flash_registry)
+    {
+        super(kp, agora_registry, agora_address, flash_registry);
+    }
+
+    /// Control API
+    public override void prepare ()
+    {
+        this.taskman.setTimer(200.msecs, &this.listenFundingEvent, Periodic.Yes);
+    }
+
+    /// Control API
+    public override string ctrlOpenChannel (in Hash funding_utxo,
+        in Amount funding_amount, in uint settle_time, in Point peer_pk)
+    {
+        writefln("%s: ctrlOpenChannel(%s, %s, %s)", this.kp.V.prettify,
+            funding_amount, settle_time, peer_pk.prettify);
+
+        auto peer = this.getFlashClient(peer_pk);
+
+        const pair_pk = this.kp.V + peer_pk;
+
+        // create funding, don't sign it yet as we'll share it first
+        auto funding_tx = this.createFundingTx(funding_utxo, funding_amount,
+            pair_pk);
+
+        const funding_tx_hash = hashFull(funding_tx);
+        const Hash chan_id = funding_tx_hash;
+
+        const ChannelConfig chan_conf =
+        {
+            gen_hash        : hashFull(GenesisBlock),
+            funder_pk       : this.kp.V,
+            peer_pk         : peer_pk,
+            pair_pk         : this.kp.V + peer_pk,
+            funding_tx      : funding_tx,
+            funding_tx_hash : funding_tx_hash,
+            funding_amount  : funding_amount,
+            settle_time     : settle_time,
+        };
+
+        // add it to the pending before the openChannel() request is even
+        // issued to avoid data races
+        this.pending_channels[chan_id] = new Channel(chan_conf);
+
+        this.taskman.schedule(
+        {
+            if (auto error = peer.openChannel(chan_conf))
+            {
+                writefln("Peer rejected openChannel() request: %s", error);
+                this.pending_channels.remove(chan_id);
+            }
+        });
+
+        // todo: we don't have a real error message here because this function
+        // is non-blocking
+        return null;
+    }
+
+    public void sendFlash (in Amount amount)
+    {
+        writefln("%s: sendFlash()", this.kp.V.prettify);
+
+        //// todo: use actual channel IDs, or perhaps an invoice API
+        auto channel = this.open_channels[this.open_channels.byKey.front];
+
+        //auto update_tx = this.createUpdateTx(channel.update_pair_pk,
+        //    channel.trigger.tx,
+        //    channel.funding_amount, channel.settle_time,
+        //    channel.settle_origin_pair_pk);
+
+        //auto peer = this.getFlashClient(channel.peer_pk);
+
+        //peer.requestSettlementSig (in Hash chan_id,
+        //    in Transaction prev_tx, Output[] outputs, in uint seq_id,
+        //    in Point peer_nonce_pk)
+
+        //this.taskman.schedule(
+        //{
+        //    if (auto error = peer.acceptChannel(chan_id))
+        //    {
+        //        // todo: handle this
+        //        writefln("Error after acceptChannel() call: %s", error);
+        //    }
+        //});
+    }
+
+    /// convenience
+    public override bool readyToExternalize ()
+    {
+        return this.ready_to_externalize;
+    }
+
+    /// ditto
+    public override bool channelOpen ()
+    {
+        return this.open_channels.length > 0;
+    }
+}
+
 /// Is in charge of spawning the flash nodes
 public class UserFactory
 {
@@ -1300,7 +1263,7 @@ public class UserFactory
     private Point[] addresses;
 
     /// list of flash nodes
-    private RemoteAPI!TestFlashAPI[] nodes;
+    private RemoteAPI!ControlAPI[] nodes;
 
     /// Ctor
     public this (Registry* agora_registry)
@@ -1310,11 +1273,11 @@ public class UserFactory
     }
 
     /// Create a new flash node user
-    public RemoteAPI!TestFlashAPI create (const Pair pair, string agora_address)
+    public RemoteAPI!ControlAPI create (const Pair pair, string agora_address)
     {
-        RemoteAPI!TestFlashAPI api = RemoteAPI!TestFlashAPI.spawn!User(pair,
+        RemoteAPI!ControlAPI api = RemoteAPI!ControlAPI.spawn!ControlUser(pair,
             this.agora_registry, agora_address, &this.flash_registry);
-        api.wait();  // wait for the ctor to finish
+        api.prepare();
 
         this.addresses ~= pair.V;
         this.nodes ~= api;
@@ -1505,6 +1468,16 @@ public Point getSettlePk (in Point origin, in Hash utxo, in ulong seq_id,
 
     const derived = origin + sum_scalar.toPoint();
     return derived;
+}
+
+/// Simplified `schedule` routine
+private class SchedulingTaskManager : LocalRestTaskManager
+{
+    /// Ditto
+    public void schedule (void delegate() dg) nothrow
+    {
+        super.setTimer(0.seconds, dg);
+    }
 }
 
 /// Ditto
