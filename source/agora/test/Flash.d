@@ -112,16 +112,13 @@ struct ChannelConfig
 private struct Channel
 {
     Hash gen_hash;
-    Hash temp_chan_id;
+    Hash chan_id;
 
     Point funder_pk;
     Point peer_pk;
     Point pair_pk;  // sum of the above
 
     Point update_pair_pk;  // the update pair for this channel
-
-    Hash funding_spend_utxo;  // note: may be multiple UTXOs for funding,
-                // but we use a single one for simplicity now
     Amount funding_amount;
     uint settle_time;
 
@@ -199,7 +196,7 @@ public interface FlashAPI
                 be a testnet / livenet / othernet node we need to know if we're
                 following the same blockchain before establishing a channel
                 with the funder node.
-            temp_chan_id = A randomly generated temporary and unique channel ID.
+            chan_id = A randomly generated temporary and unique channel ID.
                 It only has to be unique per-peer, in this case per funding key.
                 Once the channel is accepted and a funding transaction is
                 created, a new channel ID derived from the funding transaction
@@ -223,9 +220,8 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public string openChannel (in Hash gen_hash, in Hash funding_spend_utxo,
-        in Hash temp_chan_id, in Point funder_pk, in Amount funding_amount,
-        in uint settle_time);
+    public string openChannel (in Hash gen_hash, Transaction funding_tx,
+        in Point funder_pk, in Amount funding_amount, in uint settle_time);
 
     /***************************************************************************
 
@@ -236,7 +232,7 @@ public interface FlashAPI
         an error string is returned.
 
         Params:
-            temp_chan_id = A previously seen pending channel ID provided
+            chan_id = A previously seen pending channel ID provided
                 by the funder node through the call to `openChannel()`
 
         Returns:
@@ -244,7 +240,7 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public string acceptChannel (in Hash temp_chan_id);
+    public string acceptChannel (in Hash chan_id);
 
     /***************************************************************************
 
@@ -259,7 +255,7 @@ public interface FlashAPI
         than the allocated amount.
 
         Params:
-            temp_chan_id = A previously seen pending channel ID provided
+            chan_id = A previously seen pending channel ID provided
                 by the funder node through the call to `openChannel()`
             prev_tx = the transaction whose outputs should be spent
             outputs = the outputs reallocating the funds
@@ -272,7 +268,7 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public string requestSettlementSig (in Hash temp_chan_id,
+    public string requestSettlementSig (in Hash chan_id,
         in Transaction prev_tx, Output[] outputs, in uint seq_id,
         in Point peer_nonce_pk);
 
@@ -286,7 +282,7 @@ public interface FlashAPI
         should look like. Only the signature should be sent back.
 
         Params:
-            temp_chan_id = A previously seen pending channel ID provided
+            chan_id = A previously seen pending channel ID provided
                 by the funder node through the call to `openChannel()`
             seq_id = the sequence ID
             peer_nonce_pk = the nonce the calling peer is using for its
@@ -299,7 +295,7 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public string receiveSettlementSig (in Hash temp_chan_id, in uint seq_id,
+    public string receiveSettlementSig (in Hash chan_id, in uint seq_id,
         in Point peer_nonce_pk, in Signature peer_sig);
 
     /***************************************************************************
@@ -317,7 +313,7 @@ public interface FlashAPI
         making the symmetry complete.
 
         Params:
-            temp_chan_id = A previously seen pending channel ID provided
+            chan_id = A previously seen pending channel ID provided
                 by the funder node through the call to `openChannel()`
             peer_nonce_pk = the nonce the calling peer is using for its
                 own signature
@@ -331,9 +327,8 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public string requestTriggerSig (in Hash temp_chan_id,
-        in Point peer_nonce_pk, Transaction trigger_tx,
-        Transaction funding_tx);
+    public string requestTriggerSig (in Hash chan_id,
+        in Point peer_nonce_pk, Transaction trigger_tx);
 
     /***************************************************************************
 
@@ -350,7 +345,7 @@ public interface FlashAPI
         making the symmetry complete.
 
         Params:
-            temp_chan_id = A previously seen pending channel ID provided
+            chan_id = A previously seen pending channel ID provided
                 by the funder node through the call to `openChannel()`
             peer_nonce_pk = the nonce the calling peer is using for its
                 own signature
@@ -361,7 +356,7 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public string receiveTriggerSig (in Hash temp_chan_id,
+    public string receiveTriggerSig (in Hash chan_id,
         in Point peer_nonce_pk, in Signature peer_sig);
 
     /***************************************************************************
@@ -379,7 +374,7 @@ public interface FlashAPI
         making the symmetry complete.
 
         Params:
-            temp_chan_id = A previously seen pending channel ID provided
+            chan_id = A previously seen pending channel ID provided
                 by the funder node through the call to `openChannel()`
             peer_nonce_pk = the nonce the calling peer is using for its
                 own signature
@@ -408,7 +403,7 @@ public interface FlashAPI
         making the symmetry complete.
 
         Params:
-            temp_chan_id = A previously seen pending channel ID provided
+            chan_id = A previously seen pending channel ID provided
                 by the funder node through the call to `openChannel()`
             peer_nonce_pk = the nonce the calling peer is using for its
                 own signature
@@ -431,7 +426,7 @@ public interface TestFlashAPI : FlashAPI
     public void wait ();
 
     /// Open a channel with another flash node.
-    public string ctrlOpenChannel (in Hash funding_spend_utxo, in Amount funding_amount,
+    public string ctrlOpenChannel (in Hash funding_hash, in Amount funding_amount,
         in uint settle_time, in Point peer_pk);
 
     public void sendFlash (in Amount amount);
@@ -565,7 +560,7 @@ public class User : TestFlashAPI
     }
 
     /// Control API
-    public override string ctrlOpenChannel (in Hash funding_spend_utxo,
+    public override string ctrlOpenChannel (in Hash funding_utxo,
         in Amount funding_amount, in uint settle_time, in Point peer_pk)
     {
         // todo: this should only be done once, but we can't call it
@@ -577,26 +572,33 @@ public class User : TestFlashAPI
 
         auto peer = this.getFlashClient(peer_pk);
         const gen_hash = hashFull(GenesisBlock);
-        const Hash temp_chan_id = randomHash();
 
         const pair_pk = this.kp.V + peer_pk;
-        const num_peers = NumPeers(2);  // hardcoded for now
-        const update_pair_pk = getUpdatePk(pair_pk, funding_spend_utxo, num_peers);
 
-        auto channel = Channel(gen_hash, temp_chan_id, this.kp.V, peer_pk,
-            pair_pk, update_pair_pk, funding_spend_utxo, funding_amount, settle_time);
+        // create funding, don't sign it yet as we'll share it first
+        auto funding_tx = this.createFundingTx(funding_utxo, funding_amount,
+            pair_pk);
+
+        const funding_tx_hash = hashFull(funding_tx);
+        const Hash chan_id = funding_tx_hash;
+
+        const num_peers = NumPeers(2);  // hardcoded for now
+        const update_pair_pk = getUpdatePk(pair_pk, funding_tx_hash, num_peers);
+
+        auto channel = Channel(gen_hash, chan_id, this.kp.V, peer_pk,
+            pair_pk, update_pair_pk, funding_amount, settle_time,
+            funding_tx, funding_tx_hash);
 
         // add it to the pending before the openChannel() request is even
         // issued to avoid data races
-        this.pending_channels[temp_chan_id] = channel;
+        this.pending_channels[chan_id] = channel;
 
         this.taskman.schedule({
             // check if the node is willing to open a channel with us
             if (auto error = peer.openChannel(
-                gen_hash, funding_spend_utxo, temp_chan_id, this.kp.V, funding_amount,
-                settle_time))
+                gen_hash, funding_tx, this.kp.V, funding_amount, settle_time))
             {
-                this.pending_channels.remove(temp_chan_id);
+                this.pending_channels.remove(chan_id);
             }
         });
 
@@ -619,12 +621,12 @@ public class User : TestFlashAPI
 
         //auto peer = this.getFlashClient(channel.peer_pk);
 
-        //peer.requestSettlementSig (in Hash temp_chan_id,
+        //peer.requestSettlementSig (in Hash chan_id,
         //    in Transaction prev_tx, Output[] outputs, in uint seq_id,
         //    in Point peer_nonce_pk)
 
         //this.taskman.schedule({
-        //    if (auto error = peer.acceptChannel(temp_chan_id))
+        //    if (auto error = peer.acceptChannel(chan_id))
         //    {
         //        // todo: handle this
         //        writefln("Error after acceptChannel() call: %s", error);
@@ -634,19 +636,25 @@ public class User : TestFlashAPI
 
     /// Flash API
     public override string openChannel (in Hash gen_hash,
-        in Hash funding_spend_utxo, in Hash temp_chan_id, in Point funder_pk,
+        Transaction funding_tx, in Point funder_pk,
         in Amount funding_amount, in uint settle_time)
     {
+        // todo: funding amount should be drived from the `funding_tx`
+        // and not passed explicitly, else we would have to validate this.
+        // add a sumOutputs thingy here.
+
         // todo: this should only be done once, but we can't call it
         // from the ctor because in LocalRest the ctor blabla etc etc
         this.taskman.setTimer(200.msecs, &this.listenFundingEvent, Periodic.Yes);
 
         writefln("%s: openChannel()", this.kp.V.prettify);
 
+        const chan_id = funding_tx.hashFull();
+
         // todo: need replay attack protection. adversary could feed us
         // a dupe temporary channel ID once it's removed from
         // `this.pending_channels`
-        if (temp_chan_id in this.pending_channels)
+        if (chan_id in this.pending_channels)
             return "Pending channel with the given ID already exists";
 
         auto peer = this.getFlashClient(funder_pk);
@@ -667,15 +675,17 @@ public class User : TestFlashAPI
         /* todo: verify proof that funder owns `funder_update_pk` */
         const pair_pk = this.kp.V + funder_pk;
         const num_peers = NumPeers(2);  // hardcoded for now
-        const update_pair_pk = getUpdatePk(pair_pk, funding_spend_utxo, num_peers);
+        const funding_tx_hash = funding_tx.hashFull();
+        const update_pair_pk = getUpdatePk(pair_pk, funding_tx_hash, num_peers);
 
-        auto channel = Channel(gen_hash, temp_chan_id, funder_pk, this.kp.V,
-            pair_pk, update_pair_pk, funding_spend_utxo, funding_amount, settle_time);
+        auto channel = Channel(gen_hash, chan_id, funder_pk, this.kp.V,
+            pair_pk, update_pair_pk, funding_amount, settle_time,
+            funding_tx, funding_tx_hash);
 
-        this.pending_channels[temp_chan_id] = channel;
+        this.pending_channels[chan_id] = channel;
 
         this.taskman.schedule({
-            if (auto error = peer.acceptChannel(temp_chan_id))
+            if (auto error = peer.acceptChannel(chan_id))
             {
                 // todo: handle this
                 writefln("Error after acceptChannel() call: %s", error);
@@ -686,12 +696,12 @@ public class User : TestFlashAPI
     }
 
     /// Flash API
-    public override string acceptChannel (in Hash temp_chan_id)
+    public override string acceptChannel (in Hash chan_id)
     {
         writefln("%s: acceptChannel(%s)", this.kp.V.prettify,
-            temp_chan_id.prettify);
+            chan_id.prettify);
 
-        auto channel = temp_chan_id in this.pending_channels;
+        auto channel = chan_id in this.pending_channels;
         if (channel is null)
             return "Channel channel ID not found";
 
@@ -704,15 +714,10 @@ public class User : TestFlashAPI
     {
         auto peer = this.getFlashClient(channel.peer_pk);
 
-        // create funding, we can sign it but we shouldn't share it yet
-        auto funding_tx = this.createFundingTx(channel);
-
-        channel.funding_tx = funding_tx;
-        channel.funding_tx_hash = hashFull(funding_tx);
-
         // create trigger, don't sign yet but do share it
         const next_seq_id = 0;
-        auto trigger_tx = this.createUpdateTx(channel, funding_tx, next_seq_id);
+        auto trigger_tx = this.createUpdateTx(channel,
+            channel.funding_tx, next_seq_id);
 
         // initial output allocates all the funds back to the channel creator
         Output output = Output(channel.funding_amount,
@@ -724,7 +729,7 @@ public class User : TestFlashAPI
         const seq_id_0 = 0;
 
         channel.pending_settlement = Settlement(
-            channel.temp_chan_id, seq_id_0, nonce_kp,
+            channel.chan_id, seq_id_0, nonce_kp,
             Point.init, // set later when we receive it from counter-party
             trigger_tx,
             initial_outputs);
@@ -733,12 +738,12 @@ public class User : TestFlashAPI
         // from the trigger tx.
         this.taskman.schedule(
         {
-            if (auto error = peer.requestSettlementSig(channel.temp_chan_id,
+            if (auto error = peer.requestSettlementSig(channel.chan_id,
                 trigger_tx, initial_outputs, seq_id_0, nonce_kp.V))
             {
                 // todo: retry?
                 writefln("Requested settlement rejected: %s", error);
-                //this.pending_settlement.remove(channel.temp_chan_id);
+                //this.pending_settlement.remove(channel.chan_id);
             }
         });
 
@@ -746,15 +751,15 @@ public class User : TestFlashAPI
     }
 
     /// Flash API
-    public override string requestSettlementSig (in Hash temp_chan_id,
+    public override string requestSettlementSig (in Hash chan_id,
         in Transaction prev_tx, Output[] outputs, in uint seq_id,
         in Point peer_nonce_pk)
     {
         // todo: should not accept this unless acceptsChannel() was called
         writefln("%s: requestSettlementSig(%s)", this.kp.V.prettify,
-            temp_chan_id.prettify);
+            chan_id.prettify);
 
-        auto channel = temp_chan_id in this.pending_channels;
+        auto channel = chan_id in this.pending_channels;
         if (channel is null)
             return "Channel channel ID not found";
 
@@ -769,10 +774,10 @@ public class User : TestFlashAPI
         const challenge_settle = getSequenceChallenge(settle_tx, seq_id,
             input_idx);
 
-        const our_settle_scalar = getSettleScalar(this.kp.v, channel.funding_spend_utxo,
+        const our_settle_scalar = getSettleScalar(this.kp.v, channel.funding_tx_hash,
             seq_id);
         const num_peers = NumPeers(2);  // hardcoded for now
-        const settle_pair_pk = getSettlePk(channel.pair_pk, channel.funding_spend_utxo,
+        const settle_pair_pk = getSettlePk(channel.pair_pk, channel.funding_tx_hash,
             seq_id, num_peers);
         const nonce_pair_pk = our_settle_nonce_kp.V + peer_nonce_pk;
 
@@ -780,7 +785,7 @@ public class User : TestFlashAPI
             our_settle_nonce_kp.v, challenge_settle);
 
         channel.pending_settlement = Settlement(
-            channel.temp_chan_id, seq_id, our_settle_nonce_kp,
+            channel.chan_id, seq_id, our_settle_nonce_kp,
             peer_nonce_pk,
             Transaction.init,  // trigger tx is revealed later
             outputs);
@@ -789,7 +794,7 @@ public class User : TestFlashAPI
 
         this.taskman.schedule(
         {
-            if (auto error = peer.receiveSettlementSig(temp_chan_id, seq_id,
+            if (auto error = peer.receiveSettlementSig(chan_id, seq_id,
                 our_settle_nonce_kp.V, sig))
             {
                 // todo: retry?
@@ -800,14 +805,14 @@ public class User : TestFlashAPI
         return null;
     }
 
-    public override string receiveSettlementSig (in Hash temp_chan_id,
+    public override string receiveSettlementSig (in Hash chan_id,
         in uint seq_id, in Point peer_nonce_pk, in Signature peer_sig)
     {
         writefln("%s: receiveSettlementSig(%s)", this.kp.V.prettify,
-            temp_chan_id.prettify);
+            chan_id.prettify);
 
         // todo: should not accept this unless acceptsChannel() was called
-        auto channel = temp_chan_id in this.pending_channels;
+        auto channel = chan_id in this.pending_channels;
         if (channel is null)
             return "Pending channel with this ID not found";
 
@@ -829,10 +834,10 @@ public class User : TestFlashAPI
         Pair our_settle_origin_kp;
         Point their_settle_origin_pk;
 
-        const our_settle_scalar = getSettleScalar(this.kp.v, channel.funding_spend_utxo,
+        const our_settle_scalar = getSettleScalar(this.kp.v, channel.funding_tx_hash,
             seq_id);
         const num_peers = NumPeers(2);  // hardcoded for now
-        const settle_pair_pk = getSettlePk(channel.pair_pk, channel.funding_spend_utxo,
+        const settle_pair_pk = getSettlePk(channel.pair_pk, channel.funding_tx_hash,
             seq_id, num_peers);
         const nonce_pair_pk = settle.our_settle_nonce_kp.V
             + settle.their_settle_nonce_pk;
@@ -849,7 +854,7 @@ public class User : TestFlashAPI
             return "Settlement signature is invalid";
 
         writefln("%s: receiveSettlementSig(%s) VALIDATED for seq id %s",
-            this.kp.V.prettify, temp_chan_id.prettify, seq_id);
+            this.kp.V.prettify, chan_id.prettify, seq_id);
 
         // unlock script set
         const Unlock settle_unlock = createUnlockSettle(settle_sig_pair, seq_id);
@@ -881,14 +886,14 @@ public class User : TestFlashAPI
                 auto peer = this.getFlashClient(channel.peer_pk);
 
                 channel.pending_trigger = Trigger(
-                    channel.temp_chan_id,
+                    channel.chan_id,
                     our_trigger_nonce_kp,
                     Point.init,  // set later when we receive it from counter-party
                     trigger_tx);
 
                 this.taskman.schedule({
-                    if (auto error = peer.requestTriggerSig(channel.temp_chan_id,
-                        our_trigger_nonce_kp.V, trigger_tx, channel.funding_tx))
+                    if (auto error = peer.requestTriggerSig(channel.chan_id,
+                        our_trigger_nonce_kp.V, trigger_tx))
                     {
                         writefln("Error calling requestTriggerSig(): %s", error);
                     }
@@ -903,16 +908,15 @@ public class User : TestFlashAPI
         return null;
     }
 
-    public override string requestTriggerSig (in Hash temp_chan_id,
-        in Point peer_nonce_pk, Transaction trigger_tx,
-        Transaction funding_tx)  // not signed yet
+    public override string requestTriggerSig (in Hash chan_id,
+        in Point peer_nonce_pk, Transaction trigger_tx)
     {
         writefln("%s: requestTriggerSig(%s)", this.kp.V.prettify,
-            temp_chan_id.prettify);
+            chan_id.prettify);
 
         // todo: should not accept this call unless we already signed
         // a settlement transaction. Although there's no danger in accepting it.
-        auto channel = temp_chan_id in this.pending_channels;
+        auto channel = chan_id in this.pending_channels;
         if (channel is null)
             return "Pending channel with this ID not found";
 
@@ -927,13 +931,6 @@ public class User : TestFlashAPI
         auto settle = &channel.pending_settlement;
         if (*settle == Settlement.init)
             return "Pending settlement with this channel ID not found";
-
-        if (channel.funding_tx != Transaction.init &&
-            channel.funding_tx != funding_tx)
-            return "Cannot request trigger for multiple funding txs";
-
-        channel.funding_tx = funding_tx;
-        channel.funding_tx_hash = funding_tx.hashFull();
 
         // todo: the semantics of the trigger tx need to be validated properly
         if (trigger_tx.inputs.length == 0)
@@ -954,26 +951,26 @@ public class User : TestFlashAPI
             nonce_pair_pk, our_trigger_nonce_kp.v, trigger_tx);
 
         channel.pending_trigger = Trigger(
-            channel.temp_chan_id,
+            channel.chan_id,
             our_trigger_nonce_kp,
             peer_nonce_pk,
             trigger_tx);
 
         this.taskman.schedule({
-            peer.receiveTriggerSig(channel.temp_chan_id, our_trigger_nonce_kp.V,
+            peer.receiveTriggerSig(channel.chan_id, our_trigger_nonce_kp.V,
                 our_sig);
         });
 
         return null;
     }
 
-    public override string receiveTriggerSig (in Hash temp_chan_id,
+    public override string receiveTriggerSig (in Hash chan_id,
         in Point peer_nonce_pk, in Signature peer_sig)
     {
         writefln("%s: receiveTriggerSig(%s)", this.kp.V.prettify,
-            temp_chan_id.prettify);
+            chan_id.prettify);
 
-        auto channel = temp_chan_id in this.pending_channels;
+        auto channel = chan_id in this.pending_channels;
         if (channel is null)
             return "Pending channel with this ID not found";
 
@@ -1016,7 +1013,7 @@ public class User : TestFlashAPI
         channel.trigger = *trigger;
 
         writefln("%s: receiveTriggerSig(%s) VALIDATED", this.kp.V.prettify,
-            temp_chan_id.prettify);
+            chan_id.prettify);
 
         // this prevents infinite loops, we may want to optimize this
         if (channel.funder_pk == this.kp.V)
@@ -1024,7 +1021,7 @@ public class User : TestFlashAPI
             // send the trigger signature
             this.taskman.schedule({
                 if (auto error = peer.receiveTriggerSig(
-                    channel.temp_chan_id, trigger.our_trigger_nonce_kp.V,
+                    channel.chan_id, trigger.our_trigger_nonce_kp.V,
                     our_sig))
                 {
                     writefln("Error sending trigger signature back: %s", error);
@@ -1035,7 +1032,7 @@ public class User : TestFlashAPI
             const seq_id_0 = 0;
             this.taskman.schedule({
                 if (auto error = peer.receiveSettlementSig(
-                    channel.temp_chan_id, seq_id_0,
+                    channel.chan_id, seq_id_0,
                     settle.our_settle_nonce_kp.V, settle.our_sig))
                 {
                     writefln("Error sending settlement signature back: %s", error);
@@ -1044,7 +1041,7 @@ public class User : TestFlashAPI
 
             // now ok to sign and publish funding tx
             writefln("%s: Sending funding tx(%s): %s", this.kp.V.prettify,
-                temp_chan_id.prettify, hashFull(channel.funding_tx).prettify);
+                chan_id.prettify, hashFull(channel.funding_tx).prettify);
             channel.funding_tx.inputs[0].unlock
                 = genKeyUnlock(sign(this.kp, channel.funding_tx));
             this.agora_node.putTransaction(channel.funding_tx);
@@ -1061,15 +1058,15 @@ public class User : TestFlashAPI
         return null;
     }
 
-    public override string requestUpdateSig (in Hash temp_chan_id,
+    public override string requestUpdateSig (in Hash chan_id,
         in uint seq_id, in Point peer_nonce_pk, Transaction update_tx)
     {
         writefln("%s: requestUpdateSig(%s)", this.kp.V.prettify,
-            temp_chan_id.prettify);
+            chan_id.prettify);
 
         // todo: should not accept this call unless we already signed
         // a settlement transaction. Although there's no danger in accepting it.
-        auto channel = temp_chan_id in this.pending_channels;
+        auto channel = chan_id in this.pending_channels;
         if (channel is null)
             return "Pending channel with this ID not found";
 
@@ -1103,9 +1100,9 @@ public class User : TestFlashAPI
 
         auto peer = this.getFlashClient(channel.funder_pk);
 
-        const our_update_scalar = getUpdateScalar(this.kp.v, channel.funding_spend_utxo);
+        const our_update_scalar = getUpdateScalar(this.kp.v, channel.funding_tx_hash);
         const num_peers = NumPeers(2);  // hardcoded for now
-        const update_pair_pk = getUpdatePk(channel.pair_pk, channel.funding_spend_utxo,
+        const update_pair_pk = getUpdatePk(channel.pair_pk, channel.funding_tx_hash,
             num_peers);
 
         const nonce_pair_pk = our_update_nonce_kp.V + peer_nonce_pk;
@@ -1114,27 +1111,27 @@ public class User : TestFlashAPI
             nonce_pair_pk, our_update_nonce_kp.v, update_tx);
 
         channel.pending_update = Update(
-            channel.temp_chan_id,
+            channel.chan_id,
             seq_id,
             our_update_nonce_kp,
             peer_nonce_pk,
             settle.prev_tx);
 
         this.taskman.schedule({
-            peer.receiveUpdateSig(channel.temp_chan_id, seq_id,
+            peer.receiveUpdateSig(channel.chan_id, seq_id,
                 our_update_nonce_kp.V, our_sig);
         });
 
         return null;
     }
 
-    public override string receiveUpdateSig (in Hash temp_chan_id,
+    public override string receiveUpdateSig (in Hash chan_id,
         in uint seq_id, in Point peer_nonce_pk, in Signature peer_sig)
     {
         writefln("%s: receiveUpdateSig(%s)", this.kp.V.prettify,
-            temp_chan_id.prettify);
+            chan_id.prettify);
 
-        auto channel = temp_chan_id in this.pending_channels;
+        auto channel = chan_id in this.pending_channels;
         if (channel is null)
             return "Pending channel with this ID not found";
 
@@ -1153,7 +1150,7 @@ public class User : TestFlashAPI
 
         auto peer = this.getFlashClient(channel.peer_pk);
 
-        const our_update_scalar = getUpdateScalar(this.kp.v, channel.funding_spend_utxo);
+        const our_update_scalar = getUpdateScalar(this.kp.v, channel.funding_tx_hash);
         const nonce_pair_pk = update.our_update_nonce_kp.V + peer_nonce_pk;
 
         const our_sig = sign(our_update_scalar, channel.update_pair_pk,
@@ -1184,7 +1181,7 @@ public class User : TestFlashAPI
         }
 
         writefln("%s: receiveUpdateSig(%s) VALIDATED", this.kp.V.prettify,
-            temp_chan_id.prettify);
+            chan_id.prettify);
 
         channel.last_update = *update;
 
@@ -1194,7 +1191,7 @@ public class User : TestFlashAPI
             // send the update signature
             this.taskman.schedule({
                 if (auto error = peer.receiveUpdateSig(
-                    channel.temp_chan_id, seq_id, update.our_update_nonce_kp.V,
+                    channel.chan_id, seq_id, update.our_update_nonce_kp.V,
                     our_sig))
                 {
                     writefln("Error sending update signature back: %s", error);
@@ -1219,14 +1216,15 @@ public class User : TestFlashAPI
     }
 
     ///
-    private Transaction createFundingTx (in Channel channel)
+    private Transaction createFundingTx (in Hash utxo, in Amount funding_amount,
+        in Point pair_pk)
     {
         Transaction funding_tx = {
             type: TxType.Payment,
-            inputs: [Input(channel.funding_spend_utxo)],
+            inputs: [Input(utxo)],
             outputs: [
-                Output(channel.funding_amount,
-                    Lock(LockType.Key, channel.pair_pk[].dup))]
+                Output(funding_amount,
+                    Lock(LockType.Key, pair_pk[].dup))]
         };
 
         return funding_tx;
@@ -1238,7 +1236,7 @@ public class User : TestFlashAPI
     {
         const num_peers = NumPeers(2);  // hardcoded for now
         const Lock = createLockEltoo(channel.settle_time,
-            channel.funding_spend_utxo, channel.pair_pk, next_seq_id, num_peers);
+            channel.funding_tx_hash, channel.pair_pk, next_seq_id, num_peers);
 
         Transaction update_tx = {
             type: TxType.Payment,
@@ -1543,7 +1541,6 @@ unittest
         Thread.sleep(100.msecs);
     }
 
-    writefln("Sending flash..");
     alice.sendFlash(Amount(10_000));
 
     Thread.sleep(1.seconds);
