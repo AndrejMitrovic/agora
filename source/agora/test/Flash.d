@@ -108,6 +108,11 @@ public struct ChannelConfig
     /// Sum of `funder_pk + peer_pk`
     public Point pair_pk;
 
+    /// Total number of co-signers needed to make update/settlement transactions
+    /// in this channel. This does not include any HTLC intermediary peers.
+    /// Currently hardcoded to two, later may be relaxed.
+    public const uint num_peers = 2;
+
     /// The funding transaction from which the trigger transaction may spend.
     /// This transaction is unsigned - only the funder may opt to send it
     /// to the agora network for externalization. The peer may opt to retrieve
@@ -143,14 +148,21 @@ public class Channel
     /// The mostly static information about this channel
     public const ChannelConfig conf;
 
+    /// The public key sum used for validating Update transactions.
+    /// This key is derived and remains static throughout the
+    /// lifetime of the channel.
+    public const Point update_pair_pk;
+
     /// Stored when the funding transaction is signed.
-    /// For co-peers they receive this from the blockchain.
+    /// For peers they receive this from the blockchain.
     public Transaction funding_tx_signed;
 
     /// Ctor
     public this (in ChannelConfig conf)
     {
         this.conf = conf;
+        this.update_pair_pk = getUpdatePk(conf.pair_pk, conf.funding_tx_hash,
+            conf.num_peers);
     }
 
     // need it in order to publish to begin closing the channel
@@ -197,16 +209,6 @@ public struct Settlement
     /// 1 of 2 signature that belongs to us. funder needs this so he can
     /// send it to the peer once the trigger tx is signed and validated.
     Signature our_sig;
-}
-
-// type-safe number of channel owners
-public struct NumPeers
-{
-    ///
-    public ulong value;
-
-    ///
-    public alias value this;
 }
 
 /// This is the API that each flash-aware node must implement.
@@ -796,9 +798,8 @@ public class User : TestFlashAPI
 
         const our_settle_scalar = getSettleScalar(this.kp.v, channel.conf.funding_tx_hash,
             seq_id);
-        const num_peers = NumPeers(2);  // hardcoded for now
         const settle_pair_pk = getSettlePk(channel.conf.pair_pk, channel.conf.funding_tx_hash,
-            seq_id, num_peers);
+            seq_id, channel.conf.num_peers);
         const nonce_pair_pk = our_settle_nonce_kp.V + peer_nonce_pk;
 
         const sig = sign(our_settle_scalar, settle_pair_pk, nonce_pair_pk,
@@ -856,9 +857,8 @@ public class User : TestFlashAPI
 
         const our_settle_scalar = getSettleScalar(this.kp.v, channel.conf.funding_tx_hash,
             seq_id);
-        const num_peers = NumPeers(2);  // hardcoded for now
         const settle_pair_pk = getSettlePk(channel.conf.pair_pk, channel.conf.funding_tx_hash,
-            seq_id, num_peers);
+            seq_id, channel.conf.num_peers);
         const nonce_pair_pk = settle.our_settle_nonce_kp.V
             + settle.their_settle_nonce_pk;
 
@@ -1130,9 +1130,8 @@ public class User : TestFlashAPI
         auto peer = this.getFlashClient(channel.conf.funder_pk);
 
         const our_update_scalar = getUpdateScalar(this.kp.v, channel.conf.funding_tx_hash);
-        const num_peers = NumPeers(2);  // hardcoded for now
         const update_pair_pk = getUpdatePk(channel.conf.pair_pk,
-            channel.conf.funding_tx_hash, num_peers);
+            channel.conf.funding_tx_hash, channel.conf.num_peers);
 
         const nonce_pair_pk = our_update_nonce_kp.V + peer_nonce_pk;
 
@@ -1148,7 +1147,7 @@ public class User : TestFlashAPI
 
         this.taskman.schedule(
         {
-            peer.receiveUpdateSig(channel.chan_id, seq_id,
+            peer.receiveUpdateSig(channel.conf.chan_id, seq_id,
                 our_update_nonce_kp.V, our_sig);
         });
 
@@ -1216,13 +1215,13 @@ public class User : TestFlashAPI
         channel.last_update = *update;
 
         // this prevents infinite loops, we may want to optimize this
-        if (channel.funder_pk == this.kp.V)
+        if (channel.conf.funder_pk == this.kp.V)
         {
             // send the update signature
             this.taskman.schedule(
             {
                 if (auto error = peer.receiveUpdateSig(
-                    channel.chan_id, seq_id, update.our_update_nonce_kp.V,
+                    channel.conf.chan_id, seq_id, update.our_update_nonce_kp.V,
                     our_sig))
                 {
                     writefln("Error sending update signature back: %s", error);
@@ -1265,15 +1264,15 @@ public class User : TestFlashAPI
     private Transaction createUpdateTx (in Channel channel,
         in Transaction funding_tx, in uint next_seq_id)
     {
-        const num_peers = NumPeers(2);  // hardcoded for now
-        const Lock = createLockEltoo(channel.settle_time,
-            channel.conf.funding_tx_hash, channel.pair_pk, next_seq_id, num_peers);
+        const Lock = createLockEltoo(channel.conf.settle_time,
+            channel.conf.funding_tx_hash, channel.conf.pair_pk, next_seq_id,
+            channel.conf.num_peers);
 
         Transaction update_tx = {
             type: TxType.Payment,
             inputs: [Input(funding_tx, 0 /* index */, 0 /* unlock age */)],
             outputs: [
-                Output(channel.funding_amount, Lock)]  // bind to next sequence
+                Output(channel.conf.funding_amount, Lock)]
         };
 
         return update_tx;
@@ -1362,7 +1361,7 @@ private string prettify (T)(T input)
 *******************************************************************************/
 
 public Lock createLockEltoo (uint age, Hash first_utxo, Point pair_pk,
-    ulong next_seq_id, NumPeers count)
+    ulong next_seq_id, uint num_peers)
     //pure nothrow @safe
 {
     /*
@@ -1401,9 +1400,9 @@ public Lock createLockEltoo (uint age, Hash first_utxo, Point pair_pk,
         OP_ENDIF
     */
 
-    const update_pair_pk = getUpdatePk(pair_pk, first_utxo, count);
+    const update_pair_pk = getUpdatePk(pair_pk, first_utxo, num_peers);
     const next_settle_pair_pk = getSettlePk(pair_pk, first_utxo,
-        next_seq_id, count);
+        next_seq_id, num_peers);
     const age_bytes = nativeToLittleEndian(age);
     const ubyte[8] seq_id_bytes = nativeToLittleEndian(next_seq_id);
 
@@ -1470,14 +1469,14 @@ public Scalar getUpdateScalar (in Scalar origin, in Hash utxo)
 }
 
 //
-public Point getUpdatePk (in Point origin, in Hash utxo, NumPeers count)
+public Point getUpdatePk (in Point origin, in Hash utxo, uint num_peers)
 {
     const update_offset = Scalar(hashFull("update"));
     const seq_scalar = update_offset + Scalar(utxo);
 
     import std.stdio;
     Scalar sum_scalar = seq_scalar;
-    while (--count.value)  // add N-1 additional times
+    while (--num_peers)  // add N-1 additional times
         sum_scalar = sum_scalar + seq_scalar;
 
     const derived = origin + sum_scalar.toPoint();
@@ -1495,13 +1494,13 @@ public Scalar getSettleScalar (in Scalar origin, in Hash utxo, in ulong seq_id)
 
 //
 public Point getSettlePk (in Point origin, in Hash utxo, in ulong seq_id,
-    NumPeers count)
+    uint num_peers)
 {
     const settle_offset = Scalar(hashFull("settle"));
     const seq_scalar = Scalar(hashFull(seq_id)) + Scalar(utxo) + settle_offset;
 
     Scalar sum_scalar = seq_scalar;
-    while (--count.value)  // add N-1 additional times
+    while (--num_peers)  // add N-1 additional times
         sum_scalar = sum_scalar + seq_scalar;
 
     const derived = origin + sum_scalar.toPoint();
