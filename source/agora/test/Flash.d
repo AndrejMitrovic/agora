@@ -110,15 +110,20 @@ private struct Channel
     Transaction funding_tx;  // initially stored by funder
     Hash funding_tx_hash;    // stored by both (shared by funder)
 
+    // need it in order to publish to begin closing the channel
     Transaction trigger_tx;
 
-    bool funding_externalized; // both flash nodes must detect this before proceeding
-    bool trigger_cosigned;  // whether the trigger tx has been signed by both parties
-    bool settle_cosigned;  // whether the first settle tx has been signed by both parties
+    Settlement pending_settlement;
+    Update pending_update;
+
+    // all of these must be set before channel is considered opened
+    Settlement last_settlement;
+    Update last_update;
+    bool funding_externalized;
 }
 
 ///
-private struct PendingSettlement
+private struct Settlement
 {
     Hash chan_id;
     uint seq_id;
@@ -134,7 +139,7 @@ private struct PendingSettlement
 
 /// Also used for trigger transactions because a trigger is the same as an update,
 /// it's only conceptually the trigger
-private struct PendingUpdate
+private struct Update
 {
     Hash chan_id;
     uint seq_id;
@@ -407,10 +412,6 @@ public class User : TestFlashAPI
     /// to a Channel with a unique ID derived from the hash of the funding tx.
     private Channel[Hash] pending_channels;
 
-    private PendingSettlement[Hash] pending_settlements;
-
-    private PendingUpdate[Hash] pending_updates;
-
     /// channels which were promoted into open channels
     private Channel[Hash] open_channels;
 
@@ -457,8 +458,9 @@ public class User : TestFlashAPI
         Hash[] pending_chans_to_remove;
         foreach (hash, ref channel; this.pending_channels)
         {
-            if (channel.funding_externalized && channel.trigger_cosigned
-                && channel.settle_cosigned)
+            if (channel.funding_externalized
+                && channel.last_settlement != Settlement.init
+                && channel.last_update != Update.init)
             {
                 writefln("%s: Channel open(%s)", this.kp.V.prettify,
                     hash.prettify);
@@ -542,11 +544,10 @@ public class User : TestFlashAPI
     {
         writefln("%s: sendFlash()", this.kp.V.prettify);
 
-        //const Point update_pair_pk = channel.our_update_kp.V
-        //    + channel.their_update_pk;
-
         //// todo: use actual channel IDs, or perhaps an invoice API
-        //auto channel = this.open_channels[this.open_channels.byKey.front];
+        auto channel = this.open_channels[this.open_channels.byKey.front];
+
+        // todo: first we need to create a new settlement
 
         //auto update_tx = this.createUpdateTx(channel.update_pair_pk,
         //    channel.trigger_tx,
@@ -637,7 +638,7 @@ public class User : TestFlashAPI
         {
             // todo: retry?
             writefln("Receiving funding tx hash rejected: %s", error);
-            //this.pending_settlements.remove(channel.temp_chan_id);
+            //channel.pending_settlement.remove(channel.temp_chan_id);
         }
 
         // create trigger, don't sign yet but do share it
@@ -652,7 +653,7 @@ public class User : TestFlashAPI
         const nonce_kp = Pair.random();
         const seq_id_1 = 1;
 
-        this.pending_settlements[channel.temp_chan_id] = PendingSettlement(
+        channel.pending_settlement = Settlement(
             channel.temp_chan_id, seq_id_1, nonce_kp,
             Point.init, // set later when we receive it from counter-party
             trigger_tx,
@@ -667,7 +668,7 @@ public class User : TestFlashAPI
             {
                 // todo: retry?
                 writefln("Requested settlement rejected: %s", error);
-                //this.pending_settlements.remove(channel.temp_chan_id);
+                //this.pending_settlement.remove(channel.temp_chan_id);
             }
         });
 
@@ -728,7 +729,7 @@ public class User : TestFlashAPI
         const sig = sign(our_settle_scalar, settle_pair_pk, nonce_pair_pk,
             our_settle_nonce_kp.v, challenge_settle);
 
-        this.pending_settlements[channel.temp_chan_id] = PendingSettlement(
+        channel.pending_settlement = Settlement(
             channel.temp_chan_id, seq_id, our_settle_nonce_kp,
             peer_nonce_pk,
             Transaction.init,  // trigger tx is revealed later
@@ -760,10 +761,7 @@ public class User : TestFlashAPI
         if (channel is null)
             return "Pending channel with this ID not found";
 
-        auto settle = temp_chan_id in this.pending_settlements;
-        if (settle is null)
-            return "Pending settlement with this channel ID not found";
-
+        auto settle = &channel.pending_settlement;
         settle.their_settle_nonce_pk = peer_nonce_pk;
 
         // recreate the settlement tx
@@ -802,7 +800,8 @@ public class User : TestFlashAPI
 
         writefln("%s: receiveSettlementSig(%s) VALIDATED",
             this.kp.V.prettify, temp_chan_id.prettify);
-        channel.settle_cosigned = true;
+
+        channel.last_settlement = *settle;
 
         // unlock script set
         const Unlock settle_unlock = createUnlockSettle(settle_sig_pair, seq_id);
@@ -847,7 +846,7 @@ public class User : TestFlashAPI
     // we sign the trigger tx with the update key-pair,
     // we share the signature and our nonce, and we expect
     // to get back the peer's signature and nonce.
-    private void signTriggerTx (in Channel channel,
+    private void signTriggerTx (ref Channel channel,
         Transaction trigger_tx)
     {
         const our_update_nonce_kp = Pair.random();
@@ -855,7 +854,7 @@ public class User : TestFlashAPI
         auto peer = this.getFlashClient(channel.peer_pk);
 
         const uint seq_id_1 = 1;
-        this.pending_updates[channel.temp_chan_id] = PendingUpdate(
+        channel.pending_update = Update(
             channel.temp_chan_id,
             seq_id_1,
             our_update_nonce_kp,
@@ -877,19 +876,22 @@ public class User : TestFlashAPI
         writefln("%s: requestTriggerSig(%s)", this.kp.V.prettify,
             temp_chan_id.prettify);
 
-        // todo: if this is called again, we should just return the existing
-        // signature which would be encoded in the PendingUpdate
-        if (temp_chan_id in this.pending_updates)
-            return "Error: Multiple calls to requestTriggerSig() not supported";
-
         // todo: should not accept this call unless we already signed
         // a settlement transaction. Although there's no danger in accepting it.
         auto channel = temp_chan_id in this.pending_channels;
         if (channel is null)
             return "Pending channel with this ID not found";
 
-        auto settle = temp_chan_id in this.pending_settlements;
-        if (settle is null)
+        // todo: if this is called again, we should just return the existing
+        // signature which would be encoded in the Update
+        // todo: we should just keep the old signatures in case the other
+        // node needs it (technically we should just return the latest update tx
+        // and the sequence ID)
+        if (channel.pending_update != Update.init)
+            return "Error: Multiple calls to requestTriggerSig() not supported";
+
+        auto settle = &channel.pending_settlement;
+        if (*settle == Settlement.init)
             return "Pending settlement with this channel ID not found";
 
         if (channel.funding_tx_hash == Hash.init)
@@ -921,7 +923,7 @@ public class User : TestFlashAPI
             nonce_pair_pk, our_update_nonce_kp.v, trigger_tx);
 
         const uint seq_id_1 = 1;  // implicit
-        this.pending_updates[channel.temp_chan_id] = PendingUpdate(
+        channel.pending_update = Update(
             channel.temp_chan_id,
             seq_id_1,
             our_update_nonce_kp,
@@ -946,12 +948,12 @@ public class User : TestFlashAPI
         if (channel is null)
             return "Pending channel with this ID not found";
 
-        auto trigger = temp_chan_id in this.pending_updates;
-        if (trigger is null)
+        auto trigger = &channel.pending_update;
+        if (*trigger == Update.init)
             return "Could not find this pending trigger tx";
 
-        auto settle = temp_chan_id in this.pending_settlements;
-        if (settle is null)
+        auto settle = &channel.pending_settlement;
+        if (*settle == Settlement.init)
             return "Pending settlement with this channel ID not found";
 
         // todo: not sure about this yet, maybe we should move triggers
@@ -981,8 +983,9 @@ public class User : TestFlashAPI
         writefln("%s: receiveTriggerSig(%s) VALIDATED", this.kp.V.prettify,
             temp_chan_id.prettify);
 
+        channel.last_update = *trigger;
+
         channel.trigger_tx = trigger.update_tx;
-        channel.trigger_cosigned = true;
 
         // this prevents infinite loops, we may want to optimize this
         if (channel.funder_pk == this.kp.V)
