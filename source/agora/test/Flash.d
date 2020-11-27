@@ -594,12 +594,24 @@ public class User : TestFlashAPI
         //// todo: use actual channel IDs, or perhaps an invoice API
         auto channel = this.open_channels[this.open_channels.byKey.front];
 
-        // todo: first we need to create a new settlement
-
         //auto update_tx = this.createUpdateTx(channel.update_pair_pk,
         //    channel.trigger_tx,
         //    channel.funding_amount, channel.settle_time,
         //    channel.settle_origin_pair_pk);
+
+        //auto peer = this.getFlashClient(channel.peer_pk);
+
+        //peer.requestSettlementSig (in Hash temp_chan_id,
+        //    in Transaction prev_tx, Output[] outputs, in uint seq_id,
+        //    in Point peer_nonce_pk)
+
+        //this.taskman.schedule({
+        //    if (auto error = peer.acceptChannel(temp_chan_id))
+        //    {
+        //        // todo: handle this
+        //        writefln("Error after acceptChannel() call: %s", error);
+        //    }
+        //});
     }
 
     /// Flash API
@@ -866,15 +878,12 @@ public class User : TestFlashAPI
             }
             else
             {
-                // prev tx is a specific update tx because settlements always attach
-                // to specific txs based on their derived signature keypairs
-                assert(0);
+                // settlement with seq id 1 attaches to update with seq id 1
             }
         }
 
         return null;
     }
-
 
     public override string requestTriggerSig (in Hash temp_chan_id,
         in Point peer_nonce_pk, Transaction trigger_tx,
