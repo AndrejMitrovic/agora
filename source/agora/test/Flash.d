@@ -1054,30 +1054,6 @@ public class User : TestFlashAPI
         return funding_tx;
     }
 
-    // todo: fix this
-    //private Transaction createUpdateTx (in Point update_pair_pk,
-    //    in Transaction trigger_tx, in Amount funding_amount,
-    //    in uint settle_time, in Point settle_origin_pair_pk,
-    //    in uint seq_id)
-    //{
-    //    assert(seq_id >= 2);  // todo: can be 1 if we allow seq 0 later
-
-    //    const Point settle_seq_pk = getSettlePk(
-    //        settle_origin_pair_pk, seq_id);
-
-    //    const FundingLock = createLockEltoo(settle_time,
-    //        settle_seq_pk, update_pair_pk, seq_id);
-
-    //    Transaction update_tx = {
-    //        type: TxType.Payment,
-    //        inputs: [Input(trigger_tx, 0 /* index */, 0 /* unlock age */)],
-    //        outputs: [
-    //            Output(funding_amount, FundingLock)]
-    //    };
-
-    //    return update_tx;
-    //}
-
     ///
     private Transaction createTriggerTx (in Channel channel,
         in Transaction funding_tx)
