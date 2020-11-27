@@ -110,8 +110,12 @@ public struct ChannelConfig
 
     /// Total number of co-signers needed to make update/settlement transactions
     /// in this channel. This does not include any HTLC intermediary peers.
-    /// Currently hardcoded to two, later may be relaxed.
-    public const uint num_peers = 2;
+    public const uint num_peers;
+
+    /// The public key sum used for validating Update transactions.
+    /// This key is derived and remains static throughout the
+    /// lifetime of the channel.
+    public const Point update_pair_pk;
 
     /// The funding transaction from which the trigger transaction may spend.
     /// This transaction is unsigned - only the funder may opt to send it
@@ -135,11 +139,18 @@ public struct ChannelConfig
     public alias chan_id = funding_tx_hash;
 }
 
-/// Tracks the current state of the channel
-public enum ChannelState
+/// Tracks the current stage of the channel
+public enum Stage
 {
     /// The funding tx is known
     Initializing,
+}
+
+/// Tracks the current state of the channel
+public struct ChannelState
+{
+    public Stage stage = Stage.Initializing;
+    public uint seq_id = 0;
 }
 
 ///
@@ -148,21 +159,17 @@ public class Channel
     /// The mostly static information about this channel
     public const ChannelConfig conf;
 
-    /// The public key sum used for validating Update transactions.
-    /// This key is derived and remains static throughout the
-    /// lifetime of the channel.
-    public const Point update_pair_pk;
-
     /// Stored when the funding transaction is signed.
     /// For peers they receive this from the blockchain.
     public Transaction funding_tx_signed;
+
+    /// Current state of the channel
+    public ChannelState state;
 
     /// Ctor
     public this (in ChannelConfig conf)
     {
         this.conf = conf;
-        this.update_pair_pk = getUpdatePk(conf.pair_pk, conf.funding_tx_hash,
-            conf.num_peers);
     }
 
     // need it in order to publish to begin closing the channel
@@ -935,13 +942,6 @@ public abstract class User : FlashAPI
 
             this.agora_node.putTransaction(channel.funding_tx_signed);
             this.ready_to_externalize = true;
-
-            //auto last_block = this.agora_node.getBlocksFrom(0, 1024)[$ - 1];
-            //auto txs = last_block.spendable
-            //    .map!(en => en.value.refund(WK.Keys[en.index].address).sign())
-            //    .array();
-            //txs[0] = channel.conf.funding_tx;  // rewrite this one
-            //network.expectBlock(Height(2));
         }
 
         return null;
@@ -1042,18 +1042,13 @@ public abstract class User : FlashAPI
         const our_update_scalar = getUpdateScalar(this.kp.v, channel.conf.funding_tx_hash);
         const nonce_pair_pk = update.our_update_nonce_kp.V + peer_nonce_pk;
 
-        const our_sig = sign(our_update_scalar, channel.update_pair_pk,
+        const our_sig = sign(our_update_scalar, channel.conf.update_pair_pk,
             nonce_pair_pk, update.our_update_nonce_kp.v, update.update_tx);
 
         // verify signature first
         const update_multi_sig = Sig(nonce_pair_pk,
               Sig.fromBlob(our_sig).s
             + Sig.fromBlob(peer_sig).s).toBlob();
-
-        // todo: this is wrong, we should check if update can be attached
-        // to the funding tx (it can't, it's the wrong signature)
-        if (!verify(channel.update_pair_pk, update_multi_sig, update.update_tx))
-            return "Signature does not validate!";
 
         const Unlock update_unlock = createUnlockUpdate(update_multi_sig,
             update.seq_id);
@@ -1178,6 +1173,7 @@ public class ControlUser : User, ControlAPI
 
         const funding_tx_hash = hashFull(funding_tx);
         const Hash chan_id = funding_tx_hash;
+        const num_peers = 2;
 
         const ChannelConfig chan_conf =
         {
@@ -1185,6 +1181,8 @@ public class ControlUser : User, ControlAPI
             funder_pk       : this.kp.V,
             peer_pk         : peer_pk,
             pair_pk         : this.kp.V + peer_pk,
+            num_peers       : num_peers,
+            update_pair_pk  : getUpdatePk(pair_pk, funding_tx_hash, num_peers),
             funding_tx      : funding_tx,
             funding_tx_hash : funding_tx_hash,
             funding_amount  : funding_amount,
