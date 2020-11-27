@@ -27,15 +27,17 @@ import agora.common.Types;
 import agora.consensus.data.genesis.Test;
 import agora.consensus.data.Transaction;
 import agora.consensus.data.UTXO;
-import agora.flash.tests.OffChainEltoo;
 import agora.script.Engine;
 import agora.script.Lock;
+import agora.script.Opcodes;
+import agora.script.Script;
 import agora.test.Base;
 
 import geod24.Registry;
 
 import libsodium.randombytes;
 
+import std.bitmanip;
 import std.conv;
 import std.exception;
 import std.format;
@@ -1192,6 +1194,139 @@ public class UserFactory
 private string prettify (T)(T input)
 {
     return input.to!string[0 .. 6];
+}
+
+
+/*******************************************************************************
+
+    Create an Eltoo lock script based on Figure 4 from the whitepaper.
+
+    Params:
+        age = the age constraint for using the settlement keypair
+        settle_X = the Schnorr sum of the multi-party public keys for the
+                   age-constrained settlement branch
+        update_X = the Schnorr sum of the multi-party public keys for the
+                   sequence-constrained update branch
+        next_seq_id = the sequence ID to lock to for the update spend branch
+
+    Returns:
+        a lock script which can be unlocked instantly with an update key-pair,
+        or with a settlement key-pair if the age constraint of the input
+        is satisfied.
+
+*******************************************************************************/
+
+public Lock createLockEltoo (uint age, Point settle_X, Point update_X,
+    ulong next_seq_id) pure nothrow @safe
+{
+    /*
+        Eltoo whitepaper Figure 4:
+
+        Key pairs must be different for the if/else branch,
+        otherwise an attacker could just steal the signature
+        and use a different PUSH to evaluate the other branch.
+
+        To force only a specific settlement tx to be valid, we need to make
+        the settle key derived for each sequence ID. That way an attacker
+        cannot attach any arbitrary settlement to any other update.
+
+        Differences to whitepaper:
+        - we use naive schnorr multisig for simplicity
+        - we use VERIFY_SIG rather than CHECK_SIG, it improves testing
+          reliability by ensuring the right failure reason is emitted.
+          We manually push OP.TRUE to the stack after the verify.
+        - VERIFY_SEQ_SIG expects a push of the sequence on the stack by
+          the unlock script, and hashes the sequence to produce a signature.
+
+        Explanation:
+        [sig] - signature pushed by the unlock script.
+        [new_seq] - sequence ID pushed by the unlock script.
+        <seq + 1> - minimum sequence ID as set by the lock script. It's +1
+            to allow binding of the next update TX (or any future update TX).
+        OP.VERIFY_SEQ_SIG - verifies that [new_seq] >= <seq + 1>.
+            Hashes the blanked Input together with the [new_seq] that was
+            pushed to the stack. Then verifies the signature.
+
+        OP.IF
+            <age> OP.VERIFY_UNLOCK_AGE
+            [sig] [new_seq] <seq + 1> <settle_pub_multi[new_seq]> OP.VERIFY_SEQ_SIG OP.TRUE
+        OP_ELSE
+            [sig] [new_seq] <seq + 1> <update_pub_multi> OP.VERIFY_SEQ_SIG OP.TRUE
+        OP_ENDIF
+    */
+    const age_bytes = nativeToLittleEndian(age);
+    const ubyte[8] seq_id_bytes = nativeToLittleEndian(next_seq_id);
+
+    return Lock(LockType.Script,
+        [ubyte(OP.IF)]
+            ~ toPushOpcode(age_bytes) ~ [ubyte(OP.VERIFY_UNLOCK_AGE)]
+            ~ [ubyte(32)] ~ settle_X[] ~ toPushOpcode(seq_id_bytes)
+                ~ [ubyte(OP.VERIFY_SEQ_SIG), ubyte(OP.TRUE),
+         ubyte(OP.ELSE)]
+            ~ [ubyte(32)] ~ update_X[] ~ toPushOpcode(seq_id_bytes)
+                ~ [ubyte(OP.VERIFY_SEQ_SIG), ubyte(OP.TRUE),
+         ubyte(OP.END_IF)]);
+}
+
+/*******************************************************************************
+
+    Create an unlock script for the settlement branch for Eltoo Figure 4.
+
+    Params:
+        sig = the signature
+
+    Returns:
+        an unlock script
+
+*******************************************************************************/
+
+public Unlock createUnlockSettle (Signature sig, in ulong sequence)
+    pure nothrow @safe
+{
+    // remember it's LIFO when popping, TRUE goes last
+    const seq_bytes = nativeToLittleEndian(sequence);
+    return Unlock([ubyte(64)] ~ sig[] ~ toPushOpcode(seq_bytes)
+        ~ [ubyte(OP.TRUE)]);
+}
+
+/*******************************************************************************
+
+    Create an unlock script for the settlement branch for Eltoo Figure 4.
+
+    Params:
+        sig = the signature
+
+    Returns:
+        an unlock script
+
+*******************************************************************************/
+
+public Unlock createUnlockUpdate (Signature sig, in ulong sequence)
+    pure nothrow @safe
+{
+    // remember it's LIFO when popping, FALSE goes last
+    const seq_bytes = nativeToLittleEndian(sequence);
+    return Unlock([ubyte(64)] ~ sig[] ~ toPushOpcode(seq_bytes)
+        ~ [ubyte(OP.FALSE)]);
+}
+
+// note: the implementation here is naive and is not secure,
+// it's simplified for tests but should not be used in production.
+private Pair getDerivedPair (in Pair origin, in ulong seq_id)
+{
+    assert(seq_id > 0);
+    const seq_scalar = Scalar(hashFull(seq_id));
+    const derived = origin.v + seq_scalar;
+    return Pair(derived, derived.toPoint());
+}
+
+// ditto
+public Point getDerivedPoint (in Point origin, in ulong seq_id)
+{
+    assert(seq_id > 0);
+    const seq_scalar = Scalar(hashFull(seq_id));
+    const derived = origin + seq_scalar.toPoint();
+    return derived;
 }
 
 /// Ditto
