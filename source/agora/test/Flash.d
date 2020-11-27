@@ -90,6 +90,24 @@ alias LockType = agora.script.Lock.LockType;
 // - we have a valid settlement tx
 // - the funding utxo was published to the blockchain
 
+/// Channel configuration which remains static throughout the
+/// lifetime of the channel
+struct ChannelConfig
+{
+    /// Hash of the genesis block, used to determine which blockchain this
+    /// channel belongs to
+    public Hash gen_hash;
+
+    /// Key of the funder of the channel
+    public Point funder_pk;
+
+    /// Key of the counter-party to the channel
+    public Point peer_pk;
+
+    /// Sum of `funder_pk + peer_pk`
+    public Point pair_pk;
+}
+
 ///
 private struct Channel
 {
@@ -102,7 +120,7 @@ private struct Channel
 
     Point update_pair_pk;  // the update pair for this channel
 
-    Hash utxo;  // note: may be multiple UTXOs for funding,
+    Hash funding_spend_utxo;  // note: may be multiple UTXOs for funding,
                 // but we use a single one for simplicity now
     Amount funding_amount;
     uint settle_time;
@@ -205,7 +223,7 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public string openChannel (in Hash gen_hash, in Hash utxo,
+    public string openChannel (in Hash gen_hash, in Hash funding_spend_utxo,
         in Hash temp_chan_id, in Point funder_pk, in Amount funding_amount,
         in uint settle_time);
 
@@ -413,7 +431,7 @@ public interface TestFlashAPI : FlashAPI
     public void wait ();
 
     /// Open a channel with another flash node.
-    public string ctrlOpenChannel (in Hash utxo, in Amount funding_amount,
+    public string ctrlOpenChannel (in Hash funding_spend_utxo, in Amount funding_amount,
         in uint settle_time, in Point peer_pk);
 
     public void sendFlash (in Amount amount);
@@ -547,7 +565,7 @@ public class User : TestFlashAPI
     }
 
     /// Control API
-    public override string ctrlOpenChannel (in Hash utxo,
+    public override string ctrlOpenChannel (in Hash funding_spend_utxo,
         in Amount funding_amount, in uint settle_time, in Point peer_pk)
     {
         // todo: this should only be done once, but we can't call it
@@ -563,10 +581,10 @@ public class User : TestFlashAPI
 
         const pair_pk = this.kp.V + peer_pk;
         const num_peers = NumPeers(2);  // hardcoded for now
-        const update_pair_pk = getUpdatePk(pair_pk, utxo, num_peers);
+        const update_pair_pk = getUpdatePk(pair_pk, funding_spend_utxo, num_peers);
 
         auto channel = Channel(gen_hash, temp_chan_id, this.kp.V, peer_pk,
-            pair_pk, update_pair_pk, utxo, funding_amount, settle_time);
+            pair_pk, update_pair_pk, funding_spend_utxo, funding_amount, settle_time);
 
         // add it to the pending before the openChannel() request is even
         // issued to avoid data races
@@ -575,7 +593,7 @@ public class User : TestFlashAPI
         this.taskman.schedule({
             // check if the node is willing to open a channel with us
             if (auto error = peer.openChannel(
-                gen_hash, utxo, temp_chan_id, this.kp.V, funding_amount,
+                gen_hash, funding_spend_utxo, temp_chan_id, this.kp.V, funding_amount,
                 settle_time))
             {
                 this.pending_channels.remove(temp_chan_id);
@@ -616,7 +634,7 @@ public class User : TestFlashAPI
 
     /// Flash API
     public override string openChannel (in Hash gen_hash,
-        in Hash utxo, in Hash temp_chan_id, in Point funder_pk,
+        in Hash funding_spend_utxo, in Hash temp_chan_id, in Point funder_pk,
         in Amount funding_amount, in uint settle_time)
     {
         // todo: this should only be done once, but we can't call it
@@ -649,10 +667,10 @@ public class User : TestFlashAPI
         /* todo: verify proof that funder owns `funder_update_pk` */
         const pair_pk = this.kp.V + funder_pk;
         const num_peers = NumPeers(2);  // hardcoded for now
-        const update_pair_pk = getUpdatePk(pair_pk, utxo, num_peers);
+        const update_pair_pk = getUpdatePk(pair_pk, funding_spend_utxo, num_peers);
 
         auto channel = Channel(gen_hash, temp_chan_id, funder_pk, this.kp.V,
-            pair_pk, update_pair_pk, utxo, funding_amount, settle_time);
+            pair_pk, update_pair_pk, funding_spend_utxo, funding_amount, settle_time);
 
         this.pending_channels[temp_chan_id] = channel;
 
@@ -751,10 +769,10 @@ public class User : TestFlashAPI
         const challenge_settle = getSequenceChallenge(settle_tx, seq_id,
             input_idx);
 
-        const our_settle_scalar = getSettleScalar(this.kp.v, channel.utxo,
+        const our_settle_scalar = getSettleScalar(this.kp.v, channel.funding_spend_utxo,
             seq_id);
         const num_peers = NumPeers(2);  // hardcoded for now
-        const settle_pair_pk = getSettlePk(channel.pair_pk, channel.utxo,
+        const settle_pair_pk = getSettlePk(channel.pair_pk, channel.funding_spend_utxo,
             seq_id, num_peers);
         const nonce_pair_pk = our_settle_nonce_kp.V + peer_nonce_pk;
 
@@ -811,10 +829,10 @@ public class User : TestFlashAPI
         Pair our_settle_origin_kp;
         Point their_settle_origin_pk;
 
-        const our_settle_scalar = getSettleScalar(this.kp.v, channel.utxo,
+        const our_settle_scalar = getSettleScalar(this.kp.v, channel.funding_spend_utxo,
             seq_id);
         const num_peers = NumPeers(2);  // hardcoded for now
-        const settle_pair_pk = getSettlePk(channel.pair_pk, channel.utxo,
+        const settle_pair_pk = getSettlePk(channel.pair_pk, channel.funding_spend_utxo,
             seq_id, num_peers);
         const nonce_pair_pk = settle.our_settle_nonce_kp.V
             + settle.their_settle_nonce_pk;
@@ -1085,9 +1103,9 @@ public class User : TestFlashAPI
 
         auto peer = this.getFlashClient(channel.funder_pk);
 
-        const our_update_scalar = getUpdateScalar(this.kp.v, channel.utxo);
+        const our_update_scalar = getUpdateScalar(this.kp.v, channel.funding_spend_utxo);
         const num_peers = NumPeers(2);  // hardcoded for now
-        const update_pair_pk = getUpdatePk(channel.pair_pk, channel.utxo,
+        const update_pair_pk = getUpdatePk(channel.pair_pk, channel.funding_spend_utxo,
             num_peers);
 
         const nonce_pair_pk = our_update_nonce_kp.V + peer_nonce_pk;
@@ -1135,7 +1153,7 @@ public class User : TestFlashAPI
 
         auto peer = this.getFlashClient(channel.peer_pk);
 
-        const our_update_scalar = getUpdateScalar(this.kp.v, channel.utxo);
+        const our_update_scalar = getUpdateScalar(this.kp.v, channel.funding_spend_utxo);
         const nonce_pair_pk = update.our_update_nonce_kp.V + peer_nonce_pk;
 
         const our_sig = sign(our_update_scalar, channel.update_pair_pk,
@@ -1205,7 +1223,7 @@ public class User : TestFlashAPI
     {
         Transaction funding_tx = {
             type: TxType.Payment,
-            inputs: [Input(channel.utxo)],
+            inputs: [Input(channel.funding_spend_utxo)],
             outputs: [
                 Output(channel.funding_amount,
                     Lock(LockType.Key, channel.pair_pk[].dup))]
@@ -1220,7 +1238,7 @@ public class User : TestFlashAPI
     {
         const num_peers = NumPeers(2);  // hardcoded for now
         const Lock = createLockEltoo(channel.settle_time,
-            channel.utxo, channel.pair_pk, next_seq_id, num_peers);
+            channel.funding_spend_utxo, channel.pair_pk, next_seq_id, num_peers);
 
         Transaction update_tx = {
             type: TxType.Payment,
