@@ -107,8 +107,9 @@ private struct Channel
     Amount funding_amount;
     uint settle_time;
 
-    Transaction funding_tx;  // initially stored by funder
-    Hash funding_tx_hash;    // stored by both (shared by funder)
+    Transaction funding_tx;  // stored by both parties, except the peer
+                             // does not have the signature
+    Hash funding_tx_hash;    // stored by both
 
     // need it in order to publish to begin closing the channel
     //Transaction trigger_tx;
@@ -302,6 +303,9 @@ public interface FlashAPI
                 by the funder node through the call to `openChannel()`
             peer_nonce_pk = the nonce the calling peer is using for its
                 own signature
+            funding_tx = the non-signed funding transaction whose hash
+                the peer will listen for in the blockchain to determine
+                when the channel has opened
 
         Returns:
             null, or an error string if the peer could not sign the trigger
@@ -310,7 +314,8 @@ public interface FlashAPI
     ***************************************************************************/
 
     public string requestTriggerSig (in Hash temp_chan_id,
-        in Point peer_nonce_pk, Transaction trigger_tx);
+        in Point peer_nonce_pk, Transaction trigger_tx,
+        Transaction funding_tx);
 
     /***************************************************************************
 
@@ -398,28 +403,6 @@ public interface FlashAPI
 
     public string receiveUpdateSig (in Hash chan_id, in uint seq_id,
         in Point peer_nonce_pk, in Signature peer_sig);
-
-    /***************************************************************************
-
-        Send the funding transaction hash to the counter-party.
-
-        The hash must be sent before requesting signing of any trigger
-        transactions, and additionally this allows the peer to listen
-        for this hash to become externalized, as it signals that
-        the channel has been opened.
-
-        Params:
-            temp_chan_id = A previously seen pending channel ID provided
-                by the funder node through the call to `openChannel()`
-            funding_tx_hash = the hash of the funding transaction
-
-        Returns:
-            null, or an error string if the peer could not accept this signature
-
-    ***************************************************************************/
-
-    public string receiveFundingTxHash (in Hash temp_chan_id,
-        in Hash funding_tx_hash);
 }
 
 /// In addition to the Flash API, we provide controller methods to initiate
@@ -537,20 +520,16 @@ public class User : TestFlashAPI
                 continue;
             }
 
-            if (channel.funding_externalized)
-                continue;  // don't care anymore
-
+            if (!channel.funding_externalized)
             foreach (tx; last_block.txs)
             {
                 if (tx.hashFull() == channel.funding_tx_hash)
                 {
-                    // only the peer doesn't know the funding tx (preimage),
-                    // it only knew the hash
-                    if (channel.funding_tx == Transaction.init)
-                        channel.funding_tx = tx.serializeFull.deserializeFull!Transaction;
+                    channel.funding_tx  // not strictly necessary
+                        = tx.serializeFull.deserializeFull!Transaction;
 
                     channel.funding_externalized = true;
-                    writefln("%s: Fuding tx externalized(%s)",
+                    writefln("%s: Funding tx externalized(%s)",
                         this.kp.V.prettify, channel.funding_tx_hash.prettify);
                     break;
                 }
@@ -697,17 +676,9 @@ public class User : TestFlashAPI
 
         // create funding, we can sign it but we shouldn't share it yet
         auto funding_tx = this.createFundingTx(channel);
-        funding_tx.inputs[0].unlock = genKeyUnlock(sign(this.kp, funding_tx));
 
         channel.funding_tx = funding_tx;
         channel.funding_tx_hash = hashFull(funding_tx);
-        if (auto error = peer.receiveFundingTxHash(channel.temp_chan_id,
-            channel.funding_tx_hash))
-        {
-            // todo: retry?
-            writefln("Receiving funding tx hash rejected: %s", error);
-            //channel.pending_settlement.remove(channel.temp_chan_id);
-        }
 
         // create trigger, don't sign yet but do share it
         const next_seq_id = 0;
@@ -742,21 +713,6 @@ public class User : TestFlashAPI
         });
 
         // share trigger with counter-party and wait for their signature
-    }
-
-    public string receiveFundingTxHash (in Hash temp_chan_id,
-        in Hash funding_tx_hash)
-    {
-        auto channel = temp_chan_id in this.pending_channels;
-        if (channel is null)
-            return "Channel channel ID not found";
-
-        if (channel.funder_pk == this.kp.V)
-            return "We're the funder of the channel, we should not " ~
-                "receive a funding tx hash from other parties";
-
-        channel.funding_tx_hash = funding_tx_hash;
-        return null;
     }
 
     /// Flash API
@@ -865,8 +821,6 @@ public class User : TestFlashAPI
         writefln("%s: receiveSettlementSig(%s) VALIDATED for seq id %s",
             this.kp.V.prettify, temp_chan_id.prettify, seq_id);
 
-        channel.last_settlement = *settle;
-
         // unlock script set
         const Unlock settle_unlock = createUnlockSettle(settle_sig_pair, seq_id);
         settle_tx.inputs[0].unlock = settle_unlock;
@@ -884,22 +838,36 @@ public class User : TestFlashAPI
             assert(0, error);
         }
 
+        channel.last_settlement = *settle;
+
         // todo: protect against replay attacks. we do not want an infinite
         // loop scenario
         if (channel.funder_pk == this.kp.V)
         {
             if (seq_id == 0)
             {
-                // prev tx is the trigger
-                // todo: add assertion here that prev_tx is indeed a trigger tx
-                // with seq ID 1
-                this.signTriggerTx(*channel, settle.prev_tx);
+                auto trigger_tx = settle.prev_tx;
+                const our_trigger_nonce_kp = Pair.random();
+                auto peer = this.getFlashClient(channel.peer_pk);
+
+                channel.pending_trigger = Trigger(
+                    channel.temp_chan_id,
+                    our_trigger_nonce_kp,
+                    Point.init,  // set later when we receive it from counter-party
+                    trigger_tx);
+
+                this.taskman.schedule({
+                    if (auto error = peer.requestTriggerSig(channel.temp_chan_id,
+                        our_trigger_nonce_kp.V, trigger_tx, channel.funding_tx))
+                    {
+                        writefln("Error calling requestTriggerSig(): %s", error);
+                    }
+                });
             }
             else
             {
                 // prev tx is a specific update tx because settlements always attach
                 // to specific txs based on their derived signature keypairs
-
                 assert(0);
             }
         }
@@ -907,31 +875,10 @@ public class User : TestFlashAPI
         return null;
     }
 
-    // we sign the trigger tx with the update key-pair,
-    // we share the signature and our nonce, and we expect
-    // to get back the peer's signature and nonce.
-    private void signTriggerTx (ref Channel channel, Transaction trigger_tx)
-    {
-        const our_trigger_nonce_kp = Pair.random();
-        auto peer = this.getFlashClient(channel.peer_pk);
-
-        channel.pending_trigger = Trigger(
-            channel.temp_chan_id,
-            our_trigger_nonce_kp,
-            Point.init,  // set later when we receive it from counter-party
-            trigger_tx);
-
-        this.taskman.schedule({
-            if (auto error = peer.requestTriggerSig(channel.temp_chan_id,
-                our_trigger_nonce_kp.V, trigger_tx))
-            {
-                writefln("Error calling requestTriggerSig(): %s", error);
-            }
-        });
-    }
 
     public override string requestTriggerSig (in Hash temp_chan_id,
-        in Point peer_nonce_pk, Transaction trigger_tx)
+        in Point peer_nonce_pk, Transaction trigger_tx,
+        Transaction funding_tx)  // not signed yet
     {
         writefln("%s: requestTriggerSig(%s)", this.kp.V.prettify,
             temp_chan_id.prettify);
@@ -954,9 +901,12 @@ public class User : TestFlashAPI
         if (*settle == Settlement.init)
             return "Pending settlement with this channel ID not found";
 
-        if (channel.funding_tx_hash == Hash.init)
-            return "Funder has not sent us the funding transaction hash. "
-                ~ "Refusing to sign trigger transaction";
+        if (channel.funding_tx != Transaction.init &&
+            channel.funding_tx != funding_tx)
+            return "Cannot request trigger for multiple funding txs";
+
+        channel.funding_tx = funding_tx;
+        channel.funding_tx_hash = funding_tx.hashFull();
 
         // todo: the semantics of the trigger tx need to be validated properly
         if (trigger_tx.inputs.length == 0)
@@ -1023,6 +973,9 @@ public class User : TestFlashAPI
         const Unlock trigger_unlock = genKeyUnlock(trigger_multi_sig);
         trigger.trigger_tx.inputs[0].unlock = trigger_unlock;
 
+        // when receiving the trigger transaction only the funder knows
+        // the full funding transaction definition. Therefore the funder
+        // should send us a non-signed funding tx here.
         const TestStackMaxTotalSize = 16_384;
         const TestStackMaxItemSize = 512;
         scope engine = new Engine(TestStackMaxTotalSize, TestStackMaxItemSize);
@@ -1032,6 +985,8 @@ public class User : TestFlashAPI
         {
             assert(0, error);
         }
+
+        channel.trigger = *trigger;
 
         writefln("%s: receiveTriggerSig(%s) VALIDATED", this.kp.V.prettify,
             temp_chan_id.prettify);
@@ -1060,8 +1015,11 @@ public class User : TestFlashAPI
                 }
             });
 
+            // now ok to sign and publish funding tx
             writefln("%s: Sending funding tx(%s): %s", this.kp.V.prettify,
                 temp_chan_id.prettify, hashFull(channel.funding_tx).prettify);
+            channel.funding_tx.inputs[0].unlock
+                = genKeyUnlock(sign(this.kp, channel.funding_tx));
             this.agora_node.putTransaction(channel.funding_tx);
             this.ready_to_externalize = true;
 
@@ -1249,7 +1207,7 @@ public class User : TestFlashAPI
 
     /// Also used for the first trigger tx (using next_seq_id of 0)
     private Transaction createUpdateTx (in Channel channel,
-        in Transaction funding_tx, in uint next_seq_id)
+        Transaction funding_tx, in uint next_seq_id)
     {
         const num_peers = NumPeers(2);  // hardcoded for now
         const Lock = createLockEltoo(channel.settle_time,
@@ -1558,6 +1516,7 @@ unittest
         Thread.sleep(100.msecs);
     }
 
+    writefln("Sending flash..");
     alice.sendFlash(Amount(10_000));
 
     Thread.sleep(1.seconds);
