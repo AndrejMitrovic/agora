@@ -121,16 +121,14 @@ private struct Channel
 
     Point funder_pk;
     Point peer_pk;
+    Point pair_pk;  // sum of the above
 
-    Hash utxo;
+    Point update_pair_pk;  // the update pair for this channel
+
+    Hash utxo;  // note: may be multiple UTXOs for funding,
+                // but we use a single one for simplicity now
     Amount funding_amount;
     uint settle_time;
-
-    Pair our_update_kp;
-    Point their_update_pk;
-
-    Pair our_settle_origin_kp;
-    Point their_settle_origin_pk;
 
     Transaction funding_tx;  // initially stored by funder
     Hash funding_tx_hash;    // stored by both (shared by funder)
@@ -166,6 +164,16 @@ private struct PendingUpdate
     Pair our_update_nonce_kp;
     Point their_update_nonce_pk;
     Transaction update_tx;  // may be trigger too
+}
+
+// type-safe number of channel owners
+public struct NumPeers
+{
+    ///
+    public ulong value;
+
+    ///
+    public alias value this;
 }
 
 /// This is the API that each flash-aware node must implement.
@@ -204,9 +212,9 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public string openChannel (in Hash gen_hash, in Hash temp_chan_id,
-        in Point funder_pk, in Amount funding_amount, in uint settle_time,
-        in Point funder_update_pk, in Point funder_settle_origin_pk);
+    public string openChannel (in Hash gen_hash, in Hash utxo,
+        in Hash temp_chan_id, in Point funder_pk, in Amount funding_amount,
+        in uint settle_time);
 
     /***************************************************************************
 
@@ -219,18 +227,13 @@ public interface FlashAPI
         Params:
             temp_chan_id = A previously seen pending channel ID provided
                 by the funder node through the call to `openChannel()`
-            accepter_update_pk = the update public key of the accepter of the
-                initial receiving end of the channel
-            accepter_settle_origin_pk = the settlement origin public key of the
-                accepter of the initial receiving end of the channel
 
         Returns:
             null, or an error string if the channel could not be created
 
     ***************************************************************************/
 
-    public string acceptChannel (in Hash temp_chan_id,
-        in Point accepter_update_pk, in Point accepter_settle_origin_pk);
+    public string acceptChannel (in Hash temp_chan_id);
 
     /***************************************************************************
 
@@ -532,24 +535,22 @@ public class User : TestFlashAPI
         const gen_hash = hashFull(GenesisBlock);
         const Hash temp_chan_id = randomHash();
 
-        Pair our_update_kp = Pair.random();
-        Pair our_settle_origin_kp = Pair.random();
+        const pair_pk = this.kp.V + peer_pk;
+        const num_peers = NumPeers(2);  // hardcoded for now
+        const update_pair_pk = getUpdatePk(pair_pk, utxo, num_peers);
 
-        auto pending = Channel(gen_hash, temp_chan_id, this.kp.V,
-            peer_pk, utxo, funding_amount, settle_time, our_update_kp,
-            Point.init,  // set later when we receive it from counter-party
-            our_settle_origin_kp,
-            Point.init); // ditto
+        auto channel = Channel(gen_hash, temp_chan_id, this.kp.V, peer_pk,
+            pair_pk, update_pair_pk, utxo, funding_amount, settle_time);
 
         // add it to the pending before the openChannel() request is even
         // issued to avoid data races
-        this.pending_channels[temp_chan_id] = pending;
+        this.pending_channels[temp_chan_id] = channel;
 
         this.taskman.schedule({
             // check if the node is willing to open a channel with us
             if (auto error = peer.openChannel(
-                gen_hash, temp_chan_id, this.kp.V, funding_amount, settle_time,
-                our_update_kp.V, our_settle_origin_kp.V))
+                gen_hash, utxo, temp_chan_id, this.kp.V, funding_amount,
+                settle_time))
             {
                 this.pending_channels.remove(temp_chan_id);
             }
@@ -564,8 +565,8 @@ public class User : TestFlashAPI
     {
         writefln("%s: sendFlash()", this.kp.V.prettify);
 
-        //const Point update_pair_pk = pending.our_update_kp.V
-        //    + pending.their_update_pk;
+        //const Point update_pair_pk = channel.our_update_kp.V
+        //    + channel.their_update_pk;
 
         //// todo: use actual channel IDs, or perhaps an invoice API
         //auto channel = this.open_channels[this.open_channels.byKey.front];
@@ -578,9 +579,8 @@ public class User : TestFlashAPI
 
     /// Flash API
     public override string openChannel (in Hash gen_hash,
-        in Hash temp_chan_id, in Point funder_pk, in Amount funding_amount,
-        in uint settle_time, in Point funder_update_pk,
-        in Point funder_settle_origin_pk)
+        in Hash utxo, in Hash temp_chan_id, in Point funder_pk,
+        in Amount funding_amount, in uint settle_time)
     {
         // todo: this should only be done once, but we can't call it
         // from the ctor because in LocalRest the ctor blabla etc etc
@@ -610,21 +610,17 @@ public class User : TestFlashAPI
             return "Settle time is not within acceptable limits";
 
         /* todo: verify proof that funder owns `funder_update_pk` */
+        const pair_pk = this.kp.V + funder_pk;
+        const num_peers = NumPeers(2);  // hardcoded for now
+        const update_pair_pk = getUpdatePk(pair_pk, utxo, num_peers);
 
-        // todo: find an appropriate UTXO to fund the channel with
-        Hash utxo;
+        auto channel = Channel(gen_hash, temp_chan_id, funder_pk, this.kp.V,
+            pair_pk, update_pair_pk, utxo, funding_amount, settle_time);
 
-        Pair our_update_kp = Pair.random();
-        Pair our_settle_origin_kp = Pair.random();
-        auto pending = Channel(gen_hash, temp_chan_id, funder_pk,
-            this.kp.V, utxo, funding_amount, settle_time, our_update_kp,
-            funder_update_pk, our_settle_origin_kp, funder_settle_origin_pk);
-
-        this.pending_channels[temp_chan_id] = pending;
+        this.pending_channels[temp_chan_id] = channel;
 
         this.taskman.schedule({
-            if (auto error = peer.acceptChannel(temp_chan_id, our_update_kp.V,
-                our_settle_origin_kp.V))
+            if (auto error = peer.acceptChannel(temp_chan_id))
             {
                 // todo: handle this
                 writefln("Error after acceptChannel() call: %s", error);
@@ -635,66 +631,52 @@ public class User : TestFlashAPI
     }
 
     /// Flash API
-    public override string acceptChannel (in Hash temp_chan_id,
-        in Point their_update_pk, in Point their_settle_origin_pk)
+    public override string acceptChannel (in Hash temp_chan_id)
     {
         writefln("%s: acceptChannel(%s)", this.kp.V.prettify,
             temp_chan_id.prettify);
 
-        auto pending = temp_chan_id in this.pending_channels;
-        if (pending is null)
+        auto channel = temp_chan_id in this.pending_channels;
+        if (channel is null)
             return "Channel channel ID not found";
 
-        /* todo: verify proof that other party owns `their_update_pk` */
-        /* todo: verify `their_update_pk` is not ours (edge-case) */
-
-        pending.their_update_pk = their_update_pk;
-        pending.their_settle_origin_pk = their_settle_origin_pk;
-        this.prepareChannel(*pending);
+        this.prepareChannel(*channel);
         return null;
     }
 
     /// prepare everything for this channel
-    private void prepareChannel (ref Channel pending)
+    private void prepareChannel (ref Channel channel)
     {
-        auto peer = this.getFlashClient(pending.peer_pk);
-
-        const Point update_pair_pk = pending.our_update_kp.V
-            + pending.their_update_pk;
+        auto peer = this.getFlashClient(channel.peer_pk);
 
         // create funding, we can sign it but we shouldn't share it yet
-        auto funding_tx = this.createFundingTx(update_pair_pk, pending.utxo,
-            pending.funding_amount);
+        auto funding_tx = this.createFundingTx(channel);
         funding_tx.inputs[0].unlock = genKeyUnlock(sign(this.kp, funding_tx));
 
-        pending.funding_tx = funding_tx;
-        pending.funding_tx_hash = hashFull(funding_tx);
-        if (auto error = peer.receiveFundingTxHash(pending.temp_chan_id,
-            pending.funding_tx_hash))
+        channel.funding_tx = funding_tx;
+        channel.funding_tx_hash = hashFull(funding_tx);
+        if (auto error = peer.receiveFundingTxHash(channel.temp_chan_id,
+            channel.funding_tx_hash))
         {
             // todo: retry?
             writefln("Receiving funding tx hash rejected: %s", error);
-            //this.pending_settlements.remove(pending.temp_chan_id);
+            //this.pending_settlements.remove(channel.temp_chan_id);
         }
 
-        const Point settle_origin_pair_pk = pending.our_settle_origin_kp.V
-            + pending.their_settle_origin_pk;
-
         // create trigger, don't sign yet but do share it
-        auto trigger_tx = this.createTriggerTx(update_pair_pk, funding_tx,
-            pending.funding_amount, pending.settle_time, settle_origin_pair_pk);
+        auto trigger_tx = this.createTriggerTx(channel, funding_tx);
 
         // initial output allocates all the funds back to the channel creator
-        Output output = Output(pending.funding_amount,
-            PublicKey(pending.funder_pk[]));
+        Output output = Output(channel.funding_amount,
+            PublicKey(channel.funder_pk[]));
         Output[] initial_outputs = [output];
 
         // first nonce for the settlement
         const nonce_kp = Pair.random();
         const seq_id_1 = 1;
 
-        this.pending_settlements[pending.temp_chan_id] = PendingSettlement(
-            pending.temp_chan_id, seq_id_1, nonce_kp,
+        this.pending_settlements[channel.temp_chan_id] = PendingSettlement(
+            channel.temp_chan_id, seq_id_1, nonce_kp,
             Point.init, // set later when we receive it from counter-party
             trigger_tx,
             initial_outputs);
@@ -703,12 +685,12 @@ public class User : TestFlashAPI
         // from the trigger tx.
         this.taskman.schedule(
         {
-            if (auto error = peer.requestSettlementSig(pending.temp_chan_id,
+            if (auto error = peer.requestSettlementSig(channel.temp_chan_id,
                 trigger_tx, initial_outputs, seq_id_1, nonce_kp.V))
             {
                 // todo: retry?
                 writefln("Requested settlement rejected: %s", error);
-                //this.pending_settlements.remove(pending.temp_chan_id);
+                //this.pending_settlements.remove(channel.temp_chan_id);
             }
         });
 
@@ -718,15 +700,15 @@ public class User : TestFlashAPI
     public string receiveFundingTxHash (in Hash temp_chan_id,
         in Hash funding_tx_hash)
     {
-        auto pending = temp_chan_id in this.pending_channels;
-        if (pending is null)
+        auto channel = temp_chan_id in this.pending_channels;
+        if (channel is null)
             return "Channel channel ID not found";
 
-        if (pending.funder_pk == this.kp.V)
+        if (channel.funder_pk == this.kp.V)
             return "We're the funder of the channel, we should not " ~
                 "receive a funding tx hash from other parties";
 
-        pending.funding_tx_hash = funding_tx_hash;
+        channel.funding_tx_hash = funding_tx_hash;
         return null;
     }
 
@@ -739,8 +721,8 @@ public class User : TestFlashAPI
         writefln("%s: requestSettlementSig(%s)", this.kp.V.prettify,
             temp_chan_id.prettify);
 
-        auto pending = temp_chan_id in this.pending_channels;
-        if (pending is null)
+        auto channel = temp_chan_id in this.pending_channels;
+        if (channel is null)
             return "Channel channel ID not found";
 
         // todo: since the sequence ID is pushed on the stack, we can allow
@@ -753,27 +735,29 @@ public class User : TestFlashAPI
 
         const our_settle_nonce_kp = Pair.random();
 
-        const settle_tx = this.createSettleTx(prev_tx, pending.settle_time,
+        const settle_tx = this.createSettleTx(prev_tx, channel.settle_time,
             outputs);
         const uint input_idx = 0;
         const challenge_settle = getSequenceChallenge(settle_tx, seq_id,
             input_idx);
 
-        const settle_pair_pk = pending.our_settle_origin_kp.V
-            + pending.their_settle_origin_pk;
-
+        const our_settle_scalar = getSettleScalar(this.kp.v, channel.utxo,
+            seq_id);
+        const num_peers = NumPeers(2);  // hardcoded for now
+        const settle_pair_pk = getSettlePk(channel.pair_pk, channel.utxo,
+            seq_id, num_peers);
         const nonce_pair_pk = our_settle_nonce_kp.V + peer_nonce_pk;
 
-        const sig = sign(pending.our_settle_origin_kp.v,
-            settle_pair_pk, nonce_pair_pk, our_settle_nonce_kp.v, challenge_settle);
+        const sig = sign(our_settle_scalar, settle_pair_pk, nonce_pair_pk,
+            our_settle_nonce_kp.v, challenge_settle);
 
-        this.pending_settlements[pending.temp_chan_id] = PendingSettlement(
-            pending.temp_chan_id, seq_id, our_settle_nonce_kp,
+        this.pending_settlements[channel.temp_chan_id] = PendingSettlement(
+            channel.temp_chan_id, seq_id, our_settle_nonce_kp,
             peer_nonce_pk,
             Transaction.init,  // trigger tx is revealed later
             outputs);
 
-        auto peer = this.getFlashClient(pending.funder_pk);
+        auto peer = this.getFlashClient(channel.funder_pk);
 
         this.taskman.schedule(
         {
@@ -820,15 +804,16 @@ public class User : TestFlashAPI
         Pair our_settle_origin_kp;
         Point their_settle_origin_pk;
 
-        const settle_pair_pk = channel.our_settle_origin_kp.V
-            + channel.their_settle_origin_pk;
-
+        const our_settle_scalar = getSettleScalar(this.kp.v, channel.utxo,
+            seq_id);
+        const num_peers = NumPeers(2);  // hardcoded for now
+        const settle_pair_pk = getSettlePk(channel.pair_pk, channel.utxo,
+            seq_id, num_peers);
         const nonce_pair_pk = settle.our_settle_nonce_kp.V
             + settle.their_settle_nonce_pk;
 
-        const our_sig = sign(channel.our_settle_origin_kp.v,
-            settle_pair_pk, nonce_pair_pk, settle.our_settle_nonce_kp.v,
-            challenge_settle);
+        const our_sig = sign(our_settle_scalar, settle_pair_pk, nonce_pair_pk,
+            settle.our_settle_nonce_kp.v, challenge_settle);
         settle.our_sig = our_sig;
 
         const settle_sig_pair = Sig(nonce_pair_pk,
@@ -846,7 +831,7 @@ public class User : TestFlashAPI
         const Unlock settle_unlock = createUnlockSettle(settle_sig_pair, seq_id);
         settle_tx.inputs[0].unlock = settle_unlock;
 
-        // note: this step may not look necessary, but it can fail if there are
+        // note: this step may not look necessary but it can fail if there are
         // any incompatibilities with the script generators and the engine
         // (e.g. sequence ID being 4 bytes instead of 8)
         const TestStackMaxTotalSize = 16_384;
@@ -948,12 +933,14 @@ public class User : TestFlashAPI
 
         auto peer = this.getFlashClient(channel.funder_pk);
 
-        const update_pair_pk = channel.our_update_kp.V
-            + channel.their_update_pk;
+        const our_update_scalar = getUpdateScalar(this.kp.v, channel.utxo);
+        const num_peers = NumPeers(2);  // hardcoded for now
+        const update_pair_pk = getUpdatePk(channel.pair_pk, channel.utxo,
+            num_peers);
 
         const nonce_pair_pk = our_update_nonce_kp.V + peer_nonce_pk;
 
-        const our_sig = sign(channel.our_update_kp.v, update_pair_pk,
+        const our_sig = sign(our_update_scalar, update_pair_pk,
             nonce_pair_pk, our_update_nonce_kp.v, trigger_tx);
 
         const uint seq_id_1 = 1;  // implicit
@@ -999,12 +986,10 @@ public class User : TestFlashAPI
 
         auto peer = this.getFlashClient(channel.peer_pk);
 
-        const update_pair_pk = channel.our_update_kp.V
-            + channel.their_update_pk;
-
+        const our_update_scalar = getUpdateScalar(this.kp.v, channel.utxo);
         const nonce_pair_pk = trigger.our_update_nonce_kp.V + peer_nonce_pk;
 
-        const our_sig = sign(channel.our_update_kp.v, update_pair_pk,
+        const our_sig = sign(our_update_scalar, channel.update_pair_pk,
             nonce_pair_pk, trigger.our_update_nonce_kp.v, trigger.update_tx);
 
         // verify signature first
@@ -1013,7 +998,7 @@ public class User : TestFlashAPI
               Sig.fromBlob(our_sig).s
             + Sig.fromBlob(peer_sig).s).toBlob();
 
-        if (!verify(update_pair_pk, trigger_multi_sig, trigger.update_tx))
+        if (!verify(channel.update_pair_pk, trigger_multi_sig, trigger.update_tx))
             return "Signature does not validate!";
 
         writefln("%s: receiveTriggerSig(%s) VALIDATED", this.kp.V.prettify,
@@ -1046,9 +1031,8 @@ public class User : TestFlashAPI
                 }
             });
 
-            writefln("%s: Sending funding tx(%s): %s %s", this.kp.V.prettify,
-                temp_chan_id.prettify, hashFull(channel.funding_tx),
-                channel.funding_tx);
+            writefln("%s: Sending funding tx(%s): %s", this.kp.V.prettify,
+                temp_chan_id.prettify, hashFull(channel.funding_tx).prettify);
             this.agora_node.putTransaction(channel.funding_tx);
             this.ready_to_externalize = true;
 
@@ -1077,58 +1061,57 @@ public class User : TestFlashAPI
     }
 
     ///
-    private Transaction createFundingTx (in Point update_pair_pk, in Hash utxo,
-        in Amount funding_amount)
+    private Transaction createFundingTx (in Channel channel)
     {
         Transaction funding_tx = {
             type: TxType.Payment,
-            inputs: [Input(utxo)],
+            inputs: [Input(channel.utxo)],
             outputs: [
-                Output(funding_amount,
-                    Lock(LockType.Key, update_pair_pk[].dup))]
+                Output(channel.funding_amount,
+                    Lock(LockType.Key, channel.update_pair_pk[].dup))]
         };
 
         return funding_tx;
     }
 
     // todo: fix this
-    private Transaction createUpdateTx (in Point update_pair_pk,
-        in Transaction trigger_tx, in Amount funding_amount,
-        in uint settle_time, in Point settle_origin_pair_pk,
-        in uint seq_id)
-    {
-        assert(seq_id >= 2);  // todo: can be 1 if we allow seq 0 later
+    //private Transaction createUpdateTx (in Point update_pair_pk,
+    //    in Transaction trigger_tx, in Amount funding_amount,
+    //    in uint settle_time, in Point settle_origin_pair_pk,
+    //    in uint seq_id)
+    //{
+    //    assert(seq_id >= 2);  // todo: can be 1 if we allow seq 0 later
 
-        const Point settle_seq_pk = getDerivedPoint(
-            settle_origin_pair_pk, seq_id);
+    //    const Point settle_seq_pk = getSettlePk(
+    //        settle_origin_pair_pk, seq_id);
 
-        const FundingLock = createLockEltoo(settle_time,
-            settle_seq_pk, update_pair_pk, seq_id);
+    //    const FundingLock = createLockEltoo(settle_time,
+    //        settle_seq_pk, update_pair_pk, seq_id);
 
-        Transaction update_tx = {
-            type: TxType.Payment,
-            inputs: [Input(trigger_tx, 0 /* index */, 0 /* unlock age */)],
-            outputs: [
-                Output(funding_amount, FundingLock)]
-        };
+    //    Transaction update_tx = {
+    //        type: TxType.Payment,
+    //        inputs: [Input(trigger_tx, 0 /* index */, 0 /* unlock age */)],
+    //        outputs: [
+    //            Output(funding_amount, FundingLock)]
+    //    };
 
-        return update_tx;
-    }
+    //    return update_tx;
+    //}
 
     ///
-    private Transaction createTriggerTx (in Point update_pair_pk,
-        in Transaction funding_tx, in Amount funding_amount,
-        in uint settle_time, in Point settle_origin_pair_pk)
+    private Transaction createTriggerTx (in Channel channel,
+        in Transaction funding_tx)
     {
         const seq_id_1 = uint(1);
-        const FundingLockSeq_1 = createLockEltoo(settle_time,
-            settle_origin_pair_pk, update_pair_pk, seq_id_1);
+        const num_peers = NumPeers(2);  // hardcoded for now
+        const FundingLockSeq_1 = createLockEltoo(channel.settle_time,
+            channel.utxo, channel.pair_pk, seq_id_1, num_peers);
 
         Transaction trigger_tx = {
             type: TxType.Payment,
             inputs: [Input(funding_tx, 0 /* index */, 0 /* unlock age */)],
             outputs: [
-                Output(funding_amount,
+                Output(channel.funding_amount,
                     FundingLockSeq_1)]  // bind to next sequence (seq 1)
         };
 
@@ -1196,17 +1179,18 @@ private string prettify (T)(T input)
     return input.to!string[0 .. 6];
 }
 
-
 /*******************************************************************************
 
     Create an Eltoo lock script based on Figure 4 from the whitepaper.
 
     Params:
         age = the age constraint for using the settlement keypair
-        settle_X = the Schnorr sum of the multi-party public keys for the
-                   age-constrained settlement branch
-        update_X = the Schnorr sum of the multi-party public keys for the
-                   sequence-constrained update branch
+        first_utxo = the first input's UTXO of the funding transaction.
+                     used to be able to derive unique update & settlement
+                     keypairs by using the UTXO as an offset.
+        pair_pk = the Schnorr sum of the multi-party public keys.
+                  The update an settlement keys will be derived from this
+                  origin.
         next_seq_id = the sequence ID to lock to for the update spend branch
 
     Returns:
@@ -1216,8 +1200,9 @@ private string prettify (T)(T input)
 
 *******************************************************************************/
 
-public Lock createLockEltoo (uint age, Point settle_X, Point update_X,
-    ulong next_seq_id) pure nothrow @safe
+public Lock createLockEltoo (uint age, Hash first_utxo, Point pair_pk,
+    ulong next_seq_id, NumPeers count)
+    //pure nothrow @safe
 {
     /*
         Eltoo whitepaper Figure 4:
@@ -1254,16 +1239,20 @@ public Lock createLockEltoo (uint age, Point settle_X, Point update_X,
             [sig] [new_seq] <seq + 1> <update_pub_multi> OP.VERIFY_SEQ_SIG OP.TRUE
         OP_ENDIF
     */
+
+    const update_pair_pk = getUpdatePk(pair_pk, first_utxo, count);
+    const next_settle_pair_pk = getSettlePk(pair_pk, first_utxo,
+        next_seq_id, count);
     const age_bytes = nativeToLittleEndian(age);
     const ubyte[8] seq_id_bytes = nativeToLittleEndian(next_seq_id);
 
     return Lock(LockType.Script,
         [ubyte(OP.IF)]
             ~ toPushOpcode(age_bytes) ~ [ubyte(OP.VERIFY_UNLOCK_AGE)]
-            ~ [ubyte(32)] ~ settle_X[] ~ toPushOpcode(seq_id_bytes)
+            ~ [ubyte(32)] ~ next_settle_pair_pk[] ~ toPushOpcode(seq_id_bytes)
                 ~ [ubyte(OP.VERIFY_SEQ_SIG), ubyte(OP.TRUE),
          ubyte(OP.ELSE)]
-            ~ [ubyte(32)] ~ update_X[] ~ toPushOpcode(seq_id_bytes)
+            ~ [ubyte(32)] ~ update_pair_pk[] ~ toPushOpcode(seq_id_bytes)
                 ~ [ubyte(OP.VERIFY_SEQ_SIG), ubyte(OP.TRUE),
          ubyte(OP.END_IF)]);
 }
@@ -1310,22 +1299,53 @@ public Unlock createUnlockUpdate (Signature sig, in ulong sequence)
         ~ [ubyte(OP.FALSE)]);
 }
 
-// note: the implementation here is naive and is not secure,
-// it's simplified for tests but should not be used in production.
-private Pair getDerivedPair (in Pair origin, in ulong seq_id)
+//
+public Scalar getUpdateScalar (in Scalar origin, in Hash utxo)
 {
-    assert(seq_id > 0);
-    const seq_scalar = Scalar(hashFull(seq_id));
-    const derived = origin.v + seq_scalar;
-    return Pair(derived, derived.toPoint());
+    const update_offset = Scalar(hashFull("update"));
+    const seq_scalar = update_offset + Scalar(utxo);
+    const derived = origin + seq_scalar;
+    return derived;
 }
 
-// ditto
-public Point getDerivedPoint (in Point origin, in ulong seq_id)
+//
+public Point getUpdatePk (in Point origin, in Hash utxo, NumPeers count)
+{
+    const update_offset = Scalar(hashFull("update"));
+    const seq_scalar = update_offset + Scalar(utxo);
+
+    import std.stdio;
+    Scalar sum_scalar = seq_scalar;
+    while (--count.value)  // add N-1 additional times
+        sum_scalar = sum_scalar + seq_scalar;
+
+    const derived = origin + sum_scalar.toPoint();
+    return derived;
+}
+
+//
+public Scalar getSettleScalar (in Scalar origin, in Hash utxo, in ulong seq_id)
 {
     assert(seq_id > 0);
-    const seq_scalar = Scalar(hashFull(seq_id));
-    const derived = origin + seq_scalar.toPoint();
+    const settle_offset = Scalar(hashFull("settle"));
+    const seq_scalar = Scalar(hashFull(seq_id)) + Scalar(utxo) + settle_offset;
+    const derived = origin + seq_scalar;
+    return derived;
+}
+
+//
+public Point getSettlePk (in Point origin, in Hash utxo, in ulong seq_id,
+    NumPeers count)
+{
+    assert(seq_id > 0);
+    const settle_offset = Scalar(hashFull("settle"));
+    const seq_scalar = Scalar(hashFull(seq_id)) + Scalar(utxo) + settle_offset;
+
+    Scalar sum_scalar = seq_scalar;
+    while (--count.value)  // add N-1 additional times
+        sum_scalar = sum_scalar + seq_scalar;
+
+    const derived = origin + sum_scalar.toPoint();
     return derived;
 }
 
