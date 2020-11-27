@@ -90,29 +90,6 @@ alias LockType = agora.script.Lock.LockType;
 // - we have a valid settlement tx
 // - the funding utxo was published to the blockchain
 
-// todo: we can use the funding's UTXO as an offset for the key derivation.
-// that way, we don't have to generate unique update/settle key pairs,
-// we can just use key derivation for it.
-/*
-This would change:
-
-OP.IF
-    <age> OP.VERIFY_UNLOCK_AGE
-    [sig] [new_seq] <seq + 1> <settle_pub_multi[new_seq]> OP.VERIFY_SEQ_SIG OP.TRUE
-OP_ELSE
-    [sig] [new_seq] <seq + 1> <update_pub_multi> OP.VERIFY_SEQ_SIG OP.TRUE
-OP_ENDIF
-
-Into:
-
-OP.IF
-    <age> OP.VERIFY_UNLOCK_AGE
-    [sig] [new_seq] <seq + 1> <key-pair + fund_utxo + new_seq> OP.VERIFY_SEQ_SIG OP.TRUE
-OP_ELSE
-    [sig] [new_seq] <seq + 1> <key-pair + hash("update") + fund_utxo> OP.VERIFY_SEQ_SIG OP.TRUE
-OP_ENDIF
-*/
-
 ///
 private struct Channel
 {
