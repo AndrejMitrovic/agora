@@ -367,7 +367,7 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public string requestUpdateSig (in Hash chan_id,
+    public string requestUpdateSig (in Hash chan_id, in uint seq_id,
         in Point peer_nonce_pk, Transaction trigger_tx);
 
     /***************************************************************************
@@ -396,7 +396,7 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public string receiveUpdateSig (in Hash chan_id,
+    public string receiveUpdateSig (in Hash chan_id, in uint seq_id,
         in Point peer_nonce_pk, in Signature peer_sig);
 
     /***************************************************************************
@@ -720,10 +720,10 @@ public class User : TestFlashAPI
 
         // first nonce for the settlement
         const nonce_kp = Pair.random();
-        const seq_id_1 = 1;
+        const seq_id_0 = 0;
 
         channel.pending_settlement = Settlement(
-            channel.temp_chan_id, seq_id_1, nonce_kp,
+            channel.temp_chan_id, seq_id_0, nonce_kp,
             Point.init, // set later when we receive it from counter-party
             trigger_tx,
             initial_outputs);
@@ -733,7 +733,7 @@ public class User : TestFlashAPI
         this.taskman.schedule(
         {
             if (auto error = peer.requestSettlementSig(channel.temp_chan_id,
-                trigger_tx, initial_outputs, seq_id_1, nonce_kp.V))
+                trigger_tx, initial_outputs, seq_id_0, nonce_kp.V))
             {
                 // todo: retry?
                 writefln("Requested settlement rejected: %s", error);
@@ -771,11 +771,6 @@ public class User : TestFlashAPI
         auto channel = temp_chan_id in this.pending_channels;
         if (channel is null)
             return "Channel channel ID not found";
-
-        // todo: since the sequence ID is pushed on the stack, we can allow
-        // making it have sequence ID zero! fix the code in OffChainEltoo.d
-        if (seq_id == 0)
-            return "Settlement sequence ID cannot be 0";
 
         /* todo: verify sequence ID is not an older sequence ID */
         /* todo: verify prev_tx is not one of our own transactions */
@@ -867,8 +862,8 @@ public class User : TestFlashAPI
         if (!verify(settle_pair_pk, settle_sig_pair, challenge_settle))
             return "Settlement signature is invalid";
 
-        writefln("%s: receiveSettlementSig(%s) VALIDATED",
-            this.kp.V.prettify, temp_chan_id.prettify);
+        writefln("%s: receiveSettlementSig(%s) VALIDATED for seq id %s",
+            this.kp.V.prettify, temp_chan_id.prettify, seq_id);
 
         channel.last_settlement = *settle;
 
@@ -893,7 +888,7 @@ public class User : TestFlashAPI
         // loop scenario
         if (channel.funder_pk == this.kp.V)
         {
-            if (seq_id == 1)  // todo: use seq ID 0 instead
+            if (seq_id == 0)
             {
                 // prev tx is the trigger
                 // todo: add assertion here that prev_tx is indeed a trigger tx
@@ -985,7 +980,7 @@ public class User : TestFlashAPI
             channel.temp_chan_id,
             our_trigger_nonce_kp,
             peer_nonce_pk,
-            settle.prev_tx);
+            trigger_tx);
 
         this.taskman.schedule({
             peer.receiveTriggerSig(channel.temp_chan_id, our_trigger_nonce_kp.V,
@@ -1014,10 +1009,11 @@ public class User : TestFlashAPI
             return "Pending settlement with this channel ID not found";
 
         trigger.their_trigger_nonce_pk = peer_nonce_pk;
+        const nonce_pair_pk = trigger.our_trigger_nonce_kp.V + peer_nonce_pk;
 
         auto peer = this.getFlashClient(channel.peer_pk);
         const our_sig = sign(this.kp.v, channel.pair_pk,
-            nonce_pair_pk, our_trigger_nonce_kp.v, trigger.trigger_tx);
+            nonce_pair_pk, trigger.our_trigger_nonce_kp.v, trigger.trigger_tx);
 
         // verify signature first
         const trigger_multi_sig = Sig(nonce_pair_pk,
@@ -1025,24 +1021,20 @@ public class User : TestFlashAPI
             + Sig.fromBlob(peer_sig).s).toBlob();
 
         const Unlock trigger_unlock = genKeyUnlock(trigger_multi_sig);
-        settle.prev_tx.inputs[0].unlock = trigger_unlock;
+        trigger.trigger_tx.inputs[0].unlock = trigger_unlock;
 
         const TestStackMaxTotalSize = 16_384;
         const TestStackMaxItemSize = 512;
         scope engine = new Engine(TestStackMaxTotalSize, TestStackMaxItemSize);
         if (auto error = engine.execute(
             channel.funding_tx.outputs[0].lock, trigger_unlock,
-            settle.prev_tx, settle.prev_tx.inputs[0]))
+            trigger.trigger_tx, trigger.trigger_tx.inputs[0]))
         {
             assert(0, error);
         }
 
         writefln("%s: receiveTriggerSig(%s) VALIDATED", this.kp.V.prettify,
             temp_chan_id.prettify);
-
-        channel.last_update = *trigger;
-
-        //channel.trigger_tx = trigger.update_tx;
 
         // this prevents infinite loops, we may want to optimize this
         if (channel.funder_pk == this.kp.V)
@@ -1058,10 +1050,10 @@ public class User : TestFlashAPI
             });
 
             // also safe to finally send the settlement signature
-            const seq_id_1 = 1;
+            const seq_id_0 = 0;
             this.taskman.schedule({
                 if (auto error = peer.receiveSettlementSig(
-                    channel.temp_chan_id, seq_id_1,
+                    channel.temp_chan_id, seq_id_0,
                     settle.our_settle_nonce_kp.V, settle.our_sig))
                 {
                     writefln("Error sending settlement signature back: %s", error);
@@ -1085,7 +1077,7 @@ public class User : TestFlashAPI
     }
 
     public override string requestUpdateSig (in Hash temp_chan_id,
-        in Point peer_nonce_pk, Transaction update_tx)
+        in uint seq_id, in Point peer_nonce_pk, Transaction update_tx)
     {
         writefln("%s: requestUpdateSig(%s)", this.kp.V.prettify,
             temp_chan_id.prettify);
@@ -1138,20 +1130,21 @@ public class User : TestFlashAPI
 
         channel.pending_update = Update(
             channel.temp_chan_id,
+            seq_id,
             our_update_nonce_kp,
             peer_nonce_pk,
             settle.prev_tx);
 
         this.taskman.schedule({
-            peer.receiveUpdateSig(channel.temp_chan_id, our_update_nonce_kp.V,
-                our_sig);
+            peer.receiveUpdateSig(channel.temp_chan_id, seq_id,
+                our_update_nonce_kp.V, our_sig);
         });
 
         return null;
     }
 
     public override string receiveUpdateSig (in Hash temp_chan_id,
-        in Point peer_nonce_pk, in Signature peer_sig)
+        in uint seq_id, in Point peer_nonce_pk, in Signature peer_sig)
     {
         writefln("%s: receiveUpdateSig(%s)", this.kp.V.prettify,
             temp_chan_id.prettify);
@@ -1168,10 +1161,8 @@ public class User : TestFlashAPI
         if (*settle == Settlement.init)
             return "Pending settlement with this channel ID not found";
 
-        // todo: not sure about this yet, maybe we should move updates
-        // to a separate map.
-        if (update.seq_id != 1)
-            return "Update signature was already received";
+        if (update.seq_id != seq_id)
+            return "Wrong sequence ID";
 
         update.their_update_nonce_pk = peer_nonce_pk;
 
@@ -1218,7 +1209,7 @@ public class User : TestFlashAPI
             // send the update signature
             this.taskman.schedule({
                 if (auto error = peer.receiveUpdateSig(
-                    channel.temp_chan_id, update.our_update_nonce_kp.V,
+                    channel.temp_chan_id, seq_id, update.our_update_nonce_kp.V,
                     our_sig))
                 {
                     writefln("Error sending update signature back: %s", error);
@@ -1250,7 +1241,7 @@ public class User : TestFlashAPI
             inputs: [Input(channel.utxo)],
             outputs: [
                 Output(channel.funding_amount,
-                    Lock(LockType.Key, channel.update_pair_pk[].dup))]
+                    Lock(LockType.Key, channel.pair_pk[].dup))]
         };
 
         return funding_tx;
@@ -1482,7 +1473,6 @@ public Point getUpdatePk (in Point origin, in Hash utxo, NumPeers count)
 //
 public Scalar getSettleScalar (in Scalar origin, in Hash utxo, in ulong seq_id)
 {
-    assert(seq_id > 0);
     const settle_offset = Scalar(hashFull("settle"));
     const seq_scalar = Scalar(hashFull(seq_id)) + Scalar(utxo) + settle_offset;
     const derived = origin + seq_scalar;
@@ -1493,7 +1483,6 @@ public Scalar getSettleScalar (in Scalar origin, in Hash utxo, in ulong seq_id)
 public Point getSettlePk (in Point origin, in Hash utxo, in ulong seq_id,
     NumPeers count)
 {
-    assert(seq_id > 0);
     const settle_offset = Scalar(hashFull("settle"));
     const seq_scalar = Scalar(hashFull(seq_id)) + Scalar(utxo) + settle_offset;
 
