@@ -1018,6 +1018,9 @@ public class NetworkManager
 
     public void gossipTransaction (Transaction tx) @safe
     {
+        import agora.common.Hash;
+        log.info("About to gossip {} to {}", tx.hashFull(), this.peers[]);
+
         foreach (ref node; this.peers[])
         {
             if (this.banman.isBanned(node.address))

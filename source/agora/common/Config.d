@@ -431,7 +431,7 @@ unittest
     {
         immutable conf_example = `
 node:
-  address: 0.0.0.0
+  address: 127.0.0.1
   port: 2926
   data_dir: .cache
   quorum_shuffle_interval: 10

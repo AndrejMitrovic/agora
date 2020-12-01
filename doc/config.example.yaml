@@ -22,7 +22,7 @@ node:
   # Maximum number of non-validating nodes to connect to
   max_listeners: 10
   # Address to which we bind
-  address: 0.0.0.0 # Any node can bind - default value
+  address: 127.0.0.1 # Any node can bind - default value
   # Port on which we bind
   port:    2826    # 0xB0A, default value
   # Number of milliseconds to wait between retrying requests

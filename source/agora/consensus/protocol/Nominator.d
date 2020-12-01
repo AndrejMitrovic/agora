@@ -332,11 +332,17 @@ extern(D):
         const slot_idx = this.ledger.getBlockHeight() + 1;
         const nom_time = this.getExpectedBlockTime(Height(slot_idx));
         if (cur_time < nom_time)
+        {
+            log.info("Too early to nominate..");
             return;  // too early to nominate
+        }
 
         ConsensusData data;
         if (!this.prepareNominatingSet(data))
+        {
+            log.info("No txs to nominate..");
             return;
+        }
 
         log.info("Nomination started at {}", cur_time);
         this.is_nominating = true;
