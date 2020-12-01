@@ -567,6 +567,11 @@ public class NetworkManager
             offsets.sort!((a, b) => a.offset < b.offset);
             log.info("Net time offsets: {}", offsets);
             time_offset = offsets[$ / 2].offset;  // pick median
+
+            foreach (offset; offsets)
+                if (offset.offset < -100)
+                    assert(0);
+
             return true;
         }
 

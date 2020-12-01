@@ -157,6 +157,22 @@ public struct PublicKey
     public static PublicKey fromString (scope const(char)[] str) @trusted
     {
         const bin = Base32.decode(str);
+
+        if (bin.length != 1 + PublicKey.Width + 2)
+        {
+            try
+            {
+                throw new Exception("");
+            }
+            catch (Exception ex)
+            {
+                import std.stdio;
+                scope (failure) assert(0);
+                writefln("drey: %s", ex);
+                stdout.flush();
+            }
+        }
+
         assert(bin.length == 1 + PublicKey.Width + 2);
         assert(bin[0] == VersionByte.AccountID);
         assert(validate(bin[0 .. $ - 2], bin[$ - 2 .. $]));
