@@ -703,16 +703,22 @@ extern(D):
 
                 // todo: currently we just pick the first of the candidate values,
                 // but we should ideally pick tx's out of the combined set
-                return duplicate_value(&candidate);
+                return *cast(Value*)&candidate;
+                //return duplicate_value(&candidate);
             }
-        } catch (Exception ex)
-        {
-            assert(0, format!"combineCandidates: slot %u. Exception: %s"(
-                slot_idx, ex.to!string));
         }
+        catch (Exception ex)
+        {
+            assert(0);
+            //assert(0, format!"combineCandidates: slot %u. Exception: %s"(
+            //    slot_idx, ex.to!string));
+        }
+
+        assert(0);
+
         // should not reach here
-        assert(0, format!"combineCandidates: no valid candidate for slot %u."(
-            slot_idx));
+        //assert(0, format!"combineCandidates: no valid candidate for slot %u."(
+        //    slot_idx));
     }
 
     /***************************************************************************
