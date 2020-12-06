@@ -104,6 +104,11 @@ alias LockType = agora.script.Lock.LockType;
 
 // todo: make the channel ID a const struct?
 
+// todo: limit accepting only one funding UTXO, should not accept the same one
+// for multiple channels.
+// todo: once we've signed the very first channel accept message for a UTXO,
+// never accept it again for opening of a new channel.
+
 // todo: create an example where we use a new update attaching to a settlement
 // which immediately refunds everyone. This is a cooperative closing of a channel.
 public struct OpenResult
