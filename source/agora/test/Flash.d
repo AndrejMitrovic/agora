@@ -111,6 +111,42 @@ alias LockType = agora.script.Lock.LockType;
 
 // todo: create an example where we use a new update attaching to a settlement
 // which immediately refunds everyone. This is a cooperative closing of a channel.
+
+// todo: allocation of Outputs in subsequent updates must equal exactly the
+// channel sum amount, otherwise we end up creating fees for no reason.
+
+// todo: invoicing will be needed for the API to work. This is what we can present
+// to the clients and libraries. They just need to interact with the Flash node.
+// todo: must support QR codes. Such as in https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md
+// Amount can be optional in the invoice, in case of donations. But perhaps
+// a minimum donation limit could be set.
+// todo: add a SemVer version field, so compatibility can be easily derived between protocols.
+
+// LN uses <type,length,bytes[length] value> tuplets for all field types, this way
+// enabling skipping some fields for future/backwards compatibility.
+// We should probably add the protocol descriptor (unique ID) in each message.
+
+// todo: consider just having a single API end-point with the tuplet values.
+// todo: should have an init() to initialize any *new* connection to a node.
+// it's possible that a user updates its flash node and suddenly becomes incompatible,
+// therefore renegotiating the setup is important.
+
+/*
+design decisions taken from LN (https://github.com/lightningnetwork/lightning-rfc/blob/master/01-messaging.md):
+
+> By default SHA2 and Bitcoin public keys are both encoded as big endian, thus it would be unusual to use a different endian for other fields.
+=> We can just use LE
+
+> Length is limited to 65535 bytes by the cryptographic wrapping, and messages in the protocol are never more than that length anyway.
+=> This is a good hint. We should check if we can encrypt 64k via Schnorr or if we're reaching
+some kind of limit here.
+*/
+
+// todo: channel ID should be derived from the UTXO, not from just the hash of the funding tx.
+// so we should provide the funding tx and also the output index (?). Hence why we used the
+// implicit index 0 in some places, we should explicitly specify it, because the funding tx
+// may have more outputs than just 1.
+
 public struct OpenResult
 {
     string error;  // in case rejected
