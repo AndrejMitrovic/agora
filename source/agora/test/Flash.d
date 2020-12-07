@@ -147,6 +147,8 @@ some kind of limit here.
 // implicit index 0 in some places, we should explicitly specify it, because the funding tx
 // may have more outputs than just 1.
 
+// todo: nodes should signal each other when they have discovered the funding tx in the blockchain.
+
 public struct OpenResult
 {
     string error;  // in case rejected
