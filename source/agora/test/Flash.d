@@ -149,6 +149,11 @@ some kind of limit here.
 
 // todo: nodes should signal each other when they have discovered the funding tx in the blockchain.
 
+// todo: maybe the creation of the funding tx should be delayed until the counterparty
+// accepts the proposal.
+
+// todo: channel discovery in LN: Only the least-significant bit of channel_flags is currently defined: announce_channel. This indicates whether the initiator of the funding flow wishes to advertise this channel publicly to the network, as detailed within BOLT #7.
+
 public struct OpenResult
 {
     string error;  // in case rejected
