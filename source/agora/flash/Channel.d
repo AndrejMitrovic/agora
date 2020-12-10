@@ -308,9 +308,12 @@ public class Channel
     {
         this.state = ChannelState.PendingClose;
 
-        // last update was published, publish just the settlement
+        // last update was published, publish the settlement
         if (tx == this.channel_updates[$ - 1].update_tx)
         {
+            // todo: the settlement is likely encumbered by a relative time
+            // lock, need to determine the right time it should be published,
+            // and make sure a restart will still republish it.
             const settle_tx = this.channel_updates[$ - 1].settle_tx;
             writefln("Publishing last settle tx %s: %s",
                 this.channel_updates.length, settle_tx.hashFull());
@@ -440,7 +443,7 @@ public class Channel
 
     /***************************************************************************
 
-        Checks whether the new balance is acceptable.
+        Checks whether the new balance can be accepted.
 
         Returns:
             true if the new balance is less than or equal to the funding amount.
@@ -620,14 +623,12 @@ public class Channel
         this.state = ChannelState.PendingClose;
 
         // publish the trigger transaction
+        // note that the settlement will be published automatically after the
+        // node detects the trigger tx published to the blockchain and after
+        // its relative lock time expires.
         const trigger_tx = this.channel_updates[0].update_tx;
         writefln("Publishing trigger tx: %s", trigger_tx.hashFull());
         this.txPublisher(trigger_tx);
-
-        // settlement cannot be published yet (relative time lock rejected)
-        const settle_tx = this.channel_updates[0].settle_tx;
-        writefln("Publishing settle tx: %s", settle_tx.hashFull());
-        this.txPublisher(settle_tx);
     }
 
     version (unittest)
@@ -709,7 +710,7 @@ public class Channel
 
     ***************************************************************************/
 
-    public Result!PublicNonce onCloseChannelRequest (in uint seq_id,
+    public Result!PublicNonce onChannelCloseRequest (in uint seq_id,
         in PublicNonce peer_nonce, in Amount fee)
     {
         if (this.state != ChannelState.Open)

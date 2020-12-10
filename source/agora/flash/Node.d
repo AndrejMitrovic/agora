@@ -133,7 +133,7 @@ public abstract class FlashNode : FlashAPI
         in uint seq_id, in PublicNonce peer_nonce, in Amount fee )
     {
         if (auto channel = chan_id in this.channels)
-            return channel.onCloseChannelRequest(seq_id, peer_nonce, fee);
+            return channel.onChannelCloseRequest(seq_id, peer_nonce, fee);
 
         return Result!PublicNonce(ErrorCode.WrongChannelID,
             "Channel ID not found");
