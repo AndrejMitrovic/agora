@@ -43,8 +43,12 @@ public abstract class FlashNode : FlashAPI
 
     // random agora node
     protected RemoteAPI!TestAPI agora_node;
+
+    // client getter for the flash nodes
     protected Registry* flash_registry;
-    protected TaskManager taskman;  // for scheduling
+
+    // for scheduling
+    protected TaskManager taskman;
 
     // for sending tx's to the network
     protected TestAPIManager api_manager;
@@ -54,8 +58,6 @@ public abstract class FlashNode : FlashAPI
     /// transaction is externalized, the Channel channel gets promoted
     /// to a Channel with a unique ID derived from the hash of the funding tx.
     protected Channel[Hash] channels;
-
-    protected bool ready_to_close;
 
     /// Ctor
     public this (const Pair kp, Registry* agora_registry,
@@ -73,7 +75,7 @@ public abstract class FlashNode : FlashAPI
         this.agora_node = new RemoteAPI!TestAPI(tid, timeout);
     }
 
-    ///
+    /// Start monitoring the blockchain for on-chain flash transactions
     public void start ()
     {
         this.taskman.setTimer(200.msecs, &this.monitorBlockchain, Periodic.Yes);
