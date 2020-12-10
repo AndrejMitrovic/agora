@@ -321,49 +321,4 @@ unittest
 
     // and then a settlement will be published (but only after time lock expires)
     network.expectBlock(Height(12), network.blocks[0].header);
-
-    //Thread.sleep(1.seconds);
-    //node_1.printLog();
-    //alice.ctrlPublishSettle(chan_id, 1);
-
-    //// now we publish trigger tx
-    //const block_2 = node_1.getBlocksFrom(0, 1024)[$ - 1];
-
-    //const funding_tx_hash = Hash.fromString("0x54615ad5a07681a1a4e677ede7bd325c570d2d5003b0f86e6c03f3031a4d905514354cf72048f9c50c7ccdca251a01fa8971fe042f8e67e9b21652d54162241b");
-
-    //txs = filtSpendable!(tx => tx.hashFull() != funding_tx_hash)(block_2)
-    //    .enumerate()
-    //    .map!(en => en.value.refund(WK.Keys[3].address).sign())
-    //    .take(7)
-    //    .array();
-    //writefln("Posting update tx: %s", update_pair.update_tx.hashFull());
-    //txs ~= update_pair.update_tx;
-
-    //txs.each!(tx => node_1.putTransaction(tx));
-    //network.expectBlock(Height(3), network.blocks[0].header);
-
-    //const block_3 = node_1.getBlocksFrom(0, 1024)[$ - 1];
-    //txs = filtSpendable!(tx => tx.hashFull() != update_pair.update_tx.hashFull())(block_3)
-    //    .enumerate()
-    //    .map!(en => en.value.refund(WK.Keys[3].address).sign())
-    //    .take(7)
-    //    .array();
-    //writefln("Posting settle tx: %s", update_pair.settle_tx.hashFull());
-    //txs ~= update_pair.settle_tx;
-
-    //txs.each!(tx => node_1.putTransaction(tx));
-    //network.expectBlock(Height(4), network.blocks[0].header);
-
-    //Thread.sleep(1.seconds);
-}
-
-import agora.consensus.data.Block;
-import std.range;
-public auto filtSpendable (alias filt)(const ref Block block)
-{
-    return block.txs
-        .filter!(tx => tx.type == TxType.Payment)
-        .filter!(tx => filt(tx))
-        .map!(tx => iota(tx.outputs.length).map!(idx => TxBuilder(tx, cast(uint)idx)))
-        .joiner();
 }
