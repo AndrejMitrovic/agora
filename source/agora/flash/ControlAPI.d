@@ -93,6 +93,6 @@ public interface ControlFlashAPI : FlashAPI
 
     ***************************************************************************/
 
-    public void createInvoice (in Hash chan_id, in Amount funder_amount,
+    public void createNewInvoice (in Hash chan_id, in Amount funder_amount,
         in Amount peer_amount);
 }

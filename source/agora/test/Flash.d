@@ -51,10 +51,6 @@ public interface TestFlashAPI : ControlFlashAPI
     /// Used for testing and ensuring the counter-party detects the update tx
     /// and publishes the latest state to the blockchain.
     public void forcePublishUpdate (in Hash chan_id, in uint index);
-
-    ///
-    public void createInvoice (in Hash chan_id, in Amount funder,
-        in Amount peer);
 }
 
 public class ControlFlashNode : FlashNode, TestFlashAPI
@@ -181,10 +177,10 @@ public class ControlFlashNode : FlashNode, TestFlashAPI
     }
 
     ///
-    public override void createInvoice (in Hash chan_id,
+    public override void createNewInvoice (in Hash chan_id,
         in Amount funder_amount, in Amount peer_amount)
     {
-        writefln("%s: createInvoice(%s, %s, %s)", this.kp.V.prettify,
+        writefln("%s: createNewInvoice(%s, %s, %s)", this.kp.V.prettify,
             chan_id.prettify, funder_amount, peer_amount);
 
         auto channel = chan_id in this.channels;
@@ -333,11 +329,11 @@ unittest
     /* do some off-chain transactions */
 
     // todo: this would error because it's overspending, re-add the test later
-    // alice.createInvoice(chan_id, Amount(10_000), Amount(5_000));
+    // alice.createNewInvoice(chan_id, Amount(10_000), Amount(5_000));
 
-    alice.createInvoice(chan_id, Amount(5_000),  Amount(5_000));
-    alice.createInvoice(chan_id, Amount(4_000),  Amount(6_000));
-    alice.createInvoice(chan_id, Amount(6_000),  Amount(4_000));
+    alice.createNewInvoice(chan_id, Amount(5_000),  Amount(5_000));
+    alice.createNewInvoice(chan_id, Amount(4_000),  Amount(6_000));
+    alice.createNewInvoice(chan_id, Amount(6_000),  Amount(4_000));
 
     //
     writefln("Beginning collaborative close..");
@@ -403,11 +399,11 @@ unittest
     /* do some off-chain transactions */
 
     // todo: this would error because it's overspending, re-add the test later
-    // alice.createInvoice(chan_id, Amount(10_000), Amount(5_000));
+    // alice.createNewInvoice(chan_id, Amount(10_000), Amount(5_000));
 
-    alice.createInvoice(chan_id, Amount(5_000),  Amount(5_000));
-    alice.createInvoice(chan_id, Amount(4_000),  Amount(6_000));
-    alice.createInvoice(chan_id, Amount(6_000),  Amount(4_000));
+    alice.createNewInvoice(chan_id, Amount(5_000),  Amount(5_000));
+    alice.createNewInvoice(chan_id, Amount(4_000),  Amount(6_000));
+    alice.createNewInvoice(chan_id, Amount(6_000),  Amount(4_000));
 
     // alice is bad
     writefln("Alice unilaterally closing the channel..");
