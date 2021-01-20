@@ -105,6 +105,14 @@ public class ControlFlashNode : FlashNode, TestFlashAPI
         auto channel = chan_id in this.channels;
         assert(channel !is null);
 
+        const state = channel.getState();
+        if (state >= ChannelState.PendingClose)
+        {
+            writefln("%s: Error: waitChannelOpen(%s) called on channel state %s",
+                this.kp.V.prettify, chan_id.prettify, state);
+            return;
+        }
+
         while (!channel.isOpen())
             this.taskman.wait(500.msecs);
     }
