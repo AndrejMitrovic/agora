@@ -25,6 +25,7 @@ import agora.flash.API;
 import agora.flash.Channel;
 import agora.flash.Config;
 import agora.flash.ErrorCode;
+import agora.flash.OnionPacket;
 import agora.flash.Scripts;
 import agora.flash.Types;
 import agora.script.Engine;
@@ -58,9 +59,10 @@ public abstract class FlashNode : FlashAPI
     /// transaction is externalized, the Channel channel gets promoted
     /// to a Channel with a unique ID derived from the hash of the funding tx.
     protected Channel[Hash] channels;
+    protected Channel[][Hash] channels_by_key;
 
     /// The last read block height.
-    private ulong read_block_height;
+    protected ulong read_block_height;
 
     /***************************************************************************
 
@@ -177,7 +179,7 @@ public abstract class FlashNode : FlashAPI
                 "Unrecognized blockchain genesis hash");
 
         const min_funding = Amount(1000);
-        if (chan_conf.funding_amount < min_funding)
+        if (chan_conf.capacity < min_funding)
             return Result!PublicNonce(ErrorCode.FundingTooLow,
                 format("Funding amount is too low. Want at least %s", min_funding));
 
@@ -196,6 +198,12 @@ public abstract class FlashNode : FlashAPI
             peer, this.engine, this.taskman, &this.agora_node.putTransaction);
 
         this.channels[chan_conf.chan_id] = channel;
+
+        // todo: simplify
+        if (chan_conf.chan_id in this.channels_by_key)
+            this.channels_by_key[chan_conf.chan_id] = [channel];
+        else
+            this.channels_by_key[chan_conf.chan_id] ~= channel;
 
         PublicNonce pub_nonce = priv_nonce.getPublicNonce();
         return Result!PublicNonce(pub_nonce);
@@ -255,14 +263,11 @@ public abstract class FlashNode : FlashAPI
             "Channel ID not found");
     }
 
-    /// See `FlashAPI.requestBalanceUpdate`
-    public override Result!PublicNonce requestBalanceUpdate (in Hash chan_id,
-        in uint seq_id, in BalanceRequest balance_req)
+    // incoming API
+    public override Result!PublicNonce proposePayment (in Hash chan_id,
+        in uint seq_id, in Amount amount, in Hash payment_hash,
+        in Height lock_height, in OnionPacket packet, in PublicNonce peer_nonce)
     {
-        // todo: verify sequence ID
-        writefln("%s: requestBalanceUpdate(%s, %s)", this.kp.V.prettify,
-            chan_id.prettify, seq_id);
-
         auto channel = chan_id in this.channels;
         if (channel is null)
             return Result!PublicNonce(ErrorCode.InvalidChannelID,
@@ -277,29 +282,61 @@ public abstract class FlashNode : FlashAPI
                 "This channel is still collecting signatures for a "
                 ~ "previous sequence ID");
 
-        if (!channel.canAcceptBalance(balance_req.balance))
-            return Result!PublicNonce(ErrorCode.RejectedBalanceRequest,
-                format("Channel rejects balance request: %s",
-                    balance_req.balance));
-
-        // todo: need to add sequence ID verification here
-        // todo: add logic if we agree with the new balance
-        // todo: check sums for the balance so it doesn't exceed
-        // the channel balance, and that it matches exactly.
-
-        PrivateNonce priv_nonce = genPrivateNonce();
-        PublicNonce pub_nonce = priv_nonce.getPublicNonce();
-
-        // todo: there may be a double call here if the first request timed-out
-        // and the client sends this request again. We should avoid calling
-        // `updateBalance()` again.
-        this.taskman.setTimer(0.seconds,
+        Payload payload;
+        if (!decryptPayload(packet.encrypted_payload, this.kp.v,
+            packet.ephemeral_pk, payload,))
         {
-            channel.updateBalance(seq_id, priv_nonce, balance_req.peer_nonce,
-                balance_req.balance);
-        });
+            writefln("--- ERROR: CANNOT DECRYPT PAYLOAD");
+            return Result!PublicNonce(ErrorCode.CantDecrypt);
+        }
 
-        return Result!PublicNonce(pub_nonce);
+        writefln("+++ PAYLOAD IS: %s", payload);
+
+        // Forwarding HTLC. Check balance first.
+        // todo: check the owner balance first
+        // todo: need to find the next channel ID (if forwarding packet),
+        // and check our balance.
+        const cur_amount = channel.getOwnerBalance();
+        if (cur_amount < amount)
+            return Result!PublicNonce(ErrorCode.ExceedsMaximumPayment,
+                format("Insufficient funds to route this payment. "
+                    ~ "Amount requested: %s. Available: %s. Balance: %s",
+                    amount, cur_amount, channel.cur_balance));
+
+        // todo
+        version (none)
+        if (amount > channel.conf.max_payment_amount)
+            return Result!PublicNonce(ErrorCode.ExceedsMaximumPayment,
+                "Exceeds maximum payment the node is comfortable routing");
+
+        // TODO: Forward the HTLC to the next channel
+        // todo: add some kind of acceptHTLC in the channel here, or
+        // begin signing process for that HTLC
+        return channel.acceptProposedPayment(seq_id, payment_hash, amount,
+            lock_height, payload, peer_nonce, &this.paymentRouter);
+    }
+
+    // todo: the node should internally call proposeUpdate() when a new block
+    // height is received
+    public override Result!PublicNonce proposeUpdate (in Hash chan_id,
+        in uint seq_id, in Hash[] secrets, in PublicNonce peer_nonce)
+    {
+        return Result!PublicNonce.init;
+    }
+
+    public void paymentRouter (in Hash chan_id, in Hash payment_hash,
+        in Amount amount, in Height lock_height, in OnionPacket packet)
+    {
+        auto channel = chan_id in this.channels;
+        if (channel is null)
+        {
+            // todo: what to do in this case?
+            writefln("Could not find this channel ID: %s", chan_id);
+            return;
+        }
+
+        channel.routeNewPayment(payment_hash, amount, lock_height,
+            packet);
     }
 
     /***************************************************************************

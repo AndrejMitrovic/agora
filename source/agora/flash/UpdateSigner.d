@@ -220,7 +220,7 @@ public class UpdateSigner
 
     ***************************************************************************/
 
-    public UpdatePair collectSignatures (in uint seq_id, in Balance balance,
+    public UpdatePair collectSignatures (in uint seq_id, in Output[] outputs,
         in PrivateNonce priv_nonce, in PublicNonce peer_nonce,
         in Transaction prev_tx)
     {
@@ -234,7 +234,7 @@ public class UpdateSigner
         this.pending_update = this.createPendingUpdate(priv_nonce, peer_nonce,
             prev_tx);
         this.pending_settle = this.createPendingSettle(this.pending_update.tx,
-            balance, priv_nonce, peer_nonce);
+            outputs, priv_nonce, peer_nonce);
 
         // todo: need to validate settlement against update, in case
         // balances are too big, etc.
@@ -399,7 +399,7 @@ public class UpdateSigner
     ***************************************************************************/
 
     private PendingSettle createPendingSettle (in Transaction update_tx,
-        in Balance balance, in PrivateNonce priv_nonce,
+        in Output[] outputs, in PrivateNonce priv_nonce,
         in PublicNonce peer_nonce)
     {
         const settle_key = getSettleScalar(this.kp.v, this.conf.funding_tx_hash,
@@ -410,7 +410,7 @@ public class UpdateSigner
 
         const uint input_idx = 0; // todo: this should ideally not be hardcoded
         auto settle_tx = createSettleTx(update_tx, this.conf.settle_time,
-            balance.outputs);
+            outputs);
         const challenge_settle = getSequenceChallenge(settle_tx, this.seq_id,
             input_idx);
 

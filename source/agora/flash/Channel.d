@@ -16,6 +16,7 @@ module agora.flash.Channel;
 import agora.flash.API;
 import agora.flash.Config;
 import agora.flash.ErrorCode;
+import agora.flash.OnionPacket;
 import agora.flash.Scripts;
 import agora.flash.Types;
 import agora.flash.UpdateSigner;
@@ -87,7 +88,7 @@ public class Channel
 
     /// The current balance of the channel. Initially empty until the
     /// funding tx is externalized.
-    private Balance cur_balance;
+    public Balance cur_balance;
 
     /// The closing transaction can spend from the funding transaction when
     /// the channel parties want to collaboratively close the channel.
@@ -187,6 +188,33 @@ public class Channel
 
     /***************************************************************************
 
+        Returns:
+            our balance in the channel (HTLCs excluded as they're locked)
+
+    ***************************************************************************/
+
+    public Amount getOurBalance ()
+    {
+        return this.is_owner
+            ? this.cur_balance.refund_amount
+            : this.cur_balance.payment_amount;
+    }
+
+    /***************************************************************************
+
+        Returns:
+            the balance of the owner of the channel
+            (HTLCs excluded as they're locked)
+
+    ***************************************************************************/
+
+    public Amount getOwnerBalance ()
+    {
+        return this.cur_balance.refund_amount;
+    }
+
+    /***************************************************************************
+
         Start the setup stage of the channel. Should only be called once.
 
         A signing task will be spawned which attempts to collect the settlement
@@ -215,10 +243,10 @@ public class Channel
 
         // initial output allocates all the funds back to the channel creator
         const seq_id = 0;
-        auto balance = Balance([Output(this.conf.funding_amount,
-            PublicKey(this.conf.funder_pk[]))]);
+        const Balance balance = { refund_amount : this.conf.capacity };
+        const Output[] outputs = this.buildBalanceOutputs(balance);
 
-        auto pair = this.update_signer.collectSignatures(seq_id, balance,
+        auto pair = this.update_signer.collectSignatures(seq_id, outputs,
             priv_nonce, peer_nonce, this.conf.funding_tx);
         this.onSetupComplete(pair);
     }
@@ -297,8 +325,8 @@ public class Channel
 
         // todo: assert that this is really the actual balance
         // it shouldn't be technically possible that it mismatches
-        this.cur_balance = Balance([Output(this.conf.funding_amount,
-            PublicKey(this.conf.funder_pk[]))]);
+        Balance expected_balance = { refund_amount : this.conf.capacity };
+        this.cur_balance = expected_balance;
     }
 
     /***************************************************************************
@@ -332,7 +360,7 @@ public class Channel
         by some counter-party.
 
         The state of this channel will change to `PendingClose`, which will
-        make make it reject any new balance update requests.
+        make it reject any new balance update requests.
 
         If the `tx` is not the latest update transaction the Channel will try
         to publish the latest update transaction. The Channel will then publish
@@ -480,74 +508,116 @@ public class Channel
         return this.update_signer.getUpdateSig();
     }
 
-    /***************************************************************************
-
-        Checks whether a new balance can be accepted.
-
-        Returns:
-            true if the new total balance is less than or equal to the
-            funding amount.
-
-    ***************************************************************************/
-
-    public bool canAcceptBalance (in Balance new_balance)
+    /// Outgoing API
+    public void routeNewPayment (in Hash payment_hash, in Amount amount,
+        in Height lock_height, in OnionPacket packet)
     {
-        Amount total_balance;
-        foreach (output; new_balance.outputs)
+        // todo: we need to track this somewhere else
+        // todo: this should be in the propose payment routine
+        static uint new_seq_id = 0;
+        ++new_seq_id;
+
+        PrivateNonce priv_nonce = genPrivateNonce();
+        PublicNonce pub_nonce = priv_nonce.getPublicNonce();
+
+        // todo: there may be a double call here if the first request timed-out
+        // and the client sends this request again.
+        auto result = this.peer.proposePayment(this.conf.chan_id, new_seq_id,
+            amount, payment_hash, lock_height, packet, pub_nonce);
+
+        if (result.error)
         {
-            if (!total_balance.add(output.value))
-                return false;  // overflow
+            writefln("ERROR PROPOSING PAYMENT: %s", result);
+            return;
         }
 
-        return total_balance <= this.conf.funding_amount;
+        const peer_nonce = result.value;
+        auto new_balance = this.buildUpdatedBalance(cur_balance,
+            amount, payment_hash, lock_height);
+        const new_outputs = this.buildBalanceOutputs(new_balance);
+
+        this.taskman.setTimer(0.seconds,
+        {
+            this.cur_seq_id++;
+            auto update_pair = this.update_signer.collectSignatures(this.
+                cur_seq_id,
+                new_outputs, priv_nonce, peer_nonce,
+                this.channel_updates[0].update_tx);  // spend from trigger tx
+
+            writefln("%s: Got new pair!", this.kp.V.prettify);
+            this.channel_updates ~= update_pair;
+            this.cur_balance = new_balance;
+        });
     }
 
-    /***************************************************************************
-
-        Update the balance of the channel. This should be called only when
-        all the counter-parties have agreed to a new channel balance update.
-
-        Calling this starts a new signing task which will collect settlement
-        & update transactions from the counterparties. Once the collection is
-        complete, the settlement & update transaction pair will be added to
-        the `channel_updates`, and the `cur_balance` will be updated to
-        reflect the new balance.
-
-        Params:
-            seq_id = the sequence ID.
-            priv_nonce = the private nonce that will be used by the node to
-                sign the next settlement & update transaction pair
-            peer_nonce = the counter-party's nonce that will be used for the
-                next settlement & update transaction pair
-            new_balance = the new settlement balance
-
-    ***************************************************************************/
-
-    public void updateBalance (in uint seq_id, PrivateNonce priv_nonce,
-        PublicNonce peer_nonce, in Balance new_balance)
+    /// Create a new balance ready to be signed
+    public Balance buildUpdatedBalance (in Balance old_balance,
+        in Amount amount, in Hash payment_hash, in Height lock_height)
     {
-        writefln("%s: updateBalance(%s)", this.kp.V.prettify, seq_id);
+        Balance new_balance;
+        new_balance.refund_amount = old_balance.refund_amount;
+        new_balance.payment_amount = old_balance.payment_amount;
 
-        // todo: assert that the new balance doesn't overspend
-        assert(this.state == ChannelState.Open);
+        // deep-dup
+        foreach (hash, htlc; old_balance.outgoing_htlcs)
+            new_balance.outgoing_htlcs[hash] = htlc;
 
-        // todo: dupe calls should be handled somewhere, so maybe we
-        // need a call like `canUpdateBalance(seq_id, ...)`?
-        assert(seq_id == this.cur_seq_id + 1);
+        if (!new_balance.refund_amount.sub(amount))
+            assert(0);
 
-        // todo: issue: collectSignatures might be called for a new balance
-        // request, but the counter-party could still be collecting the
-        // settlement & update tx for the last sequence. They should make sure
-        // they collect the signatures before accepting a new update balance.
+        new_balance.outgoing_htlcs[payment_hash] = HTLC(lock_height, amount);
 
-        this.cur_seq_id++;
-        auto update_pair = this.update_signer.collectSignatures(this.cur_seq_id,
-            new_balance, priv_nonce, peer_nonce,
-            this.channel_updates[0].update_tx);  // spend from trigger tx
+        return new_balance;
+    }
 
-        writefln("%s: Got new pair!", this.kp.V.prettify);
-        this.channel_updates ~= update_pair;
-        this.cur_balance.outputs = new_balance.outputs.dup;
+    /// Incoming API
+    public Result!PublicNonce acceptProposedPayment (in uint seq_id,
+        in Hash payment_hash, in Amount amount, in Height lock_height,
+        in Payload payload, in PublicNonce peer_nonce,
+        PaymentRouter paymentRouter )
+    {
+        writefln("%s: proposePayment(%s, %s, %s, %s, %s, %s)",
+            this.kp.V.prettify,
+            this.conf.chan_id, seq_id, amount, payment_hash, lock_height,
+            payload);
+
+        // we force new sequences to be exactly the next in sequence to avoid
+        // running out of sequence IDs
+        if (seq_id != this.cur_seq_id + 1)
+            return Result!PublicNonce(ErrorCode.InvalidSequenceID,
+                "Proposed sequence ID must be +1 of the previous sequence ID");
+
+        this.cur_seq_id = seq_id;
+
+        PrivateNonce priv_nonce = genPrivateNonce();
+        PublicNonce pub_nonce = priv_nonce.getPublicNonce();
+
+        auto new_balance = this.buildUpdatedBalance(this.cur_balance,
+            amount, payment_hash, lock_height);
+        const new_outputs = this.buildBalanceOutputs(new_balance);
+
+        this.taskman.setTimer(0.seconds,
+        {
+            auto update_pair = this.update_signer.collectSignatures(
+                this.cur_seq_id,
+                new_outputs, priv_nonce, peer_nonce,
+                this.channel_updates[0].update_tx);  // spend from trigger tx
+
+            writefln("%s: Got new pair!", this.kp.V.prettify);
+            this.channel_updates ~= update_pair;
+            this.cur_balance = new_balance;
+
+            if (payload.next_chan_id != Hash.init)
+            {
+                writefln("%s: Routing to next channel: %s", this.kp.V.prettify,
+                    payload.next_chan_id.prettify);
+                paymentRouter(payload.next_chan_id, payment_hash,
+                    payload.forward_amount, payload.outgoing_lock_height,
+                    payload.next_packet);
+            }
+        });
+
+        return Result!PublicNonce(pub_nonce);
     }
 
     /***************************************************************************
@@ -757,6 +827,30 @@ public class Channel
         this.collectCloseSignatures(priv_nonce, close_res.value);
     }
 
+    ///
+    private Output[] buildBalanceOutputs (in Balance balance)
+    {
+        const funder_output = Output(balance.refund_amount,
+            genKeyLock(this.conf.funder_pk));
+
+        const peer_output = Output(balance.payment_amount,
+            genKeyLock(this.conf.peer_pk));
+
+        Output[] outputs = [funder_output, peer_output];
+
+        // todo: what about incoming HTLCs?
+        foreach (hash, htlc; balance.outgoing_htlcs)
+        {
+            Lock lock = createLockHTLC(hash, htlc.lock_height,
+                this.conf.funder_pk, this.conf.peer_pk);
+
+            Output output = Output(htlc.amount, lock);
+            outputs ~= output;
+        }
+
+        return outputs;
+    }
+
     /***************************************************************************
 
         Start collecting close transaction signatures.
@@ -780,7 +874,8 @@ public class Channel
     {
         // todo: index is hardcoded
         const utxo = UTXO.getHash(hashFull(this.funding_tx_signed), 0);
-        this.pending_close.tx = createClosingTx(utxo, this.cur_balance);
+        const outputs = this.buildBalanceOutputs(this.cur_balance);
+        this.pending_close.tx = createClosingTx(utxo, outputs);
 
         const nonce_pair_pk = priv_nonce.V + peer_nonce;
         this.pending_close.our_sig = sign(this.kp.v, this.conf.pair_pk,

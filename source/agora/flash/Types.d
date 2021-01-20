@@ -14,6 +14,7 @@
 
 module agora.flash.Types;
 
+import agora.common.Amount;
 import agora.common.crypto.ECC;
 import agora.common.crypto.Schnorr;
 import agora.common.Types;
@@ -88,23 +89,41 @@ public struct PrivateNonce
     public Pair update;
 }
 
+/// Contains the minimum amount of information that needs to be shared with
+/// the counter-party in order to make it possible for them to regenerate
+/// the HTLC on their side
+public struct HTLC
+{
+    /// Lock height
+    public Height lock_height;
+
+    /// Amount
+    public Amount amount;
+}
+
 /// Contains the balance towards each channel participant
 public struct Balance
 {
-    /// The outputs towards each participant in the channel
-    public Output[] outputs;
+    /// Refund back to channel funder
+    public Amount refund_amount;
+
+    /// Payment to counter-party
+    public Amount payment_amount;
+
+    /// HTLCs we're offering to the counter-party in return for a secret
+    public HTLC[Hash] outgoing_htlcs;
 }
 
 /// A request for a new balance which also contains the senders's public
 /// nonce pair which they promise to use for signing the settle & update txs.
-public struct BalanceRequest
-{
-    /// The new balance that's requested
-    public Balance balance;
+//public struct BalanceRequest
+//{
+//    /// The new balance that's requested
+//    public Balance balance;
 
-    /// The nonce the requesting peer agrees to use
-    public PublicNonce peer_nonce;
-}
+//    /// The nonce the requesting peer agrees to use
+//    public PublicNonce peer_nonce;
+//}
 
 /*******************************************************************************
 

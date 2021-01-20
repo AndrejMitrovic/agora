@@ -49,6 +49,11 @@ public enum ErrorCode : ushort
     /// as to the minimum funding limits of the node.
     FundingTooLow,
 
+    /// The receiving node rejects routing this payment as it exceeds its
+    /// current balance or its comfortable maximum payment amount it's willing
+    /// to ever route through this channel
+    ExceedsMaximumPayment,
+
     /// A new balance update request cannot be made until the active signing
     /// process is complete.
     SigningInProcess,
@@ -56,4 +61,7 @@ public enum ErrorCode : ushort
     /// The new balance request has been rejected, e.g. trying to spend more
     /// than allocated in the funding transaction.
     RejectedBalanceRequest,
+
+    /// Cannot decrypt the payload
+    CantDecrypt,
 }

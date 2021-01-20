@@ -22,6 +22,7 @@ import agora.common.crypto.ECC;
 import agora.common.crypto.Key;
 import agora.common.crypto.Schnorr;
 import agora.common.Hash;
+import agora.common.Serializer;
 import agora.common.Task;
 import agora.consensus.data.genesis.Test;
 import agora.consensus.data.Transaction;
@@ -31,9 +32,14 @@ import agora.flash.ControlAPI;
 import agora.flash.Channel;
 import agora.flash.Config;
 import agora.flash.ErrorCode;
+import agora.flash.Invoice;
 import agora.flash.Node;
+import agora.flash.OnionPacket;
+import agora.flash.Route;
 import agora.flash.Scripts;
 import agora.flash.Types;
+import agora.script.Lock;
+import agora.script.Script;
 import agora.test.Base;
 
 import geod24.Registry;
@@ -41,6 +47,7 @@ import geod24.Registry;
 import std.conv;
 import std.exception;
 
+import core.stdc.time;
 import core.thread;
 
 /// In addition to the Flash API, we provide controller methods to initiate
@@ -53,8 +60,31 @@ public interface TestFlashAPI : ControlFlashAPI
     public void forcePublishUpdate (in Hash chan_id, in uint index);
 }
 
+///
 public class ControlFlashNode : FlashNode, TestFlashAPI
 {
+    // TODO: move to base class?
+    /// secret hash => incoming HTLC.
+    /// These can be spent by us if we receive the secret,
+    /// or they can be spent by the sender after a time-lock expires.
+    //private Script[Hash] incoming_htlcs;
+
+    // TODO: move to base class?
+    /// secret hash => outgoing HTLC
+    /// These can be spent by us after a time-lock expires,
+    /// or we remove it if we get the secret fo the associated incoming HTLC.
+    //private Script[Hash] outgoing_htlcs;
+
+    // TODO: move to base class?
+    /// hash of secret => Invoice
+    private Invoice[Hash] invoices;
+
+    /// secret hash => secret (preimage)
+    /// Only the Payee initially knows about the secret,
+    /// but is then revealed back towards the payer through
+    /// any intermediaries.
+    private Hash[Hash] secrets;
+
     ///
     protected Registry* agora_registry;
 
@@ -115,17 +145,17 @@ public class ControlFlashNode : FlashNode, TestFlashAPI
 
     ///
     public override Hash openNewChannel (in Hash funding_utxo,
-        in Amount funding_amount, in uint settle_time, in Point peer_pk)
+        in Amount capacity, in uint settle_time, in Point peer_pk)
     {
         writefln("%s: openNewChannel(%s, %s, %s)", this.kp.V.prettify,
-            funding_amount, settle_time, peer_pk.prettify);
+            capacity, settle_time, peer_pk.prettify);
 
         // todo: move to initialization stage!
         auto peer = this.getFlashClient(peer_pk, Duration.init);
         const pair_pk = this.kp.V + peer_pk;
 
         // create funding, don't sign it yet as we'll share it first
-        auto funding_tx = createFundingTx(funding_utxo, funding_amount,
+        auto funding_tx = createFundingTx(funding_utxo, capacity,
             pair_pk);
 
         const funding_tx_hash = hashFull(funding_tx);
@@ -143,7 +173,7 @@ public class ControlFlashNode : FlashNode, TestFlashAPI
             funding_tx      : funding_tx,
             funding_tx_hash : funding_tx_hash,
             funding_utxo    : UTXO.getHash(funding_tx.hashFull(), 0),
-            funding_amount  : funding_amount,
+            capacity        : capacity,
             settle_time     : settle_time,
         };
 
@@ -177,50 +207,107 @@ public class ControlFlashNode : FlashNode, TestFlashAPI
     }
 
     ///
-    public override void createNewInvoice (in Hash chan_id,
-        in Amount funder_amount, in Amount peer_amount)
+    public override Invoice createNewInvoice (in Amount amount,
+        in time_t expiry, in string description = null)
     {
         writefln("%s: createNewInvoice(%s, %s, %s)", this.kp.V.prettify,
-            chan_id.prettify, funder_amount, peer_amount);
+            amount, expiry, description);
 
-        auto channel = chan_id in this.channels;
-        assert(channel !is null);
+        auto pair = createInvoice(this.kp.V, amount, expiry, description);
+        this.invoices[pair.invoice.payment_hash] = pair.invoice;
+        this.secrets[pair.invoice.payment_hash] = pair.secret;
 
-        // todo: we need to track this somewhere else
-        static uint new_seq_id = 0;
-        ++new_seq_id;
+        return pair.invoice;
+    }
 
-        PrivateNonce priv_nonce = genPrivateNonce();
-        PublicNonce pub_nonce = priv_nonce.getPublicNonce();
-
-        const Balance balance = Balance(
-            [Output(funder_amount, PublicKey(channel.conf.funder_pk[])),
-             Output(peer_amount, PublicKey(channel.conf.peer_pk[]))]);
-
-        const BalanceRequest balance_req =
-        {
-            balance    : balance,
-            peer_nonce : pub_nonce,
+    // find a route
+    private Hop[] findPaymentPath (in Point destination, in Amount amount)
+    {
+        // todo: not implemented properly yet
+        Hop[] route;
+        Hop hop = {
+            pub_key : destination,
+            chan_id : this.channels.byKey().front,
+            fee : Amount(100)
         };
+        route ~= hop;
+        return route;
+    }
 
-        Result!PublicNonce result;
-        while (1)
+    // total_amount will take into account the fees
+    public OnionPacket createOnionPacket (in Hash payment_hash,
+        in Height lock_height, in Amount amount, in Hop[] path,
+        out Amount total_amount)
+    {
+        assert(path.length >= 1);
+
+        // todo: setting fees should be part of the routing algorithm
+        total_amount = amount;
+        foreach (hop; path)
         {
-            result = channel.peer.requestBalanceUpdate(chan_id, new_seq_id,
-                balance_req);
-            if (result.error == ErrorCode.SigningInProcess)
-            {
-                writefln("Signing not yet complete: %s. Waiting..",
-                    result.message);
-                this.taskman.wait(100.msecs);
-                continue;
-            }
-
-            break;
+            if (!total_amount.add(hop.fee))
+                assert(0);
         }
 
-        assert(result.error == ErrorCode.None, result.to!string);
-        channel.updateBalance(new_seq_id, priv_nonce, result.value, balance);
+        Amount forward_amount = total_amount;
+        Height outgoing_lock_height = lock_height;
+        OnionPacket packet;
+        Hash next_chan_id;
+
+        // onion packets have to be created from the inside-out
+        auto range = path.retro;
+        foreach (hop; range)
+        {
+            Payload payload =
+            {
+                next_chan_id : next_chan_id,
+                forward_amount : forward_amount,
+                outgoing_lock_height : outgoing_lock_height,
+                next_packet : packet,
+            };
+
+            Pair ephemeral_kp = Pair.random();
+            auto encrypted_payload = encryptPayload(payload, ephemeral_kp,
+                hop.pub_key);
+
+            OnionPacket new_packet =
+            {
+                version_byte : 0,
+                ephemeral_pk : ephemeral_kp.V,
+                encrypted_payload : encrypted_payload,
+                hmac : Hash.init,
+            };
+
+            packet = new_packet;
+
+            if (!forward_amount.sub(hop.fee))
+                assert(0);
+
+            // todo: use htlc_delta config here from the channel config
+            assert(outgoing_lock_height != 0);
+            outgoing_lock_height = Height(outgoing_lock_height - 1);
+
+            next_chan_id = hop.chan_id;
+        }
+
+        return packet;
+    }
+
+    /// Finds a payment path for the invoice and attempts to pay it
+    public override void payInvoice (in Invoice invoice)
+    {
+        // todo: should not be hardcoded.
+        // todo: isn't the payee supposed to set this?
+        Height lock_height = Height(this.read_block_height + 100);
+
+        auto path = this.findPaymentPath(invoice.destination, invoice.amount);
+        Amount total_amount;
+        auto packet = this.createOnionPacket(invoice.payment_hash, lock_height,
+            invoice.amount, path, total_amount);
+
+        writefln("\nPaying invoice and routing packet: %s", packet);
+        this.paymentRouter(path.front.chan_id, invoice.payment_hash,
+            total_amount, lock_height, packet);
     }
 }
 
@@ -271,7 +358,7 @@ public class FlashNodeFactory
     }
 }
 
-/// Test collaborative close (funding + closing tx)
+/// Test direct channels & collaborative close (funding + closing tx)
 unittest
 {
     TestConf conf = { txs_to_nominate : 1 };
@@ -302,6 +389,9 @@ unittest
     const alice_pair = Pair.fromScalar(secretKeyToCurveScalar(WK.Keys[0].secret));
     const bob_pair = Pair.fromScalar(secretKeyToCurveScalar(WK.Keys[1].secret));
 
+    const alice_pk = alice_pair.V;
+    const bob_pk = bob_pair.V;
+
     // workaround to get a handle to the node from another registry's thread
     const string address = format("Validator #%s (%s)", 0,
         WK.Keys.NODE2.address);
@@ -326,14 +416,18 @@ unittest
     alice.waitChannelOpen(chan_id);
     bob.waitChannelOpen(chan_id);
 
-    /* do some off-chain transactions */
+    // begin off-chain transactions
+    auto inv_1 = bob.createNewInvoice(Amount(5_000), time_t.max, "payment 1");
 
-    // todo: this would error because it's overspending, re-add the test later
-    // alice.createNewInvoice(chan_id, Amount(10_000), Amount(5_000));
+    // here we assume bob sent the invoice to alice through some means,
+    // e.g. QR code. Alice scans it and proposes the payment.
+    // it has a direct channel to bob so it uses it.
+    alice.payInvoice(inv_1);
 
-    alice.createNewInvoice(chan_id, Amount(5_000),  Amount(5_000));
-    alice.createNewInvoice(chan_id, Amount(4_000),  Amount(6_000));
-    alice.createNewInvoice(chan_id, Amount(6_000),  Amount(4_000));
+    //alice.createNewInvoice(chan_id, Amount(1_000));
+
+    //// bob wants something back
+    //bob.createNewInvoice(chan_id, Amount(2_000));
 
     //
     writefln("Beginning collaborative close..");
@@ -342,6 +436,7 @@ unittest
 }
 
 /// Test unilateral non-collaborative close (funding + update* + settle)
+version (none)
 unittest
 {
     TestConf conf = { txs_to_nominate : 1 };

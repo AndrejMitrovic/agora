@@ -27,6 +27,11 @@ import agora.script.Script;
 
 import std.bitmanip;
 
+version (unittest)
+{
+    import ocean.core.Test;
+}
+
 /*******************************************************************************
 
     Create a Flash lock script.
@@ -172,14 +177,14 @@ public Unlock createUnlockSettle (Signature sig, in ulong seq_id)
 
 *******************************************************************************/
 
-public Transaction createFundingTx (in Hash utxo, in Amount funding_amount,
+public Transaction createFundingTx (in Hash utxo, in Amount capacity,
     in Point pair_pk) @safe nothrow
 {
     Transaction funding_tx = {
         type: TxType.Payment,
         inputs: [Input(utxo)],
         outputs: [
-            Output(funding_amount,
+            Output(capacity,
                 Lock(LockType.Key, pair_pk[].dup))]
     };
 
@@ -203,13 +208,13 @@ public Transaction createFundingTx (in Hash utxo, in Amount funding_amount,
 
 *******************************************************************************/
 
-public Transaction createClosingTx (in Hash utxo, in Balance balance)
+public Transaction createClosingTx (in Hash utxo, in Output[] outputs)
     @safe nothrow
 {
     Transaction closing_tx = {
         type: TxType.Payment,
         inputs: [Input(utxo)],
-        outputs: balance.outputs.dup,
+        outputs: outputs.dup,
     };
 
     return closing_tx;
@@ -272,7 +277,7 @@ public Transaction createUpdateTx (in ChannelConfig chan_conf,
         type: TxType.Payment,
         inputs: [Input(prev_tx, 0 /* index */, 0 /* unlock age */)],
         outputs: [
-            Output(chan_conf.funding_amount, Lock)]
+            Output(chan_conf.capacity, Lock)]
     };
 
     return update_tx;
@@ -442,4 +447,128 @@ public PublicNonce getPublicNonce (in PrivateNonce priv_nonce)
     };
 
     return pub_nonce;
+}
+
+/*******************************************************************************
+
+    Creates an HTLC with the given hash of the secret, the expected lock height,
+    the sender public key, and the receiver public key.
+
+    The sending public key may only spend this HTLC if the lock_height in the
+    tx is >= the lock height in the HTLC, and if the signature matches the
+    sender's public key. The sender passes an invalid / fake preimage to
+    switch to the ELSE branch.
+
+    The receiving public key may only spend this HTLC if it provides the
+    preimage to the hash. There are no time-locks on this branch.
+    Note however that the actual UTXO being spent is locked in the
+    channel, so it may only be spent once the channel is closed.
+
+    Params:
+        hash = the hash of the secret
+        lock_height = the expected lock_height in the spending transaction
+        sender_pk = the sending public key
+        receiver_pk = the receiving public key
+
+    Returns:
+        a lock script which can be unlocked with the right signature &
+        preimage as generated with a call to `createUnlockHTLC`
+
+*******************************************************************************/
+
+public Lock createLockHTLC (Hash hash, Height lock_height, Point sender_pk,
+    Point receiver_pk) @safe nothrow
+{
+    /*
+        OP.HASH <hash> OP.CHECK_EQUAL
+        OP_IF
+            <receiver-key>
+        OP_ELSE
+           <lock-height> OP.VERIFY_LOCK_HEIGHT
+           <sender-key>
+
+        OP.CHECK_SIG
+    */
+
+    const ubyte[8] lock_bytes = nativeToLittleEndian(lock_height.value);
+
+    return Lock(LockType.Script,
+          [ubyte(OP.HASH)] ~ toPushOpcode(hash[]) ~ [ubyte(OP.CHECK_EQUAL)]
+        ~ [ubyte(OP.IF)]
+            ~ [ubyte(32)] ~ receiver_pk[]
+        ~ [ubyte(OP.ELSE)]
+            ~ toPushOpcode(lock_bytes) ~ ubyte(OP.VERIFY_LOCK_HEIGHT)
+            ~ [ubyte(32)] ~ sender_pk[]
+        ~ [ubyte(OP.END_IF)]
+        ~ [ubyte(OP.CHECK_SIG)]);
+}
+
+/*******************************************************************************
+
+    Creates an unlock for the HTLC generated with `createLockHTLC`.
+
+    Params:
+        sig = the signature
+        secret = either the preimage, or an invalid value to switch to the
+            ELSE branch of the HTLC lock script
+
+    Returns:
+        an HTLC unlock script
+
+*******************************************************************************/
+
+public Unlock createUnlockHTLC (Signature sig, Hash secret)
+{
+    return Unlock([ubyte(64)] ~ sig[] ~ toPushOpcode(secret[]));
+}
+
+///
+unittest
+{
+    import agora.script.Engine;
+    import std.stdio;
+
+    const Transaction bad_tx = { lock_height : Height(99) };
+    const Transaction tx = { lock_height : Height(100) };
+    const Hash wrong_secret = hashFull(99);
+    const Hash secret = hashFull(42);
+    auto hash = hashFull(secret);
+    auto send_kp = Pair.random();
+    auto recv_kp = Pair.random();
+    auto lock_height = Height(100);
+
+    const TestStackMaxTotalSize = 16_384;
+    const TestStackMaxItemSize = 512;
+    scope engine = new Engine(TestStackMaxTotalSize, TestStackMaxItemSize);
+
+    auto lock_script = createLockHTLC(hash, lock_height, send_kp.V, recv_kp.V);
+
+    auto send_sig = sign(send_kp, tx);
+    auto recv_sig = sign(recv_kp, tx);
+    auto bad_tx_send_sig = sign(send_kp, bad_tx);
+
+    test!("==")(engine.execute(
+        lock_script,
+        createUnlockHTLC(recv_sig, secret), tx, Input.init),
+        null);  // receiver can unlock with secret + signature
+
+    test!("==")(engine.execute(
+        lock_script,
+        createUnlockHTLC(send_sig, secret), tx, Input.init),
+        "Script failed");  // wrong signature (expected receiver sig)
+
+    test!("==")(engine.execute(
+        lock_script,
+        createUnlockHTLC(send_sig, wrong_secret), tx, Input.init),
+        null);  // sender can unlock with ELSE branch + timelock + signature
+
+    test!("==")(engine.execute(
+        lock_script,
+        createUnlockHTLC(recv_sig, wrong_secret), tx, Input.init),
+        "Script failed");  // wrong signature (expected sender key)
+
+    test!("==")(engine.execute(
+        lock_script,
+        createUnlockHTLC(bad_tx_send_sig, wrong_secret), bad_tx, Input.init),
+        "VERIFY_LOCK_HEIGHT height lock of transaction is too low");  // timelock is wrong
 }

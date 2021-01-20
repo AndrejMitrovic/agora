@@ -62,7 +62,7 @@ public struct ChannelConfig
 
     /// The total amount funded in this channel. This information is
     /// derived from the Outputs of the funding transaction.
-    public Amount funding_amount;
+    public Amount capacity;
 
     /// The settle time to use for the settlement transactions. This time is
     /// verified by the `OP.VERIFY_UNLOCK_AGE` opcode in the lock script

@@ -17,6 +17,7 @@ import agora.common.Amount;
 import agora.common.crypto.ECC;
 import agora.common.Types;
 import agora.flash.Config;
+import agora.flash.OnionPacket;
 import agora.flash.Types;
 
 /// This is the API that each Flash node must implement.
@@ -76,25 +77,6 @@ public interface FlashAPI
 
     /***************************************************************************
 
-        Requests a closing signature for an established channel and a
-        previously agreed-upon `closeChannel` request with the given
-        sequence ID.
-
-        Params:
-            chan_id = A previously open channel ID
-            seq_id = the agreed-upon sequence ID in a previous
-                `closeChannel` call
-
-        Returns:
-            the signature for the closing transaction,
-            or an error code with an optional error message.
-
-    ***************************************************************************/
-
-    public Result!Signature requestCloseSig (in Hash chan_id, in uint seq_id);
-
-    /***************************************************************************
-
         Get the state of a channel with the given channel ID.
 
         Note that the node reports its own view of this channel.
@@ -115,6 +97,60 @@ public interface FlashAPI
     ***************************************************************************/
 
     public Result!ChannelState getChannelState (in Hash chan_id);
+
+    /***************************************************************************
+
+        Proposes a payment through this channel. This may be a direct payment,
+        or an indirect routed payment. Both types of payments use this API.
+
+        Params:
+            chan_id = an existing channel ID previously opened with
+                `openChannel()` and agreed to by the counter-party.
+            seq_id = the new sequence ID
+            amount = the amount that the sender wants to send to this node
+            payment_hash = the hash of the secret that's included in the
+                HTLC. The destination node reveals this value.
+            lock_height = the lock height of the HTLC
+            packet = the encrypted packet and any further destinations
+            peer_nonce = the nonce the calling peer will use
+
+        Returns:
+            the nonce the receiving node will use, or an error code in case the
+            HTLC is rejected
+
+    ***************************************************************************/
+
+    public Result!PublicNonce proposePayment (in Hash chan_id, in uint seq_id,
+        in Amount amount, in Hash payment_hash, in Height lock_height,
+        in OnionPacket packet, in PublicNonce peer_nonce);
+
+    /***************************************************************************
+
+        Proposes updating the channel by resolving all pending HTLCs with
+        the secrets the counter-party offers.
+
+        When there is a payment route from A => B => C using proposePayment(),
+        there will also be an update route from C => B => A using
+        proposeUpdate() in order to settle HTLCs.
+
+        Note that this API is fee-less. There is no associated fee involved
+        as there are no payments being routed through this call, only the
+        HTLCs are consolidated into their respective outputs.
+
+        Params:
+            chan_id = an existing channel ID
+            seq_id = the new sequence ID
+            secrets = the secrets the proposer wishes to disclose
+            peer_nonce = the nonce the calling peer will use
+
+        Returns:
+            the nonce the receiving node will use, or an error code if the
+            secrets are unrecognized
+
+    ***************************************************************************/
+
+    public Result!PublicNonce proposeUpdate (in Hash chan_id, in uint seq_id,
+        in Hash[] secrets, in PublicNonce peer_nonce);
 
     /***************************************************************************
 
@@ -145,8 +181,8 @@ public interface FlashAPI
 
     ***************************************************************************/
 
-    public Result!PublicNonce requestBalanceUpdate (in Hash chan_id,
-        in uint seq_id, in BalanceRequest balance_req);
+    //public Result!PublicNonce requestBalanceUpdate (in Hash chan_id,
+    //    in uint seq_id, in BalanceRequest balance_req);
 
     /***************************************************************************
 
@@ -191,4 +227,23 @@ public interface FlashAPI
     ***************************************************************************/
 
     public Result!Signature requestUpdateSig (in Hash chan_id, in uint seq_id);
+
+    /***************************************************************************
+
+        Requests a closing signature for an established channel and a
+        previously agreed-upon `closeChannel` request with the given
+        sequence ID.
+
+        Params:
+            chan_id = A previously open channel ID
+            seq_id = the agreed-upon sequence ID in a previous
+                `closeChannel` call
+
+        Returns:
+            the signature for the closing transaction,
+            or an error code with an optional error message.
+
+    ***************************************************************************/
+
+    public Result!Signature requestCloseSig (in Hash chan_id, in uint seq_id);
 }

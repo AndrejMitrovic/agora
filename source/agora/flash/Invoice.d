@@ -24,6 +24,7 @@
 module agora.flash.Invoice;
 
 import agora.common.Amount;
+import agora.common.crypto.ECC;
 import agora.common.Hash;
 
 import libsodium.randombytes;
@@ -33,8 +34,11 @@ import core.stdc.time;
 /// Ditto
 public struct Invoice
 {
-    /// Hash of the secret.
-    public Hash preimage_hash;
+    /// Hash of the secret. Also known as the payment hash.
+    public Hash payment_hash;
+
+    /// Payment destination
+    public Point destination;
 
     /// The amount to pay for this invoice.
     public Amount amount;
@@ -46,6 +50,12 @@ public struct Invoice
 
     /// Invoice description. Useful for user-facing UIs (kiosks), may be empty.
     public string description;
+}
+
+struct InvoicePair
+{
+    Invoice invoice;
+    Hash secret;
 }
 
 /*******************************************************************************
@@ -64,26 +74,33 @@ public struct Invoice
 
 *******************************************************************************/
 
-public Invoice createInvoice (out Hash secret, in Amount amount,
+public InvoicePair createInvoice (in Point destination, in Amount amount,
     in time_t expiry, in string description = null) @safe @nogc nothrow
 {
+    Hash secret;
     () @trusted { randombytes_buf(secret[].ptr, Hash.sizeof); }();
 
     Invoice invoice =
     {
-        preimage_hash : hashFull(secret),
+        payment_hash : hashFull(secret),
+        destination : destination,
         amount : amount,
         expiry : expiry,
         description : description,
     };
 
-    return invoice;
+    InvoicePair pair =
+    {
+        invoice : invoice,
+        secret : secret
+    };
+
+    return pair;
 }
 
 ///
 @safe @nogc nothrow unittest
 {
-    Hash secret;
-    const invoice = createInvoice(secret, Amount(100), 1611121934, "desc");
-    assert(secret.hashFull() == invoice.preimage_hash);
+    const pair = createInvoice(Point.init, Amount(100), 1611121934, "desc");
+    assert(pair.secret.hashFull() == pair.invoice.payment_hash);
 }

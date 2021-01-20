@@ -18,7 +18,11 @@ import agora.common.Amount;
 import agora.common.crypto.ECC;
 import agora.common.Types;
 import agora.flash.API;
+import agora.flash.Invoice;
+import agora.flash.Route;
 import agora.flash.Types;
+
+import core.stdc.time;
 
 /// Ditto
 public interface ControlFlashAPI : FlashAPI
@@ -51,14 +55,14 @@ public interface ControlFlashAPI : FlashAPI
 
         Params:
             funding_utxo = the UTXO that will be used to fund the setup tx
-            funding_amount = the amount that will be used to fund the setup tx
+            capacity = the amount that will be used to fund the setup tx
             settle_time = closing settle time in number of blocks since last
                 setup / update tx was published on the blockchain
             peer_pk = the public key of the counter-party flash node
 
     ***************************************************************************/
 
-    public Hash openNewChannel (in Hash funding_utxo, in Amount funding_amount,
+    public Hash openNewChannel (in Hash funding_utxo, in Amount capacity,
         in uint settle_time, in Point peer_pk);
 
     /***************************************************************************
@@ -83,16 +87,29 @@ public interface ControlFlashAPI : FlashAPI
         shared through a secure channel to the party which will pay the invoice.
         The hash of the preimage is used in the contract, which is then shared
         across zero or more channel hops. The invoice payer must reveal their
-        preimage to proove
+        preimage to prove.
 
         Params:
-            chan_id = TODO: this should be the public key of the payer, not
-                the channel ID itself (?)
-            funder_amount = TODO: replace with just amount
-            peer_amount = TODO: remove
+            destination = the public key of the destination
+            amount = the amount to invoice
+            expiry = expiry time of this invoice
+            description = optional description
 
     ***************************************************************************/
 
-    public void createNewInvoice (in Hash chan_id, in Amount funder_amount,
-        in Amount peer_amount);
+    public Invoice createNewInvoice (in Amount amount,
+        in time_t expiry, in string description = null);
+
+    /***************************************************************************
+
+        Attempt to pay an invoice for the target peer's wallet key and the
+        given invoice, using the given (indirect) channel.
+
+        Params:
+            invoice = the invoice to pay
+            peer_pk =
+
+    ***************************************************************************/
+
+    public void payInvoice (in Invoice invoice);
 }
