@@ -27,6 +27,7 @@ import agora.consensus.data.genesis.Test;
 import agora.consensus.data.Transaction;
 import agora.consensus.data.UTXO;
 import agora.flash.API;
+import agora.flash.ControlAPI;
 import agora.flash.Channel;
 import agora.flash.Config;
 import agora.flash.ErrorCode;
@@ -44,30 +45,19 @@ import core.thread;
 
 /// In addition to the Flash API, we provide controller methods to initiate
 /// the channel creation procedures and control each flash node's behavior.
-public interface ControlAPI : FlashAPI
+public interface TestFlashAPI : ControlFlashAPI
 {
-    /// start timers which monitor the blockchain for new relevant tx's
-    public void ctrlStart();
+    /// Force publishing an update tx with the given index to the blockchain.
+    /// Used for testing and ensuring the counter-party detects the update tx
+    /// and publishes the latest state to the blockchain.
+    public void forcePublishUpdate (in Hash chan_id, in uint index);
 
     ///
-    public void ctrlPublishUpdate (in Hash chan_id, in uint index);
-
-    ///
-    public void ctrlCollaborativeClose (in Hash chan_id);
-
-    /// Open a channel with another flash node.
-    public Hash ctrlOpenChannel (in Hash funding_hash, in Amount funding_amount,
-        in uint settle_time, in Point peer_pk);
-
-    ///
-    public void ctrlWaitFunding (in Hash chan_id);
-
-    ///
-    public void ctrlUpdateBalance (in Hash chan_id, in Amount funder,
+    public void createInvoice (in Hash chan_id, in Amount funder,
         in Amount peer);
 }
 
-public class ControlFlashNode : FlashNode, ControlAPI
+public class ControlFlashNode : FlashNode, TestFlashAPI
 {
     ///
     protected Registry* agora_registry;
@@ -95,22 +85,22 @@ public class ControlFlashNode : FlashNode, ControlAPI
     }
 
     ///
-    protected override FlashAPI getFlashClient (in Point peer_pk,
+    protected override ControlFlashAPI getFlashClient (in Point peer_pk,
         Duration timeout)
     {
         auto tid = this.flash_registry.locate(peer_pk.to!string);
         assert(tid != typeof(tid).init, "Flash node not initialized");
-        return new RemoteAPI!FlashAPI(tid, timeout);
+        return new RemoteAPI!ControlFlashAPI(tid, timeout);
     }
 
     ///
-    public override void ctrlStart ()
+    public override void start ()
     {
         super.startMonitoring();
     }
 
     ///
-    public override void ctrlWaitFunding (in Hash chan_id)
+    public override void waitChannelOpen (in Hash chan_id)
     {
         auto channel = chan_id in this.channels;
         assert(channel !is null);
@@ -120,10 +110,10 @@ public class ControlFlashNode : FlashNode, ControlAPI
     }
 
     ///
-    public override Hash ctrlOpenChannel (in Hash funding_utxo,
+    public override Hash openNewChannel (in Hash funding_utxo,
         in Amount funding_amount, in uint settle_time, in Point peer_pk)
     {
-        writefln("%s: ctrlOpenChannel(%s, %s, %s)", this.kp.V.prettify,
+        writefln("%s: openNewChannel(%s, %s, %s)", this.kp.V.prettify,
             funding_amount, settle_time, peer_pk.prettify);
 
         // todo: move to initialization stage!
@@ -167,15 +157,15 @@ public class ControlFlashNode : FlashNode, ControlAPI
     }
 
     ///
-    public override void ctrlPublishUpdate (in Hash chan_id, in uint index)
+    public override void forcePublishUpdate (in Hash chan_id, in uint index)
     {
         auto channel = chan_id in this.channels;
         assert(channel !is null);
-        channel.ctrlPublishUpdate(index);
+        channel.forcePublishUpdate(index);
     }
 
     ///
-    public override void ctrlCollaborativeClose (in Hash chan_id)
+    public override void beginCollaborativeClose (in Hash chan_id)
     {
         auto channel = chan_id in this.channels;
         assert(channel !is null);
@@ -183,10 +173,10 @@ public class ControlFlashNode : FlashNode, ControlAPI
     }
 
     ///
-    public override void ctrlUpdateBalance (in Hash chan_id,
+    public override void createInvoice (in Hash chan_id,
         in Amount funder_amount, in Amount peer_amount)
     {
-        writefln("%s: ctrlUpdateBalance(%s, %s, %s)", this.kp.V.prettify,
+        writefln("%s: createInvoice(%s, %s, %s)", this.kp.V.prettify,
             chan_id.prettify, funder_amount, peer_amount);
 
         auto channel = chan_id in this.channels;
@@ -243,7 +233,7 @@ public class FlashNodeFactory
     private Point[] addresses;
 
     /// list of flash nodes
-    private RemoteAPI!ControlAPI[] nodes;
+    private RemoteAPI!TestFlashAPI[] nodes;
 
     /// Ctor
     public this (Registry* agora_registry)
@@ -253,11 +243,11 @@ public class FlashNodeFactory
     }
 
     /// Create a new flash node user
-    public RemoteAPI!ControlAPI create (const Pair pair, string agora_address)
+    public RemoteAPI!TestFlashAPI create (const Pair pair, string agora_address)
     {
-        RemoteAPI!ControlAPI api = RemoteAPI!ControlAPI.spawn!ControlFlashNode(pair,
+        RemoteAPI!TestFlashAPI api = RemoteAPI!TestFlashAPI.spawn!ControlFlashNode(pair,
             this.agora_registry, agora_address, &this.flash_registry);
-        api.ctrlStart();
+        api.start();
 
         this.addresses ~= pair.V;
         this.nodes ~= api;
@@ -320,7 +310,7 @@ unittest
 
     // the utxo the funding tx will spend (only relevant to the funder)
     const utxo = UTXO.getHash(hashFull(txs[0]), 0);
-    const chan_id = alice.ctrlOpenChannel(
+    const chan_id = alice.openNewChannel(
         utxo, Amount(10_000), Settle_1_Blocks, bob_pair.V);
 
     // await funding transaction
@@ -329,21 +319,21 @@ unittest
     assert(block_9.txs.any!(tx => tx.hashFull() == chan_id));
 
     // wait for the parties to detect the funding tx
-    alice.ctrlWaitFunding(chan_id);
-    bob.ctrlWaitFunding(chan_id);
+    alice.waitChannelOpen(chan_id);
+    bob.waitChannelOpen(chan_id);
 
     /* do some off-chain transactions */
 
     // todo: this would error because it's overspending, re-add the test later
-    // alice.ctrlUpdateBalance(chan_id, Amount(10_000), Amount(5_000));
+    // alice.createInvoice(chan_id, Amount(10_000), Amount(5_000));
 
-    alice.ctrlUpdateBalance(chan_id, Amount(5_000),  Amount(5_000));
-    alice.ctrlUpdateBalance(chan_id, Amount(4_000),  Amount(6_000));
-    alice.ctrlUpdateBalance(chan_id, Amount(6_000),  Amount(4_000));
+    alice.createInvoice(chan_id, Amount(5_000),  Amount(5_000));
+    alice.createInvoice(chan_id, Amount(4_000),  Amount(6_000));
+    alice.createInvoice(chan_id, Amount(6_000),  Amount(4_000));
 
     //
     writefln("Beginning collaborative close..");
-    alice.ctrlCollaborativeClose(chan_id);
+    alice.beginCollaborativeClose(chan_id);
     network.expectBlock(Height(10), network.blocks[0].header);
 }
 
@@ -390,7 +380,7 @@ unittest
 
     // the utxo the funding tx will spend (only relevant to the funder)
     const utxo = UTXO.getHash(hashFull(txs[0]), 0);
-    const chan_id = alice.ctrlOpenChannel(
+    const chan_id = alice.openNewChannel(
         utxo, Amount(10_000), Settle_1_Blocks, bob_pair.V);
 
     // await funding transaction
@@ -399,21 +389,21 @@ unittest
     assert(block_9.txs.any!(tx => tx.hashFull() == chan_id));
 
     // wait for the parties to detect the funding tx
-    alice.ctrlWaitFunding(chan_id);
-    bob.ctrlWaitFunding(chan_id);
+    alice.waitChannelOpen(chan_id);
+    bob.waitChannelOpen(chan_id);
 
     /* do some off-chain transactions */
 
     // todo: this would error because it's overspending, re-add the test later
-    // alice.ctrlUpdateBalance(chan_id, Amount(10_000), Amount(5_000));
+    // alice.createInvoice(chan_id, Amount(10_000), Amount(5_000));
 
-    alice.ctrlUpdateBalance(chan_id, Amount(5_000),  Amount(5_000));
-    alice.ctrlUpdateBalance(chan_id, Amount(4_000),  Amount(6_000));
-    alice.ctrlUpdateBalance(chan_id, Amount(6_000),  Amount(4_000));
+    alice.createInvoice(chan_id, Amount(5_000),  Amount(5_000));
+    alice.createInvoice(chan_id, Amount(4_000),  Amount(6_000));
+    alice.createInvoice(chan_id, Amount(6_000),  Amount(4_000));
 
     // alice is bad
     writefln("Alice unilaterally closing the channel..");
-    alice.ctrlPublishUpdate(chan_id, 0);
+    alice.forcePublishUpdate(chan_id, 0);
     network.expectBlock(Height(10), network.blocks[0].header);
 
     // at this point bob will automatically publish the latest update tx

@@ -976,7 +976,7 @@ public class Channel
     // forcefully publish an update transaction with the given index.
     // for use with tests
     version (unittest)
-    public void ctrlPublishUpdate (uint index)
+    public void forcePublishUpdate (uint index)
     {
         assert(this.channel_updates.length > index + 1);
         const update_tx = this.channel_updates[index].update_tx;
