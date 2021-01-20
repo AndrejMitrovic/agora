@@ -162,19 +162,6 @@ public class Channel
     /***************************************************************************
 
         Returns:
-            true if the channel is awaiting the externalization of the
-            funding transaction
-
-    ***************************************************************************/
-
-    public bool isWaitingForFunding ()
-    {
-        return this.state == ChannelState.WaitingForFunding;
-    }
-
-    /***************************************************************************
-
-        Returns:
             true if the channel is currently in the process of collecting
             a signature. During that time new balance updates will not be
             accepted.
