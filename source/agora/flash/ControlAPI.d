@@ -77,7 +77,22 @@ public interface ControlFlashAPI : FlashAPI
 
     public void waitChannelOpen (in Hash chan_id);
 
-    ///
-    public void createInvoice (in Hash chan_id, in Amount funder,
-        in Amount peer);
+    /***************************************************************************
+
+        Create an invoice that can be paid by another party. A preimage is
+        shared through a secure channel to the party which will pay the invoice.
+        The hash of the preimage is used in the contract, which is then shared
+        across zero or more channel hops. The invoice payer must reveal their
+        preimage to proove
+
+        Params:
+            chan_id = TODO: this should be the public key of the payer, not
+                the channel ID itself (?)
+            funder_amount = TODO: replace with just amount
+            peer_amount = TODO: remove
+
+    ***************************************************************************/
+
+    public void createInvoice (in Hash chan_id, in Amount funder_amount,
+        in Amount peer_amount);
 }
