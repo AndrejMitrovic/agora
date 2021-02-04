@@ -535,7 +535,7 @@ unittest
 
     auto nodes = network.clients;
     auto node_1 = nodes[0];
-    //scope (failure) node_1.printLog();
+    scope (failure) node_1.printLog();
 
     // split the genesis funds into WK.Keys[0] .. WK.Keys[7]
     auto txs = genesisSpendable().take(8).enumerate()

@@ -621,7 +621,7 @@ public class Ledger
     {
         data = ConsensusData.init;
         data.timestamp = max(clock.networkTime(), this.last_block.header.timestamp + 1);
-        log.trace("Going to nominate current timestamp [{}] or newer", clock.networkTime());
+        //log.trace("Going to nominate current timestamp [{}] or newer", clock.networkTime());
         const next_height = Height(this.getBlockHeight() + 1);
         auto utxo_finder = this.utxo_set.getUTXOFinder();
 

@@ -604,7 +604,7 @@ public class Channel
                 new_outputs, priv_nonce, peer_nonce,
                 this.channel_updates[0].update_tx);  // spend from trigger tx
 
-            writefln("%s: Got new pair!", this.kp.V.prettify);
+            writefln("%s: Got new pair! Balance updated!", this.kp.V.prettify);
             this.channel_updates ~= update_pair;
             this.cur_balance = new_balance;
 
