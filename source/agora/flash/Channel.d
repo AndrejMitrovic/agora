@@ -346,6 +346,7 @@ public class Channel
 
     private void onCloseTxExternalized (in Transaction tx)
     {
+        writefln("Received close tx: %s", tx);
         // todo: can notify Node that it can destroy this channel instance later
         this.state = ChannelState.Closed;
     }
@@ -544,7 +545,7 @@ public class Channel
                 new_outputs, priv_nonce, peer_nonce,
                 this.channel_updates[0].update_tx);  // spend from trigger tx
 
-            writefln("%s: Got new pair!", this.kp.V.prettify);
+            writefln("%s: Got new pair. Balanced updated!", this.kp.V.prettify);
             this.channel_updates ~= update_pair;
             this.cur_balance = new_balance;
         });
@@ -906,6 +907,7 @@ public class Channel
         this.pending_close.validated = true;
 
         // todo: schedule this
+        writefln("Publishing close tx: %s", this.pending_close.tx);
         this.txPublisher(this.pending_close.tx);
     }
 

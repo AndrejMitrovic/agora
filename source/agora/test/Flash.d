@@ -424,10 +424,8 @@ unittest
     // it has a direct channel to bob so it uses it.
     alice.payInvoice(inv_1);
 
-    //alice.createNewInvoice(chan_id, Amount(1_000));
-
-    //// bob wants something back
-    //bob.createNewInvoice(chan_id, Amount(2_000));
+    // wait until the invoice is done (should payInvoice() be blocking?)
+    Thread.sleep(1.seconds);
 
     //
     writefln("Beginning collaborative close..");
