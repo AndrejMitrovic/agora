@@ -831,17 +831,22 @@ public class Channel
     ///
     private Output[] buildBalanceOutputs (in Balance balance)
     {
-        const funder_output = Output(balance.refund_amount,
-            genKeyLock(this.conf.funder_pk));
+        Output[] outputs;
 
-        const peer_output = Output(balance.payment_amount,
-            genKeyLock(this.conf.peer_pk));
+        if (balance.refund_amount != Amount(0))
+            outputs ~= Output(balance.refund_amount,
+                genKeyLock(this.conf.funder_pk));
 
-        Output[] outputs = [funder_output, peer_output];
+        if (balance.payment_amount != Amount(0))
+            outputs ~= Output(balance.payment_amount,
+                genKeyLock(this.conf.peer_pk));
+
+        assert(outputs.length > 0);
 
         // todo: what about incoming HTLCs?
         foreach (hash, htlc; balance.outgoing_htlcs)
         {
+            assert(htlc.amount > Amount(0));
             Lock lock = createLockHTLC(hash, htlc.lock_height,
                 this.conf.funder_pk, this.conf.peer_pk);
 
@@ -1052,6 +1057,9 @@ public class Channel
             this.funding_tx_signed.outputs[0].lock, close_tx.inputs[0].unlock,
             close_tx, close_tx.inputs[0]))
             return error;
+
+        // note: must always validate the tx itself with the validation
+        // routine
 
         close.tx = close_tx;
         return null;
