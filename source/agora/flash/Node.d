@@ -275,7 +275,7 @@ public abstract class FlashNode : FlashAPI
 
         if (!channel.isOpen())
             return Result!PublicNonce(ErrorCode.ChannelNotOpen,
-                "This channel is not funded yet");
+                "This channel is not open");
 
         if (channel.isCollectingSignatures())
             return Result!PublicNonce(ErrorCode.SigningInProcess,

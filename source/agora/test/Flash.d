@@ -221,16 +221,27 @@ public class ControlFlashNode : FlashNode, TestFlashAPI
     }
 
     // find a route
-    private Hop[] findPaymentPath (in Point destination, in Amount amount)
+    // todo: not implemented properly yet (hardcoded paths)
+    private Hop[] findPaymentPath (in Point final_destination, in Amount amount)
     {
-        // todo: not implemented properly yet
         Hop[] route;
-        Hop hop = {
-            pub_key : destination,
-            chan_id : this.channels.byKey().front,
+
+        Hop hop_1 =
+        {
+            pub_key : Point.fromString("0x81bca7587ce2a790cdc7d0a0bf850431bc55b7a08eb5c9d6b877dc693c41adc3"),
+            chan_id : Hash.fromString("0x54615ad5a07681a1a4e677ede7bd325c570d2d5003b0f86e6c03f3031a4d905514354cf72048f9c50c7ccdca251a01fa8971fe042f8e67e9b21652d54162241b"),
             fee : Amount(100)
         };
-        route ~= hop;
+
+        Hop hop_2 =
+        {
+            pub_key : Point.fromString("0xdcafdacc6fa2cc329d2ecb82d0a7c947a0ccd5a0c8887f34c7967950a508adc5"),
+            chan_id : Hash.fromString("0xe613cd7fcecff794b9bdd1aa0eae13768d9e52fa68f5c5d29c524d4ceeaadc0f165612ac733ee4c84c7db757199ca93249b1d0ca1ab10e540baeb98b7a2f4a01"),
+            fee : Amount(100)
+        };
+
+        route ~= hop_1;
+        route ~= hop_2;
         return route;
     }
 
@@ -305,7 +316,7 @@ public class ControlFlashNode : FlashNode, TestFlashAPI
         auto packet = this.createOnionPacket(invoice.payment_hash, lock_height,
             invoice.amount, path, total_amount);
 
-        writefln("\nPaying invoice and routing packet: %s", packet);
+        writefln("%s Paying invoice and routing packet", this.kp.V.prettify);
         this.paymentRouter(path.front.chan_id, invoice.payment_hash,
             total_amount, lock_height, packet);
     }
@@ -426,6 +437,7 @@ unittest
     alice.payInvoice(inv_1);
 
     // wait until the invoice is done (should payInvoice() be blocking?)
+    writefln("Sleeping for 1 seconds..");
     Thread.sleep(1.seconds);
 
     //
@@ -547,6 +559,10 @@ unittest
     const bob_pk = bob_pair.V;
     const charlie_pk = charlie_pair.V;
 
+    //writefln("Alice PK: %s", alice_pk);
+    //writefln("Bob PK: %s", bob_pk);
+    //writefln("Charlie PK: %s", charlie_pk);
+
     // workaround to get a handle to the node from another registry's thread
     const string address = format("Validator #%s (%s)", 0,
         WK.Keys.NODE2.address);
@@ -564,6 +580,7 @@ unittest
     const alice_utxo = UTXO.getHash(hashFull(txs[0]), 0);
     const alice_bob_chan_id = alice.openNewChannel(
         alice_utxo, Amount(10_000), Settle_1_Blocks, bob_pk);
+    writefln("Alice bob channel ID: %s", alice_bob_chan_id);
 
     // await alice & bob channel funding transaction
     network.expectBlock(Height(9), network.blocks[0].header);
@@ -581,6 +598,7 @@ unittest
     const bob_utxo = UTXO.getHash(hashFull(txs[1]), 0);
     const bob_charlie_chan_id = bob.openNewChannel(
         bob_utxo, Amount(10_000), Settle_1_Blocks, charlie_pk);
+    writefln("Bob Charlie channel ID: %s", bob_charlie_chan_id);
 
     // await bob & bob channel funding transaction
     network.expectBlock(Height(10), network.blocks[0].header);
@@ -601,7 +619,8 @@ unittest
     alice.payInvoice(inv_1);
 
     // wait until the invoice is done (should payInvoice() be blocking?)
-    Thread.sleep(1.seconds);
+    writefln("Sleeping for 4 seconds..");
+    Thread.sleep(4.seconds);
 
     //
     writefln("Beginning bob => charlie collaborative close..");
