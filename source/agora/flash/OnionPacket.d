@@ -29,6 +29,7 @@
 module agora.flash.OnionPacket;
 
 import agora.flash.ErrorCode;
+import agora.flash.Types;
 
 import agora.common.Amount;
 import agora.common.crypto.ECC;
@@ -37,6 +38,7 @@ import agora.common.crypto.Schnorr;
 import agora.common.Hash;
 import agora.common.Serializer;
 import agora.common.Types;
+import agora.flash.Route;
 import agora.script.Lock;
 import agora.script.Script;
 import agora.utils.Log;
@@ -44,6 +46,8 @@ import agora.utils.Log;
 import libsodium.randombytes;
 import libsodium.crypto_secretbox;
 import libsodium.crypto_generichash;
+
+import std.range;
 
 import core.stdc.time;
 
@@ -64,11 +68,10 @@ public struct OnionPacket
     // shared secret for decrypting
     public Point ephemeral_pk;
 
-    // encrypted payload, decrypts to a `Payload`
-    public EncryptedPayload encrypted_payload;
-
-    // todo: replace with actual HMAC
-    public Hash hmac;
+    // encrypted payload. The first one decrypts & deserializes to a `Payload`.
+    // the next payload may or may not be legitimate, but it depends entirely
+    // on the next node's ability to decrypt the payload.
+    public EncryptedPayload[20] encrypted_payloads;
 }
 
 /// Contains the encrypted payload and the nonce used to encrypt it
@@ -78,7 +81,19 @@ struct EncryptedPayload
     public ubyte[crypto_secretbox_NONCEBYTES] nonce;
 
     /// The serialized & encrypted payload
-    public ubyte[] payload;
+    public ubyte[crypto_secretbox_MACBYTES + SerializedPayloadSize] payload;
+}
+
+// Payload size without the encryption metadata
+private enum SerializedPayloadSize = 80;
+
+/// always same static size, no VarInt
+unittest
+{
+    assert(serializeFull(Payload(Hash.init, Amount.init, Height(0)))
+        .length == SerializedPayloadSize);
+    assert(serializeFull(Payload(Hash.init, Amount.init, Height(ulong.max)))
+        .length == SerializedPayloadSize);
 }
 
 /// Decrypted Payload which is originally stored encrypted in the OnionPacket
@@ -101,11 +116,135 @@ public struct Payload
     // cltv_expiry - cltv_expiry_delta >= outgoing_lock_height
     public Height outgoing_lock_height;
 
-    /// the packet to send to the next node
-    public OnionPacket next_packet;
+    /// Serialization hook
+    public void serialize (scope SerializeDg dg) const @trusted
+    {
+        serializePart(this.next_chan_id, dg, CompactMode.No);
+        serializePart(this.forward_amount, dg, CompactMode.No);
+        serializePart(this.outgoing_lock_height.value, dg, CompactMode.No);
+    }
 
-    // todo: replace with actual HMAC
-    public Hash hmac;
+    /// Deserialization hook
+    public static QT fromBinary (QT) (
+        scope DeserializeDg dg, in DeserializerOptions opts) @safe
+    {
+        auto next_chan_id = deserializeFull!Hash(dg, opts);
+        auto forward_amount = deserializeFull!Amount(dg, opts);
+        auto outgoing_lock_height = Height(deserializeFull!ulong(dg, opts));
+        return QT(next_chan_id, forward_amount, outgoing_lock_height);
+    }
+}
+
+/*******************************************************************************
+
+    Create an onion packet for the given path. Each hop will contain an
+    ephemeral public key to derive a common secret with which the hop's
+    payload will be encrypted and may later be decrypted by the hop node
+    which owns their private key.
+
+    The onion packet is fixed in size, and uses encrypted padding bytes
+    to obfuscate its true size. When a node peels of their layer of the
+    encrypted packet, it adds additional pading to fill the packet size
+    back to its expected fixed length size.
+
+    Params:
+        payment_hash = the payment hash to use
+        lock_height = the initial lock height
+        amount = the amount for the payment
+        path = the individual hops (including destination hop)
+        total_amount = will contain the amount which needs to be paid to the
+            first channel along the route. Different to `amount` as it also
+            includes fees.
+
+    Returns:
+        the onion packet ready to be routed through the first payment path.
+
+*******************************************************************************/
+
+public OnionPacket createOnionPacket (in Hash payment_hash,
+    in Height lock_height, in Amount amount, in Hop[] path,
+    out Amount total_amount)
+{
+    assert(path.length >= 1);
+
+    // todo: setting fees should be part of the routing algorithm
+    total_amount = amount;
+    foreach (hop; path)
+    {
+        if (!total_amount.add(hop.fee))
+            assert(0);
+    }
+
+    Amount forward_amount = total_amount;
+    Height outgoing_lock_height = lock_height;
+    Hash next_chan_id;
+
+    Pair ephemeral_kp = Pair.random();
+    OnionPacket packet = { version_byte : 0 };
+
+    // onion packets have to be created from right to left
+    assert(path.length <= 20);
+    ulong last_index = path.length - 1;
+
+    foreach (hop; path.retro)
+    {
+        Payload payload =
+        {
+            next_chan_id : next_chan_id,
+            forward_amount : forward_amount,
+            outgoing_lock_height : outgoing_lock_height,
+        };
+
+        auto encrypted_payload = encryptPayload(payload, ephemeral_kp,
+            hop.pub_key);
+
+        packet.encrypted_payloads[last_index] = encrypted_payload;
+        last_index--;
+        if (!forward_amount.sub(hop.fee))
+            assert(0);
+
+        // todo: use htlc_delta config here from the channel config
+        assert(outgoing_lock_height != 0);
+        outgoing_lock_height = Height(outgoing_lock_height - 1);
+
+        next_chan_id = hop.chan_id;
+
+        // keep updating last valid ephemeral key
+        packet.ephemeral_pk = ephemeral_kp.V;
+
+        // todo: use hashing for derivation instead
+        auto next_secret = ephemeral_kp.v + Scalar(hashFull(1));
+        ephemeral_kp = Pair(next_secret, next_secret.toPoint());
+    }
+
+    // fill out the rest with encrypted filler
+    foreach (ref payload; packet.encrypted_payloads[path.length .. $])
+        fillGarbage(payload);
+
+    return packet;
+}
+
+/// Fill the payload with random encrypted data so it looks real but it ain't
+private void fillGarbage (ref EncryptedPayload payload)
+{
+    randombytes_buf(payload.nonce.ptr, payload.nonce.length);
+
+    auto ephemeral_kp = Pair.random();
+    ubyte[32] key_bytes = ephemeral_kp.v[][0 .. 32];
+
+    randombytes_buf_deterministic(payload.payload.ptr,
+        payload.payload.length, key_bytes);
+}
+
+/// Create the next packet for routing (if the next channel ID is not empty)
+public OnionPacket nextPacket (in OnionPacket packet)
+{
+    OnionPacket next = packet.serializeFull.deserializeFull!OnionPacket();
+    next.encrypted_payloads[0 .. $ - 1] = cast(EncryptedPayload[])packet.encrypted_payloads[1 .. $];
+    fillGarbage(next.encrypted_payloads[$ - 1]);
+    auto next_point = packet.ephemeral_pk - Scalar(hashFull(1)).toPoint;
+    next.ephemeral_pk = next_point;
+    return next;
 }
 
 /*******************************************************************************
@@ -132,7 +271,6 @@ public EncryptedPayload encryptPayload (Payload payload, Pair ephemeral_kp,
 
     const data = payload.serializeFull();
     auto ciphertext_len = crypto_secretbox_MACBYTES + data.length;
-    result.payload = new ubyte[](ciphertext_len);
 
     Point secret = generateSharedSecret(true, ephemeral_kp.v, target_pk);
     if (crypto_secretbox_easy(result.payload.ptr, data.ptr, data.length,
@@ -175,10 +313,26 @@ public bool decryptPayload (in EncryptedPayload encrypted,
             our_key, ephemeral_pk);
         return false;
     }
+    assert(decrypted.length == SerializedPayloadSize);
 
     try
     {
-        payload = deserializeFull!Payload(decrypted);
+        const DeserializerOptions opts = { maxLength : DefaultMaxLength,
+            compact : CompactMode.No };
+
+        import std.format;
+        scope DeserializeDg dg = (size) @safe
+        {
+            if (size > decrypted.length)
+                throw new Exception(
+                    format("Requested %d bytes but only %d bytes available", size, decrypted.length));
+
+            auto res = decrypted[0 .. size];
+            decrypted = decrypted[size .. $];
+            return res;
+        };
+
+        payload = deserializeFull!Payload(dg, opts);
         return true;
     }
     catch (Exception ex)
@@ -196,8 +350,6 @@ unittest
         next_chan_id : hashFull(42),
         forward_amount : Amount(123),
         outgoing_lock_height : Height(100),
-        next_packet : OnionPacket.init,
-        hmac : hashFull(111),
     };
 
     Pair ephemeral_kp = Pair.random();
