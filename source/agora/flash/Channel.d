@@ -1817,9 +1817,13 @@ LOuter: while (1)
     version (unittest)
     public void waitForUpdateIndex (in uint index)
     {
-        // wait until this update is complete
-        while (index + 1 > this.channel_updates.length)
+        // wait until this index is available
+        while (index >= this.channel_updates.length)
             this.taskman.wait(100.msecs);
+
+        if (index < this.channel_updates.length)
+            writefln("waitForUpdateIndex: index %s is OK compared to updates %s",
+                index, this.channel_updates.length);
     }
 
     // forcefully publish an update transaction with the given index.
@@ -1827,11 +1831,17 @@ LOuter: while (1)
     version (unittest)
     public Transaction getPublishUpdateIndex (uint index)
     {
+        writefln("++ INDEX: %s. UPDATES: %s", index, this.channel_updates.length);
+
+        if (index >= this.channel_updates.length)
+            writefln("getPublishUpdateIndex: index %s is greater than updates %s",
+                index, this.channel_updates.length);
+
         // wait until this update is complete
-        while (index + 1 > this.channel_updates.length)
+        while (index >= this.channel_updates.length)
             this.taskman.wait(100.msecs);
 
-        assert(this.channel_updates.length > index + 1);
+        assert(index < this.channel_updates.length);
         const update_tx = this.channel_updates[index].update_tx;
         writefln("%s: Publishing update tx index %s: %s",
             this.kp.V.prettify, index, update_tx.hashFull().prettify);

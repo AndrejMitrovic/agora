@@ -269,7 +269,9 @@ public class ControlFlashNode : FlashNode, TestFlashAPI
         in uint index)
     {
         auto channel = chan_id in this.channels;
-        assert(channel !is null);
+        if (channel is null)
+            writefln("\n\n+++ ERROR: CHANNEL IS NULL +++\n\n");
+        //assert(channel !is null);
         return channel.getPublishUpdateIndex(index);
     }
 
@@ -401,6 +403,8 @@ unittest
     alice.waitChannelOpen(chan_id);
     bob.waitChannelOpen(chan_id);
 
+    auto update_tx = alice.getPublishUpdateIndex(chan_id, 0);
+
     /* do some off-chain transactions */
     auto inv_1 = bob.createNewInvoice(Amount(5_000), time_t.max, "payment 1");
     alice.payInvoice(inv_1);
@@ -422,7 +426,6 @@ unittest
 
     // alice is acting bad
     writefln("Alice unilaterally closing the channel..");
-    auto update_tx = alice.getPublishUpdateIndex(chan_id, 0);
     network.expectBlock(Height(10), network.blocks[0].header);
     auto tx_10 = node_1.getBlocksFrom(10, 1)[0].txs[0];
     assert(tx_10 == update_tx);
@@ -438,7 +441,7 @@ unittest
 }
 
 /// Test indirect channel payments
-//version (none)
+version (none)
 unittest
 {
     TestConf conf = { txs_to_nominate : 1, payout_period : 100 };
