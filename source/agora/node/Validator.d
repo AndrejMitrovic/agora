@@ -434,7 +434,7 @@ public class Validator : FullNode, API
 
     ***************************************************************************/
 
-    protected final override void onAcceptedBlock (const ref Block block,
+    protected override void onAcceptedBlock (const ref Block block,
         bool validators_changed) @safe
     {
         assert(block.header.height >= this.last_shuffle_height);
@@ -501,6 +501,7 @@ public class Validator : FullNode, API
             this.enroll_man.addPreimage(preimage);
             this.network.peers.each!(p => p.client.sendPreimage(preimage));
             this.pushPreImage(preimage);
+            this.onAcceptedPreimage(preimage);
         }
     }
 

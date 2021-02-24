@@ -58,7 +58,7 @@ import agora.registry.NameRegistryAPI;
 import agora.registry.NameRegistryImpl;
 import agora.utils.Log;
 import agora.utils.PrettyPrinter;
-public import agora.utils.Utility : retryFor;
+public import agora.utils.Utility;
 import agora.utils.Workarounds;
 import agora.api.FullNode : NodeInfo, NetworkState;
 import agora.api.Validator : ValidatorAPI = API;
@@ -66,6 +66,7 @@ import agora.api.Validator : ValidatorAPI = API;
 import scpd.types.Stellar_SCP;
 
 static import geod24.LocalRest;
+private alias Listener = geod24.LocalRest.Listener;
 import geod24.Registry;
 
 import std.array;
@@ -81,9 +82,9 @@ import core.stdc.stdlib : abort;
 /* The following imports are frequently needed in tests */
 
 public import agora.common.Types;
- // Contains utilities for testing, e.g. `retryFor`
+ // Contains utilities for testing
 public import agora.utils.Test;
-// `core.time` provides duration-related utilities, used e.g. for `retryFor`
+// `core.time` provides duration-related utilities
 public import core.time;
 // Useful to express complex pipeline simply
 public import std.algorithm;
@@ -140,6 +141,26 @@ void testAssertHandler (string file, ulong line, string msg) nothrow
     throw new AssertError(msg, file, line);
 }
 
+/// The sole LocalRest unittest thread which has its own scheduler
+private interface ITestThread
+{
+    /// Block until tests are complete
+    public void waitTestsDone ();
+
+    /// Prepare a new ID for the responses for the given list of clients
+    public ulong prepareForWait (Address[] clients);
+
+    /// Wait up to `msecs` for the response from the clients
+    // @bug: Duration not serializable
+    public bool waitCondition (/*Duration duration*/ ulong msecs, string msg);
+
+    /// Called by each client once a condition has been fulfilled
+    public void onReachedCondition (ulong req_id, Address address);
+}
+
+// TODO: use `shared` / avoid globals
+__gshared Listener!ITestThread test_listener;
+
 /// Skip printing out per-node logs ony agora/test/* failures
 shared bool no_logs;
 
@@ -167,7 +188,8 @@ private UnitTestResult customModuleUnitTester ()
     assertHandler = &testAssertHandler;
 
     //
-    const chatty = ("dchatty" in environment) ?
+    static shared bool chatty;
+    chatty = ("dchatty" in environment) ?
         to!bool(environment["dchatty"]) : false;
     no_logs = ("dnologs" in environment) ?
         to!bool(environment["dnologs"]) : false;
@@ -183,9 +205,7 @@ private UnitTestResult customModuleUnitTester ()
         void function() test;
     }
 
-    ModTest[] single_threaded;
-    ModTest[] parallel_tests;
-    ModTest[] heavy_tests;
+    ModTest[] tests;
 
     foreach (ModuleInfo* mod; ModuleInfo)
     {
@@ -206,26 +226,14 @@ private UnitTestResult customModuleUnitTester ()
                 continue;
             }
 
-            // this test checks GC usage stats before / after tests,
-            // but other threads can change the outcome of the GC usage stats
-            if (all_single_threaded || mod.name == "agora.common.Serializer")
-                single_threaded ~= ModTest(mod.name, fp);
-            else if (mod.name == "agora.test.ManyValidators")
-                heavy_tests ~= ModTest(mod.name, fp);
-            else
-                // due to problems with the parallelism test,
-                // the test is performed with single threads
-                version (Windows)
-                    single_threaded ~= ModTest(mod.name, fp);
-                else
-                    parallel_tests ~= ModTest(mod.name, fp);
+            tests ~= ModTest(mod.name, fp);
         }
     }
 
-    shared size_t executed;
-    shared size_t passed;
+    static shared size_t executed;
+    static shared size_t passed;
 
-    void runTest (ModTest mod)
+    static void runTest (ModTest mod)
     {
         atomicOp!"+="(executed, 1);
         try
@@ -249,53 +257,81 @@ private UnitTestResult customModuleUnitTester ()
         }
     }
 
-    // Run single-threaded tests
-    foreach (mod; single_threaded)
-        runTest(mod);
-
-    auto available_cores = new Semaphore(totalCPUs);
-    auto finished_tasks_num = new Semaphore(0);
-    // we cannot use phobos' parallel function, as that function will not
-    // re-initialize static variables at the start of a new task
-    void runInParallel (ModTest[] parallel_tests)
+    /// The main test thread
+    static class TestThread : ITestThread
     {
-        class WorkThread : Thread
-        {
-            ModTest test;
-            this (ModTest test)
-            {
-                this.test = test;
-                super(&this.run);
-            }
+        /// All the tests to run
+        private ModTest[] tests;
 
-            void run ()
-            {
-                scope (exit)
-                {
-                    available_cores.notify();
-                    finished_tasks_num.notify();
-                }
-                runTest(this.test);
-            }
+        /// The currently awaiting list of client responses
+        private Set!Address awaiting;
+
+        /// The request ID we're awaiting a response for.
+        /// If clients send responses with outdated IDs, we ignore them.
+        private ulong req_id;
+
+        /// Ctor
+        public this (ModTest[] tests)
+        {
+            this.tests = tests;
         }
 
-        while (parallel_tests.length)
+        /// Block until the tests complete or fail
+        override void waitTestsDone ()
         {
-            auto test = parallel_tests.front;
-            parallel_tests.popFront();
+            foreach (mod; this.tests)
+                runTest(mod);
+        }
 
-            // wait for a core to become available
-            available_cores.wait();
+        /// Prepare a new ID for the responses for the given list of clients
+        override ulong prepareForWait (Address[] clients)
+        {
+            this.awaiting = Set!Address.from(clients);
+            return ++this.req_id;
+        }
 
-            (new WorkThread(test)).start();
+        /// Wait up to `msecs` for the response from the clients
+        // @bug: Duration not serializable
+        override bool waitCondition (ulong msecs, string reason)
+        {
+            // already received the responses
+            if (this.awaiting.length == 0)
+                return true;
+
+            import std.datetime.stopwatch;
+            geod24.LocalRest.sleep(0.seconds);  // events might already be waiting
+
+            auto sw = StopWatch(Yes.autoStart);
+
+            while (this.awaiting.length != 0)
+            {
+                geod24.LocalRest.sleep(10.msecs);  // yield fiber
+                if (sw.peek.total!"msecs" > msecs)
+                {
+                    writefln("Timed out after %ss: %s", msecs / 1000.0, reason);
+                    return false;
+                }
+            }
+
+            return this.awaiting.length == 0;
+        }
+
+        /// Called by each client once a condition has been fulfilled
+        /// Outdated response IDs are ignored.
+        override void onReachedCondition (ulong req_id, Address address)
+        {
+            if (req_id != this.req_id)
+                return;  // outdated response
+
+            this.awaiting.remove(address);
         }
     }
 
-    runInParallel(parallel_tests);
-    runInParallel(heavy_tests);
+    auto test_thread = RemoteAPI!ITestThread.spawn!TestThread(tests);
+    test_listener = test_thread.listener();
 
-    //waiting for all parallel tasks to finish
-    iota(parallel_tests.length + heavy_tests.length).each!(x => finished_tasks_num.wait());
+    test_thread.waitTestsDone();
+    test_thread.ctrl.shutdown();
 
     UnitTestResult result = { executed : executed, passed : passed };
     if (filtered > 0)
@@ -551,6 +587,9 @@ public class TestAPIManager
     /// will be test_start_time + (last_height * block_interval)
     protected TimePoint initial_time;
 
+    //// Test thread listener
+    protected RemoteAPI!ITestThread test_thread;
+
     /// convenience: returns a random-access range which lets us access clients
     auto clients ()
     {
@@ -567,6 +606,7 @@ public class TestAPIManager
     public this (immutable(Block)[] blocks, TestConf test_conf,
         TimePoint test_start_time)
     {
+        this.test_thread = new RemoteAPI!ITestThread(test_listener);
         this.test_conf = test_conf;
         this.blocks = blocks;
         this.test_start_time = test_start_time;
@@ -574,6 +614,30 @@ public class TestAPIManager
         this.reg.initialize();
         this.nreg.initialize();
         this.createNameRegistry();
+    }
+
+    /// Wait until the transaction has been accepted by all nodes' pools
+    public void expectTransactionHash (Hash tx_hash,
+        Duration timeout = 5.seconds, string file = __FILE__,
+        int line = __LINE__)
+    {
+        this.expectTransactionHash(iota(this.clients.length), tx_hash, timeout,
+            file, line);
+    }
+
+    /// Ditto
+    public void expectTransactionHash (Idxs)(Idxs clients_idxs, Hash tx_hash,
+        Duration timeout = 5.seconds,
+        string file = __FILE__, int line = __LINE__)
+    {
+        static assert (isInputRange!Idxs);
+
+        string[] awaiting = clients_idxs.map!(idx => this.nodes[idx].address).array;
+        ulong req_id = this.test_thread.prepareForWait(awaiting);
+        clients_idxs.each!(idx => clients[idx].notifyOnAcceptedTx(
+            req_id, tx_hash));
+        assert(this.test_thread.waitCondition(timeout.total!"msecs",
+            format("%s(%s): expectTransactionHash(%s)", file, line, tx_hash)));
     }
 
     /***************************************************************************
@@ -606,11 +670,13 @@ public class TestAPIManager
     {
         static assert (isInputRange!Idxs);
 
+        string[] awaiting = clients_idxs.map!(idx => this.nodes[idx].address).array;
+        ulong req_id = this.test_thread.prepareForWait(awaiting);
+        clients_idxs.each!(idx => clients[idx].notifyOnAcceptedBlock(
+            req_id, height));
         this.setTimeFor(height);
-        clients_idxs.each!(idx =>
-            retryFor(clients[idx].getBlockHeight() == height, timeout,
-                format("Node %s has block height %s. Expected: %s",
-                    idx, clients[idx].getBlockHeight(), height), file, line));
+        assert(this.test_thread.waitCondition(timeout.total!"msecs",
+            format("%s(%s): expectBlock(%s)", file, line, height)));
     }
 
     /***************************************************************************
@@ -648,7 +714,7 @@ public class TestAPIManager
         assert(height > enroll_header.height);
         auto distance = cast(ushort)(height - enroll_header.height - 1);
         waitForPreimages(clients_idxs, enroll_header.enrollments,
-            distance, timeout);
+            distance, timeout, file, line);
         this.expectBlock(clients_idxs, height, timeout, file, line);
     }
 
@@ -682,11 +748,12 @@ public class TestAPIManager
         string file = __FILE__, int line = __LINE__)
     {
         static assert (isInputRange!Idxs);
-
-        clients_idxs.each!(idx =>
-            enrolls.each!(enroll =>
-                retryFor(this.clients[idx].getPreimage(enroll.utxo_key)
-                    .distance >= distance, timeout)));
+        string[] awaiting = clients_idxs.map!(idx => this.nodes[idx].address).array;
+        ulong req_id = this.test_thread.prepareForWait(awaiting);
+        clients_idxs.each!(idx => clients[idx].notifyOnAcceptedPreimage(
+            req_id, enrolls, distance));
+        assert(this.test_thread.waitCondition(timeout.total!"msecs",
+            format("%s(%s): waitForPreimages(%s)", file, line, distance)));
     }
 
     /***************************************************************************
@@ -912,21 +979,11 @@ public class TestAPIManager
     public void waitForDiscovery (Duration timeout = 5.seconds,
         string file = __FILE__, int line = __LINE__)
     {
-        try
-        {
-            this.nodes.each!(node =>
-                retryFor(node.client.getNodeInfo().ifThrown(NodeInfo.init)
-                    .state == NetworkState.Complete,
-                    timeout,
-                    format("Node %s has not completed discovery after %s.",
-                        node.address, timeout)));
-        }
-        catch (Error ex)  // better UX
-        {
-            ex.file = file;
-            ex.line = line;
-            throw ex;
-        }
+        string[] awaiting = this.nodes.map!(node => node.address).array;
+        ulong req_id = this.test_thread.prepareForWait(awaiting);
+        this.nodes.each!(node => node.client.notifyOnNetworkComplete(req_id));
+        assert(this.test_thread.waitCondition(timeout.total!"msecs",
+            format("%s(%s): waitForDiscovery()", file, line)));
     }
 
     /***************************************************************************
@@ -1023,6 +1080,34 @@ public class TestAPIManager
             enroll_block.header, 10.seconds, file, line);
     }
 
+    /// Enroll the given client index and expect a rejection from the listed nodes
+    public void failEnroll (size_t client_idx, string file = __FILE__,
+        int line = __LINE__)
+    {
+        this.failEnroll(iota(GenesisValidators), client_idx, file, line);
+    }
+
+    /// Ditto
+    void failEnroll (Idxs)(Idxs client_idxs, size_t client_idx,
+        string file = __FILE__, int line = __LINE__)
+    {
+        static assert (isInputRange!Idxs);
+
+        string[] awaiting = client_idxs.map!(idx => this.nodes[idx].address).array;
+        ulong req_id = this.test_thread.prepareForWait(awaiting);
+
+        Enrollment enroll = this.clients[client_idx].createEnrollmentData();
+        client_idxs.each!(idx => clients[idx].notifyOnRejectedEnrollment(
+            req_id, enroll));
+
+        // we need to manually send the enrollment to every validator as sending
+        // to only one would not gossip it (rejected enrollments are not gossiped)
+        client_idxs.each!(idx => clients[idx].enrollValidator(enroll));
+
+        assert(this.test_thread.waitCondition(5.seconds.total!"msecs",
+            format("%s(%s): notifyFailEnroll(%s)", file, line, enroll.utxo_key)));
+    }
+
     /***************************************************************************
 
         Enroll validator
@@ -1036,24 +1121,29 @@ public class TestAPIManager
 
     ***************************************************************************/
 
-    void enroll (size_t client_idx)
+    Enrollment enroll (size_t client_idx, string file = __FILE__,
+        int line = __LINE__)
     {
-        enroll(iota(GenesisValidators), client_idx);
+        return enroll(iota(GenesisValidators), client_idx, file, line);
     }
 
     /// Ditto
-    void enroll (Idxs)(Idxs client_idxs, size_t client_idx,
+    Enrollment enroll (Idxs)(Idxs client_idxs, size_t client_idx,
         string file = __FILE__, int line = __LINE__)
     {
         static assert (isInputRange!Idxs);
 
         Enrollment enroll = this.clients[client_idx].createEnrollmentData();
         clients[client_idx].enrollValidator(enroll);
-        client_idxs.each!(idx =>
-            retryFor(this.clients[idx].getEnrollment(enroll.utxo_key) == enroll,
-                5.seconds,
-                format!"[%s:%s] Client #%s enrollment not in pool of client #%s"
-                    (file, line, client_idx, idx)));
+
+        string[] awaiting = client_idxs.map!(idx => this.nodes[idx].address).array;
+        ulong req_id = this.test_thread.prepareForWait(awaiting);
+        client_idxs.each!(idx => clients[idx].notifyOnAcceptedEnrollment(
+            req_id, enroll));
+        assert(this.test_thread.waitCondition(5.seconds.total!"msecs",
+            format("%s(%s): notifyOnAcceptedEnrollment(%s)", file, line,
+                enroll.utxo_key)));
+        return enroll;
     }
 
     /***************************************************************************
@@ -1080,20 +1170,21 @@ public class TestAPIManager
     {
         static assert (isInputRange!Idxs);
 
-        client_idxs.each!(idx =>
-            retryFor(Height(this.clients[idx].getBlockHeight()) == height,
-                5.seconds,
-                format!"[%s:%s] Expected height %s for client #%s not %s"
-                    (file, line, height, idx,
-                        this.clients[idx].getBlockHeight())));
+        string[] awaiting = client_idxs.map!(idx => this.nodes[idx].address).array;
+        ulong req_id = this.test_thread.prepareForWait(awaiting);
+        client_idxs.each!(idx => clients[idx].notifyOnAcceptedBlock(req_id, height));
+        assert(this.test_thread.waitCondition(5.seconds.total!"msecs",
+            format("%s(%s): assertSameBlocks(%s)", file, line, height)));
 
-        retryFor(client_idxs.map!(idx =>
-            this.clients[idx].getAllBlocks()).uniq().count() == 1,
-            5.seconds,
-            format!"[%s:%s] Clients %s blocks are not all the same: %s"
-                (file, line, client_idxs, client_idxs.fold!((s, i) =>
-                    s ~ format!"\n\n========== Client #%s ==========%s"
-                        (i, prettify(this.clients[i].getAllBlocks())))("")));
+        Block[] all_blocks = cast(Block[])(client_idxs.map!(idx =>
+            this.clients[idx].getAllBlocks()).joiner.array);
+        all_blocks.sort!((a, b) => a.header.hashFull > b.header.hashFull);
+        import std.conv;
+        assert(all_blocks.map!(b => b.header.hashFull).uniq().count() == height + 1,
+            format("Checking height %s. Received %s blocks. Expected %s blocks",
+            height,
+            all_blocks.map!(b => b.header.hashFull).uniq().count(),
+            height + 1));
     }
 }
 
@@ -1351,6 +1442,25 @@ public interface TestAPI : ValidatorAPI
     ***************************************************************************/
 
     public TimePoint getNetworkTime ();
+
+    /// Request notification when the node has completed network discovery
+    public void notifyOnNetworkComplete (ulong req_id);
+
+    /// Request notification when the node has accepted this tx hash in its pool
+    public void notifyOnAcceptedTx (ulong req_id, Hash tx_hash);
+
+    /// Request notification when the node has this block height
+    public void notifyOnAcceptedBlock (ulong req_id, Height height);
+
+    /// Request notification when the node has accepted this enrollment in its pool
+    public void notifyOnAcceptedEnrollment (ulong req_id, Enrollment enroll);
+
+    /// Request notification when the node has rejected this enrollment
+    public void notifyOnRejectedEnrollment (ulong req_id, Enrollment enroll);
+
+    /// Request notification when the node has accepted this preimage
+    public void notifyOnAcceptedPreimage (ulong req_id, const(Enrollment)[] enrolls,
+        ushort distance);
 }
 
 /// Contains routines which are implemented by both TestFullNode and
@@ -1372,6 +1482,218 @@ private mixin template TestNodeMixin ()
 
     /// Blocks to preload into the memory storage
     private immutable(Block)[] blocks;
+
+    static struct NotifyNetComplete
+    {
+        ulong req_id;
+    }
+
+    static struct NotifyAcceptedTx
+    {
+        ulong req_id;
+        Hash tx_hash;
+    }
+
+    static struct NotifyAcceptedBlock
+    {
+        ulong req_id;
+        Height height = Height(ulong.max);
+    }
+
+    static struct NotifyAcceptedEnr
+    {
+        ulong req_id;
+        Enrollment enroll;
+    }
+
+    static struct NotifyRejectedEnr
+    {
+        ulong req_id;
+        Enrollment enroll;
+    }
+
+    static struct NotifyAcceptedPreimage
+    {
+        ulong req_id;
+        const(Enrollment)[] enrolls;
+        ushort distance;
+    }
+
+    NotifyNetComplete notify_net_complete;
+    NotifyAcceptedTx notify_accepted_tx;
+    NotifyAcceptedBlock notify_accepted_block;
+    NotifyAcceptedEnr notify_accepted_enr;
+    NotifyRejectedEnr notify_rejected_enr;
+    NotifyAcceptedPreimage notify_accepted_preimage;
+
+    /// Hook
+    protected override void onNetworkComplete () @safe
+    {
+        // no registered listeners
+        if (this.notify_net_complete == NotifyNetComplete.init)
+            return;
+
+        this.test_thread.onReachedCondition(this.notify_net_complete.req_id,
+            this.config.node.address);
+        this.notify_net_complete = NotifyNetComplete.init;
+    }
+
+    /// Hook
+    protected override void onAcceptedTransaction (Hash hash) @safe
+    {
+        // no registered listeners
+        if (this.notify_accepted_tx == NotifyAcceptedTx.init)
+            return;
+
+        if (hash != this.notify_accepted_tx.tx_hash)
+            return;
+
+        this.test_thread.onReachedCondition(this.notify_accepted_tx.req_id,
+            this.config.node.address);
+        this.notify_accepted_tx = NotifyAcceptedTx.init;
+    }
+
+    /// Hook
+    protected override void onAcceptedBlock (
+        const ref Block block, bool validators_changed) @safe
+    {
+        super.onAcceptedBlock(block, validators_changed);
+
+        // no registered listeners
+        if (this.notify_accepted_block == NotifyAcceptedBlock.init)
+            return;
+
+        if (block.header.height == this.notify_accepted_block.height)
+        {
+            this.test_thread.onReachedCondition(this.notify_accepted_block.req_id,
+                this.config.node.address);
+            this.notify_accepted_block = NotifyAcceptedBlock.init;
+        }
+    }
+
+    /// Hook
+    protected override void onAcceptedEnrollment (Enrollment enroll) @safe
+    {
+        // no registered listeners
+        if (this.notify_accepted_enr == NotifyAcceptedEnr.init)
+            return;
+
+        if (enroll == this.notify_accepted_enr.enroll)
+        {
+            this.test_thread.onReachedCondition(
+                this.notify_accepted_enr.req_id, this.config.node.address);
+            this.notify_accepted_enr = NotifyAcceptedEnr.init;
+        }
+    }
+
+    /// Hook
+    protected override void onRejectedEnrollment (Enrollment enroll) @safe
+    {
+        // no registered listeners
+        if (this.notify_rejected_enr == NotifyRejectedEnr.init)
+            return;
+
+        if (enroll == this.notify_rejected_enr.enroll)
+        {
+            this.test_thread.onReachedCondition(this.notify_rejected_enr.req_id,
+                this.config.node.address);
+            this.notify_rejected_enr = NotifyRejectedEnr.init;
+        }
+    }
+
+    /// Hook
+    protected override void onAcceptedPreimage (PreImageInfo preimage) @safe
+    {
+        // no registered listeners
+        if (this.notify_accepted_preimage == NotifyAcceptedPreimage.init)
+            return;
+
+        if (this.notify_accepted_preimage.enrolls.all!(enroll =>
+            this.enroll_man.getValidatorPreimage(enroll.utxo_key)
+                .distance >= this.notify_accepted_preimage.distance))
+        {
+            this.test_thread.onReachedCondition(this.notify_accepted_preimage.req_id,
+                this.config.node.address);
+            this.notify_accepted_preimage = NotifyAcceptedPreimage.init;
+        }
+    }
+
+    /// Request notification when the node has completed network discovery
+    public override void notifyOnNetworkComplete (ulong req_id)
+    {
+        if (this.network.getNetworkInfo().state == NetworkState.Complete)
+        {
+            this.test_thread.onReachedCondition(req_id,
+                this.config.node.address);
+            return;
+        }
+
+        this.notify_net_complete = NotifyNetComplete(req_id);
+    }
+
+    /// Request notification when the node has accepted this tx hash in its pool
+    public override void notifyOnAcceptedTx (ulong req_id, Hash tx_hash)
+    {
+        if (this.pool.hasTransactionHash(tx_hash))
+        {
+            this.test_thread.onReachedCondition(req_id,
+                this.config.node.address);
+            return;
+        }
+
+        this.notify_accepted_tx = NotifyAcceptedTx(req_id, tx_hash);
+    }
+
+    /// Request notification when the node has this block height
+    public override void notifyOnAcceptedBlock (ulong req_id, Height height)
+    {
+        if (this.ledger.getBlockHeight >= height)
+        {
+            this.test_thread.onReachedCondition(req_id,
+                this.config.node.address);
+            return;
+        }
+
+        this.notify_accepted_block = NotifyAcceptedBlock(req_id, height);
+    }
+
+    /// Request notification when the node has accepted this enrollment in its pool
+    public override void notifyOnAcceptedEnrollment (ulong req_id,
+        Enrollment enroll)
+    {
+        if (this.enroll_man.getEnrollment(enroll.utxo_key) == enroll)
+        {
+            this.test_thread.onReachedCondition(req_id,
+                this.config.node.address);
+            return;
+        }
+
+        this.notify_accepted_enr = NotifyAcceptedEnr(req_id, enroll);
+    }
+
+    /// Request notification when the node has rejected this enrollment
+    public override void notifyOnRejectedEnrollment (ulong req_id,
+        Enrollment enroll)
+    {
+        this.notify_rejected_enr = NotifyRejectedEnr(req_id, enroll);
+    }
+
+    /// Request notification when the node has accepted this preimage
+    public override void notifyOnAcceptedPreimage (ulong req_id,
+        const(Enrollment)[] enrolls, ushort distance)
+    {
+        if (enrolls.all!(enroll =>
+            this.enroll_man.getValidatorPreimage(enroll.utxo_key)
+                .distance >= distance))
+        {
+            this.test_thread.onReachedCondition(req_id,
+                this.config.node.address);
+            return;
+        }
+
+        this.notify_accepted_preimage = NotifyAcceptedPreimage(req_id, enrolls,
+            distance);
+    }
 
     ///
     public override void start ()
@@ -1430,7 +1752,8 @@ private mixin template TestNodeMixin ()
     {
         assert(taskman !is null);
         return new TestNetworkManager(
-            this.config, metadata, taskman, clock, this.registry, this.nregistry);
+            this.config, metadata, taskman, clock, &this.onNetworkComplete,
+            this.registry, this.nregistry);
     }
 
     /// Return an enrollment manager backed by an in-memory SQLite db
@@ -1500,6 +1823,9 @@ public class TestFullNode : FullNode, TestAPI
     /// txs to nominate in the TestNominator
     protected ulong txs_to_nominate;
 
+    /// Test thread listener
+    protected RemoteAPI!ITestThread test_thread;
+
     ///
     mixin TestNodeMixin!();
 
@@ -1513,6 +1839,7 @@ public class TestFullNode : FullNode, TestAPI
         this.blocks = blocks;
         this.cur_time = cur_time;
         this.test_start_time = *cur_time;
+        this.test_thread = new RemoteAPI!ITestThread(test_listener);
         super(config);
     }
 
@@ -1568,6 +1895,9 @@ public class TestValidatorNode : Validator, TestAPI
     /// for TestNominator
     protected ulong txs_to_nominate;
 
+    /// Test thread listener
+    protected RemoteAPI!ITestThread test_thread;
+
     ///
     mixin TestNodeMixin!();
 
@@ -1581,6 +1911,7 @@ public class TestValidatorNode : Validator, TestAPI
         this.txs_to_nominate = test_conf.txs_to_nominate;
         this.cur_time = cur_time;
         this.test_start_time = *cur_time;
+        this.test_thread = new RemoteAPI!ITestThread(test_listener);
         super(config);
     }
 

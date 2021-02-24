@@ -123,6 +123,9 @@ public class Ledger
     /// but less than current time + block_timestamp_tolerance
     public Duration block_timestamp_tolerance;
 
+    /// If non-null, called when a transaction has been added to the pool
+    public void delegate (Hash) @safe onAcceptedTransaction;
+
     /***************************************************************************
 
         Constructor
@@ -146,9 +149,11 @@ public class Ledger
         UTXOSet utxo_set, IBlockStorage storage,
         EnrollmentManager enroll_man, TransactionPool pool,
         FeeManager fee_man, Clock clock,
+        void delegate (Hash) @safe onAcceptedTransaction = null,
         Duration block_timestamp_tolerance = 60.seconds,
         void delegate (const ref Block, bool) @safe onAcceptedBlock = null)
     {
+        this.onAcceptedTransaction = onAcceptedTransaction;
         this.params = params;
         this.utxo_set = utxo_set;
         this.storage = storage;
@@ -378,6 +383,8 @@ public class Ledger
             this.tx_stats.increaseMetricBy!"agora_transactions_rejected_total"(1);
             return false;
         }
+        if (this.onAcceptedTransaction !is null)
+            this.onAcceptedTransaction(tx.hashFull());
         // If we were looking for this TX, stop
         this.unknown_txs.remove(tx.hashFull());
 
@@ -1090,7 +1097,8 @@ version (unittest)
             const(Block)[] blocks = null,
             immutable(ConsensusParams) params_ = null,
             Duration block_timestamp_tolerance_dur = 600.seconds,
-            Clock mock_clock = new MockClock(time(null)))
+            Clock mock_clock = new MockClock(time(null)),
+            void delegate (Hash) @safe onAcceptedTransaction = null)
         {
             const params = (params_ !is null)
                 ? params_
@@ -1106,6 +1114,7 @@ version (unittest)
                 new TransactionPool(":memory:"),
                 new FeeManager(":memory:", params),
                 mock_clock,
+                onAcceptedTransaction,
                 block_timestamp_tolerance_dur);
         }
 
