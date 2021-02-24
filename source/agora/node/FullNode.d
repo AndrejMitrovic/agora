@@ -204,7 +204,7 @@ public class FullNode : API
         this.fee_man = this.getFeeManager();
         this.ledger = new Ledger(params, this.utxo_set,
             this.storage, this.enroll_man, this.pool, this.fee_man, this.clock,
-            config.node.block_timestamp_tolerance, &this.onAcceptedBlock);
+            &this.onAcceptedTransaction, config.node.block_timestamp_tolerance, &this.onAcceptedBlock);
         this.exception = new RestException(
             400, Json("The query was incorrect"), string.init, int.init);
 
@@ -245,6 +245,11 @@ public class FullNode : API
 
     mixin DefineCollectorForStats!("app_stats", "collectAppStats");
     mixin DefineCollectorForStats!("endpoint_request_stats", "collectStats");
+
+    /// Called when a transaction was accepted
+    protected void onAcceptedTransaction (Hash hash) @safe
+    {
+    }
 
     /***************************************************************************
 
@@ -507,7 +512,13 @@ public class FullNode : API
     protected NetworkManager getNetworkManager (Metadata metadata,
         TaskManager taskman, Clock clock)
     {
-        return new NetworkManager(this.config, metadata, taskman, clock);
+        return new NetworkManager(this.config, metadata, taskman, clock,
+            &this.onNetworkComplete);
+    }
+
+    /// Called when the network state is complete
+    protected void onNetworkComplete ()
+    {
     }
 
     /***************************************************************************
@@ -688,7 +699,22 @@ public class FullNode : API
         {
             log.info("Accepted enrollment: {}", prettify(enroll));
             this.network.peers.each!(p => p.client.sendEnrollment(enroll));
+            this.onAcceptedEnrollment(enroll);
         }
+        else
+        {
+            this.onRejectedEnrollment(enroll);
+        }
+    }
+
+    /// Called when an Enrollment has been accepted
+    protected void onAcceptedEnrollment (Enrollment enr) @safe
+    {
+    }
+
+    /// Called when an Enrollment has been rejected
+    protected void onRejectedEnrollment (Enrollment enr) @safe
+    {
     }
 
     /// GET: /enrollment
@@ -709,7 +735,16 @@ public class FullNode : API
             log.info("Accepted preimage: {}", prettify(preimage));
             this.network.peers.each!(p => p.client.sendPreimage(preimage));
             this.pushPreImage(preimage);
+
+            version (unittest)
+                this.onAcceptedPreimage(preimage);
         }
+    }
+
+    version (unittest)
+    @trusted protected void onAcceptedPreimage (PreImageInfo preimage)
+    {
+
     }
 
     /// GET: /preimage

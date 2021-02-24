@@ -113,7 +113,8 @@ unittest
             super(args);
             this.ledger = new PickyLedger(params, this.utxo_set, this.storage,
                 this.enroll_man, this.pool, this.fee_man, this.clock,
-                this.config.node.block_timestamp_tolerance, &this.onAcceptedBlock);
+                null, this.config.node.block_timestamp_tolerance,
+                &this.onAcceptedBlock);
         }
 
         public override void putTransaction (Transaction tx) @safe
