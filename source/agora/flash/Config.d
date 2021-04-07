@@ -60,7 +60,7 @@ public struct FlashConfig
     public uint max_settle_time = 100;
 
     /// Maximum number of times a payment should be retried before failure
-    public uint max_payment_retries = 3;
+    public uint max_payment_retries = 20;
 }
 
 /// Channel configuration. These fields remain static throughout the
