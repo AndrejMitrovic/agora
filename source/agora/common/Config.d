@@ -607,6 +607,8 @@ private FlashConfig parseFlashConfig (Node* node, in CommandLine cmdln,
     const max_payment_retries = opt!(uint, "flash", "max_payment_retries")(
         cmdln, node);
     assert(max_payment_retries >= 1);
+    const max_retry_delay = get!(Duration, "flash", "max_retry_delay", str => str.to!ulong.msecs)
+        (cmdln, node);
 
     FlashConfig result = {
         enabled: true,
@@ -619,6 +621,7 @@ private FlashConfig parseFlashConfig (Node* node, in CommandLine cmdln,
         min_settle_time: min_settle_time,
         max_settle_time: max_settle_time,
         max_payment_retries : max_payment_retries,
+        max_retry_delay : max_retry_delay,
     };
     return result;
 }

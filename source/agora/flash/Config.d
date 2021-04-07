@@ -61,6 +61,9 @@ public struct FlashConfig
 
     /// Maximum number of times a payment should be retried before failure
     public uint max_payment_retries = 20;
+
+    /// The maximum retry delay for Flash requests
+    public Duration max_retry_delay = 2000.msecs;
 }
 
 /// Channel configuration. These fields remain static throughout the
