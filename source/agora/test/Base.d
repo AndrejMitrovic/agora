@@ -874,21 +874,21 @@ public class TestAPIManager
         foreach (node; this.nodes)
             enforce(this.reg.unregister(node.address));
 
-        /// Private functions used for `shutdown`
-        static void shutdownWithLogs (Object node)
+        // shut down all event timers first
+        foreach (ref node; this.nodes)
+            node.client.shutdown();
+
+        // print out the node's logs before its destruction
+        static void printLogsDg (Object node)
         {
-            (cast(FullNode)node).shutdown();
             (cast(TestAPI)node).printLog();
         }
-        static void shutdownSilent (Object node)
-        {
-            (cast(FullNode)node).shutdown();
-        }
+        static void noOp (Object node) { }
 
+        // now it's safe to print the logs & kill the control interface
         foreach (ref node; this.nodes)
         {
-            node.client.ctrl.shutdown(
-                printLogs ? &shutdownWithLogs : &shutdownSilent);
+            node.client.ctrl.shutdown(printLogs ? &printLogsDg : &noOp);
             node.client = null;
         }
 
